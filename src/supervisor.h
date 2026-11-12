@@ -247,6 +247,7 @@ class Supervisor {
   void LoadProfiles();
   void StartWorker(Entry* entry);
   bool StartRelay(Entry* entry);
+  void StopRelay(Entry* entry);
   void RequestSkillHub(
       int index, SkillHubCallback done,
       const std::function<void(ProfileWorker*, quint64)>& send);
@@ -267,6 +268,9 @@ class Supervisor {
   quint64 next_steer_token_ = 1;
 
   std::vector<Entry> entries_;
+  // Relays retired by a profile switch finish asynchronously, so a slow ticket
+  // mint cannot freeze the UI. Stop() waits for them before the app exits.
+  std::vector<QThread*> retired_relay_threads_;
   int active_index_ = 0;
   bool enable_streaming_ = true;
   bool started_ = false;

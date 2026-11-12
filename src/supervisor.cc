@@ -3,7 +3,9 @@
 #include "src/supervisor.h"
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -27,6 +29,28 @@ thread_local std::optional<Supervisor::RequestScope> g_worker_scope;
 
 // Deterministic hue for a named profile, matching the desktop's
 // profileColor(): hsl(hash % 360, 68%, 58%). Default stays neutral.
+QStringList ServedProfileNames(const QStringList& profile_ids) {
+  const QString root = QDir::cleanPath(HermesHome());
+  const QString profiles_dir =
+      QDir::cleanPath(root + QStringLiteral("/profiles"));
+  QStringList names;
+  for (const QString& raw : profile_ids) {
+    const QString id = QDir::cleanPath(raw);
+    if (id == root) {
+      names.push_back(QStringLiteral("default"));
+      continue;
+    }
+    const QFileInfo info(id);
+    if (QDir::cleanPath(info.absolutePath()) == profiles_dir) {
+      names.push_back(info.fileName());
+    } else if (!raw.contains(QLatin1Char('/'))) {
+      names.push_back(raw);
+    }
+  }
+  names.removeDuplicates();
+  return names;
+}
+
 QColor ProfileColorFor(const QString& name) {
   if (name.isEmpty() || name == QStringLiteral("default")) {
     return QColor(QStringLiteral("#6E6E78"));
@@ -162,6 +186,32 @@ void Supervisor::StartWorker(Entry* entry) {
       });
   entry->thread->start();
   QMetaObject::invokeMethod(entry->worker, "Start", Qt::QueuedConnection);
+}
+
+void Supervisor::StopRelay(Entry* entry) {
+  if (entry == nullptr || entry->relay == nullptr) {
+    return;
+  }
+  InterruptRelay* relay = entry->relay;
+  QThread* thread = entry->relay_thread;
+  entry->relay = nullptr;
+  entry->relay_thread = nullptr;
+  if (thread != nullptr && thread->isRunning()) {
+    // Shut the socket down on its own thread, then stop that thread. Do not
+    // block Activate on a ticket mint that may be waiting on a dead endpoint.
+    QObject::connect(thread, &QThread::finished, relay, &QObject::deleteLater);
+    QMetaObject::invokeMethod(
+        relay,
+        [relay, thread]() {
+          relay->Shutdown();
+          thread->quit();
+        },
+        Qt::QueuedConnection);
+    retired_relay_threads_.push_back(thread);
+    return;
+  }
+  delete relay;
+  delete thread;
 }
 
 bool Supervisor::StartRelay(Entry* entry) {
@@ -370,6 +420,12 @@ void Supervisor::Stop() {
     return;
   }
   stopped_ = true;
+  for (QThread* thread : retired_relay_threads_) {
+    thread->quit();
+    thread->wait();
+    delete thread;
+  }
+  retired_relay_threads_.clear();
   for (Entry& entry : entries_) {
     if (entry.relay_thread != nullptr && entry.relay_thread->isRunning()) {
       QMetaObject::invokeMethod(entry.relay, "Shutdown",
@@ -417,10 +473,18 @@ void Supervisor::LoadProfiles() {
                              .toString(QStringLiteral("unknown"));
       const QJsonArray profiles =
           object.value(QStringLiteral("profiles")).toArray();
-      for (const QJsonValue& value : profiles) {
-        const QString name = value.toString();
-        if (!name.isEmpty()) {
-          names.push_back(name);
+      const QStringList served = ServedProfileNames(endpoint_.served_profiles);
+      if (!served.isEmpty()) {
+        // `/api/status.profiles` lists every profile on disk, including ones
+        // this multiplexer does not serve. Starting a worker for those only
+        // produces permanent `bootstrap binding rejected` retries.
+        names = served;
+      } else {
+        for (const QJsonValue& value : profiles) {
+          const QString name = value.toString();
+          if (!name.isEmpty()) {
+            names.push_back(name);
+          }
         }
       }
     } else if (error_.isEmpty()) {
@@ -464,6 +528,9 @@ void Supervisor::Activate(int index) {
     Entry& entry = entries_[static_cast<std::size_t>(i)];
     if (entry.worker != nullptr) {
       entry.worker->SetForeground(i == index);
+    }
+    if (i != index) {
+      StopRelay(&entry);
     }
   }
   // Prewarm only the active profile's relay. Seven idle control sockets would

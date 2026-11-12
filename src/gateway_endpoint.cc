@@ -5,6 +5,7 @@
 #include <QDir>
 #include <QElapsedTimer>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocalSocket>
@@ -154,6 +155,24 @@ bool DiscoverEndpoint(GatewayEndpoint* endpoint, QString* error) {
   endpoint->code_sha = data.value(QStringLiteral("code_sha")).toString();
   endpoint->runtime_protocol =
       data.value(QStringLiteral("runtime_protocol")).toInt();
+  endpoint->served_profiles.clear();
+  const QJsonArray served =
+      data.value(QStringLiteral("served_profiles")).toArray();
+  for (const QJsonValue& value : served) {
+    QString id;
+    if (value.isObject()) {
+      const QJsonObject row = value.toObject();
+      id = row.value(QStringLiteral("profile_id")).toString();
+      if (id.isEmpty()) {
+        id = row.value(QStringLiteral("home")).toString();
+      }
+    } else {
+      id = value.toString();
+    }
+    if (!id.isEmpty()) {
+      endpoint->served_profiles.push_back(id);
+    }
+  }
   if (!endpoint->valid()) {
     if (error != nullptr) {
       *error = QStringLiteral("gateway identify returned no endpoint");

@@ -38,6 +38,24 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-13 (relay follow-up)
+
+**Only the active profile keeps a control socket, and unserved profiles stop
+retrying.**
+
+- [x] Profile switches now retire the previous relay instead of leaving one
+  control socket per visited profile. Retirement is asynchronous, so a dead
+  endpoint cannot freeze the switch on a ticket timeout; `Stop()` drains the
+  retired threads before exit.
+- [x] The profile roster is filtered by `served_profiles` from the gateway's
+  `identify` reply. `/api/status.profiles` lists every profile on disk, so
+  profiles the multiplexer does not serve (for example `local-llama-test`)
+  were starting workers that could only answer `bootstrap binding rejected`.
+  Older gateways without `served_profiles` keep the status roster.
+- [x] Relay auth failures log once per backoff run instead of once per retry.
+- [x] Verification: app run with saved profile `ceo` shows no
+  `local-llama-test` or relay lines; full suite **9/9 passed** in 36.94 s.
+
 ## Status update — 2026-11-13 (seventy-fourth pass)
 
 **Profile defaults can reclaim a stale chat, and Stop no longer queues behind
