@@ -222,12 +222,17 @@ void ApplySubagentEvent(std::vector<SubagentProgress>* rows,
     SubagentProgress row;
     row.id = id;
     row.goal = QStringLiteral("Subagent");
+    row.owner_session_id = session_id;
+    row.session_id = session_id;
     row.started_at_ms = now_ms;
     rows->push_back(std::move(row));
     it = rows->end() - 1;
   }
 
   SubagentProgress& row = *it;
+  if (row.owner_session_id.isEmpty()) {
+    row.owner_session_id = session_id;
+  }
   if (row.session_id.isEmpty()) {
     row.session_id = session_id;
   }

@@ -38,6 +38,33 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-12 (sixty-sixth pass)
+
+**Live sub-agents are visible and steerable from the right rail.**
+
+- [x] **Live roster, not a snapshot.** The Agents accordion now renders one
+      expandable card per delegated child, ordered by the delegation tree.
+      Cards show status, goal, elapsed time, task/tool/token/cost metadata, and
+      the latest stream line without opening Settings.
+- [x] **In-place updates preserve steering.** Cards are keyed by subagent id
+      and update labels/stream rows in place instead of rebuilding the card.
+      A half-typed steer draft and focus survive incoming `subagent.*` events.
+- [x] **Steer and stop where the work is.** Expanding a card reveals the last
+      eight stream entries, an owner-scoped steer field, Steer and Stop
+      buttons, and queued/stopped/error feedback. Controls disappear on
+      terminal status.
+- [x] **Right session scope.** `SubagentProgress::owner_session_id` records the
+      dispatching session; `subagent.steer` / `subagent.interrupt` use it
+      rather than the child's stored `child_session_id`. Settings → Agents uses
+      the same fallback.
+- [x] **New work announces itself.** A newly seen live agent auto-expands the
+      Agents section (never while the rail is hidden/collapsed) and updates the
+      section title to `Agents · N live`.
+- [x] **Regression check.** `rightRailSteersAndStopsLiveAgents` covers live
+      labels, expansion, owner/session/steer arguments, queued feedback, draft
+      preservation across snapshots, stop arguments, and terminal cleanup.
+      Full native suite 9/9 in 31.35 s.
+
 ## Status update — 2026-11-12 (sixty-fifth pass)
 
 **macOS notifications now come from a real app bundle.**

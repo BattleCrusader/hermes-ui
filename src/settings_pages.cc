@@ -3834,7 +3834,9 @@ QWidget* AgentsPage(const PageContext& context, QWidget* parent) {
                          [steer](const QString& text) {
                            steer->setEnabled(!text.trimmed().isEmpty());
                          });
-        const QString session_id = row->session_id;
+        const QString session_id = row->owner_session_id.isEmpty()
+                                       ? row->session_id
+                                       : row->owner_session_id;
         const QString subagent_id = row->id;
         const auto send_steer = [steer, steer_input, control_status, session_id,
                                  subagent_id, steer_child]() {
@@ -3877,7 +3879,9 @@ QWidget* AgentsPage(const PageContext& context, QWidget* parent) {
       if (interrupt_child) {
         auto* stop = Button(control_row, QStringLiteral("Stop"));
         stop->setObjectName(QStringLiteral("agentStop_") + row->id);
-        const QString session_id = row->session_id;
+        const QString session_id = row->owner_session_id.isEmpty()
+                                       ? row->session_id
+                                       : row->owner_session_id;
         const QString subagent_id = row->id;
         QObject::connect(
             stop, &QPushButton::clicked, stop,

@@ -5,9 +5,11 @@
 
 #include <QDateTime>
 #include <QJsonObject>
+#include <QSet>
 #include <QString>
 #include <QWidget>
 #include <functional>
+#include <map>
 #include <vector>
 
 #include "src/artifacts.h"
@@ -31,6 +33,8 @@ class QTreeView;
 class QVBoxLayout;
 
 namespace hermes::ui {
+
+class AgentHeaderButton;
 
 // One artifact-ish block lifted out of the transcript, newest first. Generated
 // HTML/SVG/code records carry their version history; file cards (`:::artifact`
@@ -109,6 +113,17 @@ class RightRail : public QWidget {
   // Fired only when the user clicks the rail's own collapse/expand controls;
   // the shell then persists the pane width.
   std::function<void(bool collapsed)> on_collapsed_changed;
+  // Live delegated children can be steered or stopped from the rail. Keep the
+  // callbacks on the rail so the UI updates in place instead of rebuilding the
+  // agent cards (and stealing focus from the steer field) on every snapshot.
+  using SubagentControlDone =
+      std::function<void(const QJsonObject&, const QString&)>;
+  std::function<void(const QString& session_id, const QString& subagent_id,
+                     const QString& text, SubagentControlDone done)>
+      on_steer_subagent;
+  std::function<void(const QString& session_id, const QString& subagent_id,
+                     SubagentControlDone done)>
+      on_interrupt_subagent;
 
  private:
   void RebuildContext(const ProfileSnapshot& snapshot);
@@ -168,7 +183,33 @@ class RightRail : public QWidget {
   };
   void AddSection(const QString& id, const QString& title, QWidget* content);
   void SetSectionExpanded(const QString& id, bool expanded);
+  void SetSectionTitle(const QString& id, const QString& title);
   Section* FindSection(const QString& id);
+
+  struct AgentCard {
+    QString id;
+    QString owner_session_id;
+    QWidget* card = nullptr;
+    AgentHeaderButton* header = nullptr;
+    QWidget* details = nullptr;
+    QLabel* meta = nullptr;
+    QWidget* stream_host = nullptr;
+    QVBoxLayout* stream_layout = nullptr;
+    QLabel* feedback = nullptr;
+    QWidget* controls = nullptr;
+    QLineEdit* steer_input = nullptr;
+    QPushButton* steer = nullptr;
+    QPushButton* stop = nullptr;
+    QString stream_signature;
+    bool expanded = false;
+  };
+  AgentCard* FindAgentCard(const QString& id);
+  void CreateAgentCard(const QString& id);
+  void UpdateAgentCard(const SubagentProgress& agent, int depth,
+                       const ProfileSnapshot& snapshot, qint64 now_ms);
+  void SetAgentExpanded(const QString& id, bool expanded);
+  void SteerAgent(const QString& id);
+  void InterruptAgent(const QString& id);
 
   Theme theme_;
   QWidget* workspace_ = nullptr;
@@ -214,6 +255,9 @@ class RightRail : public QWidget {
   QLabel* context_session_ = nullptr;
   QLabel* agents_empty_ = nullptr;
   QWidget* agents_list_ = nullptr;
+  std::map<QString, AgentCard> agent_cards_;
+  QSet<QString> expanded_agents_;
+  QSet<QString> announced_agents_;
   QLabel* todos_empty_ = nullptr;
   QLabel* todos_summary_ = nullptr;
   QWidget* todos_list_ = nullptr;

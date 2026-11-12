@@ -129,6 +129,7 @@ class PreferencesTest : public QObject {
   void audioDataUrlDecodesSpeechAndRejectsJunk();
   void attachmentAttachRpcMatchesMediaType();
   void rightRailShowsContextAgentsAndArtifacts();
+  void rightRailSteersAndStopsLiveAgents();
   void rightRailPreviewsArtifactText();
   void rightRailKeepsArtifactScrollAcrossSnapshots();
   void rightRailProjectGitTerminalPanes();
@@ -649,6 +650,7 @@ void PreferencesTest::subagentEventsBuildALiveDelegationTree() {
       1000);
   QCOMPARE(rows.size(), std::size_t{1});
   QCOMPARE(rows[0].status, SubagentStatus::kRunning);
+  QCOMPARE(rows[0].owner_session_id, QStringLiteral("s1"));
   QCOMPARE(rows[0].session_id, QStringLiteral("s1"));
   QCOMPARE(rows[0].model, QStringLiteral("haiku"));
 
@@ -711,6 +713,18 @@ void PreferencesTest::subagentEventsBuildALiveDelegationTree() {
   QCOMPARE(ordered.size(), std::size_t{2});
   QCOMPARE(ordered[0]->id, QStringLiteral("a"));
   QCOMPARE(ordered[1]->id, QStringLiteral("b"));
+
+  // The child's stored session is not the RPC scope: steering stays with the
+  // session that dispatched the child.
+  ApplySubagentEvent(
+      &rows, QStringLiteral("subagent.start"), QStringLiteral("owner"),
+      QJsonObject{
+          {QStringLiteral("subagent_id"), QStringLiteral("c")},
+          {QStringLiteral("child_session_id"), QStringLiteral("child-c")},
+          {QStringLiteral("goal"), QStringLiteral("Read notes")}},
+      2400);
+  QCOMPARE(rows.back().owner_session_id, QStringLiteral("owner"));
+  QCOMPARE(rows.back().session_id, QStringLiteral("child-c"));
 
   ApplySubagentEvent(
       &rows, QStringLiteral("subagent.complete"), QStringLiteral("s1"),
@@ -849,6 +863,124 @@ void PreferencesTest::rightRailShowsContextAgentsAndArtifacts() {
   };
   QTest::mouseClick(output, Qt::LeftButton);
   QCOMPARE(opened, QStringLiteral("/tmp/report.html"));
+}
+
+void PreferencesTest::rightRailSteersAndStopsLiveAgents() {
+  using hermes::ui::SubagentProgress;
+  using hermes::ui::SubagentStatus;
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::RightRail rail(theme);
+  rail.resize(320, 720);
+  rail.show();
+
+  QString steer_session;
+  QString steer_id;
+  QString steer_text;
+  QString stop_session;
+  QString stop_id;
+  rail.on_steer_subagent =
+      [&](const QString& session_id, const QString& subagent_id,
+          const QString& text,
+          hermes::ui::RightRail::SubagentControlDone done) {
+        steer_session = session_id;
+        steer_id = subagent_id;
+        steer_text = text;
+        done(QJsonObject{{QStringLiteral("status"), QStringLiteral("queued")}},
+             QString());
+      };
+  rail.on_interrupt_subagent =
+      [&](const QString& session_id, const QString& subagent_id,
+          hermes::ui::RightRail::SubagentControlDone done) {
+        stop_session = session_id;
+        stop_id = subagent_id;
+        done(QJsonObject{{QStringLiteral("found"), true}}, QString());
+      };
+
+  hermes::ui::ProfileSnapshot snapshot = Snapshot();
+  snapshot.selected_session_id = QStringLiteral("s1");
+  SubagentProgress agent;
+  agent.id = QStringLiteral("a");
+  agent.owner_session_id = QStringLiteral("owner");
+  agent.goal = QStringLiteral("Audit pricing");
+  agent.status = SubagentStatus::kRunning;
+  agent.duration_seconds = 4.2;
+  agent.current_tool = QStringLiteral("Web Search");
+  agent.stream.push_back(hermes::ui::SubagentStreamEntry{
+      .at_ms = 1000,
+      .kind = QStringLiteral("tool"),
+      .text = QStringLiteral("Web Search(\"competitor pricing\")"),
+  });
+  snapshot.subagents.push_back(agent);
+  rail.SetSnapshot(snapshot);
+
+  auto* agents_header =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailSection_agents"));
+  QVERIFY(agents_header != nullptr);
+  QVERIFY(agents_header->property("expanded").toBool());
+
+  auto* row = rail.findChild<QLabel*>(QStringLiteral("rightRailAgent_a"));
+  QVERIFY(row != nullptr);
+  QVERIFY(row->text().contains(QStringLiteral("Running")));
+  QVERIFY(row->text().contains(QStringLiteral("Audit pricing")));
+  auto* activity =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailAgentActivity_a"));
+  QVERIFY(activity != nullptr);
+  QVERIFY(activity->text().contains(QStringLiteral("competitor pricing")));
+
+  auto* header =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailAgentHeader_a"));
+  QVERIFY(header != nullptr);
+  header->click();
+  auto* details =
+      rail.findChild<QWidget*>(QStringLiteral("rightRailAgentDetails_a"));
+  QVERIFY(details != nullptr);
+  QVERIFY(details->isVisible());
+
+  auto* input =
+      rail.findChild<QLineEdit*>(QStringLiteral("rightRailAgentSteerInput_a"));
+  QVERIFY(input != nullptr);
+  auto* steer =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailAgentSteer_a"));
+  QVERIFY(steer != nullptr);
+  auto* stop =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailAgentStop_a"));
+  QVERIFY(stop != nullptr);
+  QVERIFY(steer->isVisible());
+  QVERIFY(stop->isVisible());
+
+  input->setText(QStringLiteral("focus on margins"));
+  QVERIFY(steer->isEnabled());
+  steer->click();
+  QCOMPARE(steer_session, QStringLiteral("owner"));
+  QCOMPARE(steer_id, QStringLiteral("a"));
+  QCOMPARE(steer_text, QStringLiteral("focus on margins"));
+  QCOMPARE(input->text(), QString());
+  auto* feedback =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailAgentFeedback_a"));
+  QVERIFY(feedback != nullptr);
+  QVERIFY(feedback->text().contains(QStringLiteral("queued")));
+
+  // A live snapshot refresh updates status labels without rebuilding the
+  // controls, so a half-typed steer survives the event stream.
+  input->setText(QStringLiteral("keep this draft"));
+  rail.SetSnapshot(snapshot);
+  QCOMPARE(
+      rail.findChild<QLineEdit*>(QStringLiteral("rightRailAgentSteerInput_a")),
+      input);
+  QCOMPARE(input->text(), QStringLiteral("keep this draft"));
+
+  stop->click();
+  QCOMPARE(stop_session, QStringLiteral("owner"));
+  QCOMPARE(stop_id, QStringLiteral("a"));
+  QVERIFY(feedback->text().contains(QStringLiteral("Stop requested")));
+
+  snapshot.subagents[0].status = SubagentStatus::kCompleted;
+  snapshot.subagents[0].summary = QStringLiteral("Pricing verified");
+  snapshot.subagents[0].duration_seconds = 65.0;
+  rail.SetSnapshot(snapshot);
+  QVERIFY(!steer->isVisible());
+  QVERIFY(!stop->isVisible());
+  QVERIFY(row->text().contains(QStringLiteral("Done")));
 }
 
 void PreferencesTest::rightRailPreviewsArtifactText() {

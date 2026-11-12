@@ -369,6 +369,125 @@ QString ArtifactRenderSignature(const std::vector<SessionArtifact>& artifacts,
   return signature;
 }
 
+QString CompactRailText(QString text, int max = 180) {
+  text.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
+  text = text.trimmed();
+  if (text.size() > max) {
+    text = text.left(max - 1) + QChar(0x2026);
+  }
+  return text;
+}
+
+QColor SubagentStatusColor(const Theme& theme, SubagentStatus status) {
+  switch (status) {
+    case SubagentStatus::kQueued:
+      return theme.text_secondary;
+    case SubagentStatus::kRunning:
+      return theme.accent;
+    case SubagentStatus::kCompleted:
+      return theme.success;
+    case SubagentStatus::kFailed:
+      return theme.danger;
+    case SubagentStatus::kInterrupted:
+      return theme.warning;
+  }
+  return theme.foreground;
+}
+
+QString AgentTitle(const SubagentProgress& agent, qint64 now_ms) {
+  QString title =
+      SubagentStatusText(agent.status) + QStringLiteral(" · ") + agent.goal;
+  if (agent.task_count > 1) {
+    title += QStringLiteral(" (%1/%2)")
+                 .arg(std::min(agent.task_index, agent.task_count))
+                 .arg(agent.task_count);
+  }
+  if (agent.duration_seconds > 0.0) {
+    title +=
+        QStringLiteral(" · ") + FormatSubagentDuration(agent.duration_seconds);
+  } else if (!SubagentIsTerminal(agent.status) && agent.started_at_ms > 0 &&
+             now_ms > agent.started_at_ms) {
+    title += QStringLiteral(" · ") +
+             FormatSubagentDuration((now_ms - agent.started_at_ms) / 1000.0);
+  }
+  return title;
+}
+
+QString AgentActivity(const SubagentProgress& agent) {
+  if (SubagentIsTerminal(agent.status)) {
+    if (!agent.summary.isEmpty()) {
+      return QStringLiteral("Result: ") + agent.summary;
+    }
+    if (!agent.stream.empty()) {
+      return agent.stream.back().text;
+    }
+    return QStringLiteral("Finished.");
+  }
+  if (agent.status == SubagentStatus::kQueued) {
+    return QStringLiteral("Waiting to start.");
+  }
+  if (!agent.stream.empty()) {
+    return CompactRailText(agent.stream.back().text);
+  }
+  if (!agent.current_tool.isEmpty()) {
+    return QStringLiteral("Using ") + agent.current_tool;
+  }
+  return QStringLiteral("Waiting for activity.");
+}
+
+QString AgentMeta(const SubagentProgress& agent, qint64 now_ms) {
+  QStringList parts;
+  if (agent.task_count > 1) {
+    parts.append(QStringLiteral("Task %1/%2")
+                     .arg(std::min(agent.task_index, agent.task_count))
+                     .arg(agent.task_count));
+  }
+  if (!agent.model.isEmpty()) {
+    parts.append(agent.model);
+  }
+  if (agent.tool_count > 0) {
+    parts.append(QStringLiteral("%1 tools").arg(agent.tool_count));
+  }
+  const qint64 tokens = agent.input_tokens + agent.output_tokens;
+  if (tokens > 0) {
+    parts.append(QStringLiteral("%1 tokens").arg(FormatSubagentTokens(tokens)));
+  }
+  if (agent.cost_usd > 0.0) {
+    parts.append(QStringLiteral("$%1").arg(
+        QString::number(agent.cost_usd, 'f', agent.cost_usd < 0.01 ? 4 : 3)));
+  }
+  if (!agent.files_written.empty()) {
+    parts.append(QStringLiteral("%1 written").arg(agent.files_written.size()));
+  }
+  if (!agent.files_read.empty()) {
+    parts.append(QStringLiteral("%1 read").arg(agent.files_read.size()));
+  }
+  if (agent.duration_seconds > 0.0) {
+    parts.append(FormatSubagentDuration(agent.duration_seconds));
+  } else if (!SubagentIsTerminal(agent.status) && agent.updated_at_ms > 0) {
+    parts.append(QStringLiteral("updated %1")
+                     .arg(FormatSubagentAge(agent.updated_at_ms, now_ms)));
+  }
+  return parts.isEmpty() ? QStringLiteral("Waiting for progress.")
+                         : parts.join(QStringLiteral(" · "));
+}
+
+QString AgentStreamSignature(const SubagentProgress& agent) {
+  QStringList fields;
+  fields.append(SubagentStatusText(agent.status));
+  fields.append(agent.summary);
+  fields.append(QString::number(agent.stream.size()));
+  const std::size_t start =
+      agent.stream.size() > 8 ? agent.stream.size() - 8 : 0;
+  for (std::size_t i = start; i < agent.stream.size(); ++i) {
+    fields.append(agent.stream[i].kind);
+    fields.append(agent.stream[i].text);
+    fields.append(agent.stream[i].error ? QStringLiteral("1")
+                                        : QStringLiteral("0"));
+  }
+  return fields.join(QChar(0x1f));
+}
+
 }  // namespace
 
 QString CompactUsageTokens(qint64 value) {
@@ -468,6 +587,155 @@ std::vector<TimelineEntry> CollectTimelineEntries(
   }
   return entries;
 }
+
+// Rows are buttons with child labels because QPushButton paints only its first
+// line. The title/activity labels also make live status updates cheap: the
+// roster can refresh without rebuilding the steer field and losing focus.
+class AgentHeaderButton : public QPushButton {
+ public:
+  AgentHeaderButton(const QString& id, const Theme& theme, QWidget* parent)
+      : QPushButton(parent), theme_(theme) {
+    setObjectName(QStringLiteral("rightRailAgentHeader_") + id);
+    setProperty("railAgentRow", true);
+    setFlat(true);
+    setText(QString());
+    setCursor(Qt::PointingHandCursor);
+    setFocusPolicy(Qt::StrongFocus);
+    QSizePolicy policy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    policy.setHeightForWidth(true);
+    setSizePolicy(policy);
+    setMinimumHeight(38);
+
+    auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(8, 6, 8, 6);
+    layout->setSpacing(2);
+    auto* top = new QHBoxLayout();
+    top->setContentsMargins(0, 0, 0, 0);
+    top->setSpacing(6);
+    title_ = new QLabel(this);
+    title_->setObjectName(QStringLiteral("rightRailAgent_") + id);
+    title_->setProperty("railAgentTitle", true);
+    title_->setWordWrap(true);
+    title_->setTextFormat(Qt::PlainText);
+    title_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    QSizePolicy title_policy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    title_policy.setHeightForWidth(true);
+    title_->setSizePolicy(title_policy);
+    top->addWidget(title_, 1);
+    chevron_ = new QLabel(this);
+    chevron_->setObjectName(QStringLiteral("rightRailAgentChevron_") + id);
+    chevron_->setText(QStringLiteral("▸"));
+    chevron_->setProperty("railAgentChevron", true);
+    chevron_->setAlignment(Qt::AlignTop | Qt::AlignRight);
+    chevron_->setFixedWidth(12);
+    chevron_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    top->addWidget(chevron_);
+    layout->addLayout(top);
+
+    activity_ = new QLabel(this);
+    activity_->setObjectName(QStringLiteral("rightRailAgentActivity_") + id);
+    activity_->setProperty("railAgentActivity", true);
+    activity_->setWordWrap(true);
+    activity_->setTextFormat(Qt::PlainText);
+    activity_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    QSizePolicy activity_policy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    activity_policy.setHeightForWidth(true);
+    activity_->setSizePolicy(activity_policy);
+    layout->addWidget(activity_);
+    SetTheme(theme_);
+  }
+
+  void SetTheme(const Theme& theme) {
+    theme_ = theme;
+    setFont(theme.UiFont(11, QFont::Normal));
+    title_->setFont(theme.UiFont(11, QFont::DemiBold));
+    activity_->setFont(theme.UiFont(10, QFont::Normal));
+    chevron_->setFont(theme.UiFont(10, QFont::Normal));
+    chevron_->setStyleSheet(
+        QStringLiteral("color: %1; background: transparent;")
+            .arg(theme.text_secondary.name()));
+    ApplyColors();
+  }
+
+  void SetContent(const SubagentProgress& agent, int depth, qint64 now_ms) {
+    title_->setText(AgentTitle(agent, now_ms));
+    activity_->setText(AgentActivity(agent));
+    title_color_ = SubagentStatusColor(theme_, agent.status);
+    activity_color_ =
+        !agent.stream.empty() && agent.stream.back().error
+            ? theme_.danger
+            : (agent.status == SubagentStatus::kQueued ? theme_.text_tertiary
+                                                       : theme_.text_secondary);
+    ApplyColors();
+    if (auto* box = qobject_cast<QVBoxLayout*>(layout())) {
+      box->setContentsMargins(8 + std::max(0, depth) * 12, 6, 8, 6);
+    }
+    setToolTip(WrappedToolTip(agent.goal + QStringLiteral("\n\n") +
+                              AgentMeta(agent, now_ms)));
+    setAccessibleName(title_->text());
+    updateGeometry();
+  }
+
+  void SetExpanded(bool expanded) {
+    expanded_ = expanded;
+    chevron_->setText(expanded ? QStringLiteral("▾") : QStringLiteral("▸"));
+    setProperty("expanded", expanded);
+    style()->unpolish(this);
+    style()->polish(this);
+  }
+
+  bool hasHeightForWidth() const override { return true; }
+
+  int heightForWidth(int width) const override {
+    if (layout() == nullptr) {
+      return QPushButton::heightForWidth(width);
+    }
+    return layout()->heightForWidth(width);
+  }
+
+  QSize sizeHint() const override {
+    if (layout() == nullptr) {
+      return QPushButton::sizeHint();
+    }
+    QSize hint = layout()->sizeHint();
+    const int height = layout()->heightForWidth(std::max(width(), 220));
+    if (height > 0) {
+      hint.setHeight(height);
+    }
+    return hint;
+  }
+
+  QSize minimumSizeHint() const override { return QSize(0, 38); }
+
+ protected:
+  void resizeEvent(QResizeEvent* event) override {
+    QPushButton::resizeEvent(event);
+    if (layout() == nullptr) {
+      return;
+    }
+    const int target = layout()->heightForWidth(width());
+    if (target > 0 && height() != target) {
+      setFixedHeight(target);
+    }
+  }
+
+ private:
+  void ApplyColors() {
+    title_->setStyleSheet(QStringLiteral("color: %1; background: transparent;")
+                              .arg(title_color_.name()));
+    activity_->setStyleSheet(
+        QStringLiteral("color: %1; background: transparent;")
+            .arg(activity_color_.name()));
+  }
+
+  Theme theme_;
+  QLabel* title_ = nullptr;
+  QLabel* activity_ = nullptr;
+  QLabel* chevron_ = nullptr;
+  QColor title_color_;
+  QColor activity_color_;
+  bool expanded_ = false;
+};
 
 RightRail::RightRail(const Theme& theme, QWidget* parent)
     : QWidget(parent), theme_(theme) {
@@ -1070,6 +1338,18 @@ void RightRail::AddSection(const QString& id, const QString& title,
   });
 }
 
+void RightRail::SetSectionTitle(const QString& id, const QString& title) {
+  Section* section = FindSection(id);
+  if (section == nullptr || section->header == nullptr ||
+      section->title == title) {
+    return;
+  }
+  section->title = title;
+  const bool expanded = section->header->property("expanded").toBool();
+  section->header->setText(QStringLiteral("%1  %2").arg(
+      expanded ? QStringLiteral("▾") : QStringLiteral("▸"), title));
+}
+
 void RightRail::SetSectionExpanded(const QString& id, bool expanded) {
   Section* section = FindSection(id);
   if (section == nullptr || section->header == nullptr ||
@@ -1161,6 +1441,19 @@ void RightRail::SetTheme(const Theme& theme) {
           "QLabel[railTimelinePreview=\"true\"], "
           "QPushButton[railTimelineRow=\"true\"]:pressed "
           "QLabel[railTimelinePreview=\"true\"] { color: %4; }"
+          "QWidget[railAgentCard=\"true\"] { background: %6; "
+          "border: 1px solid %2; border-radius: 6px; }"
+          "QPushButton[railAgentRow=\"true\"] { text-align: left; "
+          "padding: 0; border: 1px solid transparent; border-radius: 6px; "
+          "color: %4; background: transparent; }"
+          "QPushButton[railAgentRow=\"true\"]:hover { background: %7; }"
+          "QPushButton[railAgentRow=\"true\"]:focus, "
+          "QPushButton[railAgentRow=\"true\"]:pressed { background: %6; "
+          "border-color: %5; color: %4; }"
+          "QPushButton[railAgentRow=\"true\"] QLabel { "
+          "background: transparent; }"
+          "QLineEdit[railAgentSteer=\"true\"] { background: %6; color: %4; "
+          "border: 1px solid %2; border-radius: 5px; padding: 3px 6px; }"
           "QPushButton[railArtifactCard=\"true\"] { text-align: left; "
           "padding: 7px 8px; border: 1px solid %2; border-radius: 6px; "
           "color: %3; background: %6; }"
@@ -1204,6 +1497,21 @@ void RightRail::SetTheme(const Theme& theme) {
   }
   for (QLabel* label : findChildren<QLabel*>()) {
     StyleRailLabel(label, theme_);
+  }
+  for (auto& entry : agent_cards_) {
+    AgentCard& card = entry.second;
+    if (card.header != nullptr) {
+      card.header->SetTheme(theme_);
+    }
+    if (card.steer_input != nullptr) {
+      card.steer_input->setFont(theme_.UiFont(10, QFont::Normal));
+    }
+    if (card.steer != nullptr) {
+      card.steer->setFont(theme_.UiFont(10, QFont::Normal));
+    }
+    if (card.stop != nullptr) {
+      card.stop->setFont(theme_.UiFont(10, QFont::Normal));
+    }
   }
   if (timeline_search_ != nullptr) {
     timeline_search_->setFont(theme_.UiFont(11, QFont::Normal));
@@ -2060,35 +2368,344 @@ void RightRail::RebuildContext(const ProfileSnapshot& snapshot) {
   }
 }
 
+RightRail::AgentCard* RightRail::FindAgentCard(const QString& id) {
+  auto it = agent_cards_.find(id);
+  return it == agent_cards_.end() ? nullptr : &it->second;
+}
+
+void RightRail::CreateAgentCard(const QString& id) {
+  AgentCard card;
+  card.id = id;
+  card.card = new QWidget(agents_list_);
+  card.card->setObjectName(QStringLiteral("rightRailAgentCard_") + id);
+  card.card->setProperty("railAgentCard", true);
+  card.card->setAttribute(Qt::WA_StyledBackground, true);
+  auto* card_layout = new QVBoxLayout(card.card);
+  card_layout->setContentsMargins(0, 0, 0, 0);
+  card_layout->setSpacing(0);
+
+  card.header = new AgentHeaderButton(id, theme_, card.card);
+  card_layout->addWidget(card.header);
+  QObject::connect(
+      card.header, &QPushButton::clicked, card.header,
+      [this, id]() { SetAgentExpanded(id, !expanded_agents_.contains(id)); });
+
+  card.details = new QWidget(card.card);
+  card.details->setObjectName(QStringLiteral("rightRailAgentDetails_") + id);
+  auto* details_layout = new QVBoxLayout(card.details);
+  details_layout->setContentsMargins(10, 0, 10, 8);
+  details_layout->setSpacing(5);
+
+  card.meta = RailLabel(card.details, theme_, QString(), 10, QFont::Normal,
+                        theme_.text_secondary);
+  card.meta->setObjectName(QStringLiteral("rightRailAgentMeta_") + id);
+  details_layout->addWidget(card.meta);
+
+  card.stream_host = new QWidget(card.details);
+  card.stream_host->setObjectName(QStringLiteral("rightRailAgentStream_") + id);
+  card.stream_layout = new QVBoxLayout(card.stream_host);
+  card.stream_layout->setContentsMargins(0, 0, 0, 0);
+  card.stream_layout->setSpacing(2);
+  details_layout->addWidget(card.stream_host);
+
+  card.controls = new QWidget(card.details);
+  card.controls->setObjectName(QStringLiteral("rightRailAgentControls_") + id);
+  auto* control_layout = new QHBoxLayout(card.controls);
+  control_layout->setContentsMargins(0, 0, 0, 0);
+  control_layout->setSpacing(4);
+  card.steer_input = new QLineEdit(card.controls);
+  card.steer_input->setObjectName(QStringLiteral("rightRailAgentSteerInput_") +
+                                  id);
+  card.steer_input->setProperty("railAgentSteer", true);
+  card.steer_input->setPlaceholderText(QStringLiteral("Steer this agent…"));
+  card.steer_input->setClearButtonEnabled(true);
+  control_layout->addWidget(card.steer_input, 1);
+  card.steer = PreviewAction(card.controls, QStringLiteral("Steer"),
+                             QStringLiteral("rightRailAgentSteer_") + id);
+  card.steer->setEnabled(false);
+  control_layout->addWidget(card.steer);
+  card.stop = PreviewAction(card.controls, QStringLiteral("Stop"),
+                            QStringLiteral("rightRailAgentStop_") + id);
+  control_layout->addWidget(card.stop);
+  details_layout->addWidget(card.controls);
+
+  card.feedback = RailLabel(card.details, theme_, QString(), 10, QFont::Normal,
+                            theme_.text_secondary);
+  card.feedback->setObjectName(QStringLiteral("rightRailAgentFeedback_") + id);
+  card.feedback->hide();
+  details_layout->addWidget(card.feedback);
+
+  QObject::connect(card.steer_input, &QLineEdit::textChanged, card.steer,
+                   [steer = card.steer](const QString& text) {
+                     steer->setEnabled(!text.trimmed().isEmpty());
+                   });
+  QObject::connect(card.steer_input, &QLineEdit::returnPressed, card.steer,
+                   [this, id]() { SteerAgent(id); });
+  QObject::connect(card.steer, &QPushButton::clicked, card.steer,
+                   [this, id]() { SteerAgent(id); });
+  QObject::connect(card.stop, &QPushButton::clicked, card.stop,
+                   [this, id]() { InterruptAgent(id); });
+
+  card.details->hide();
+  card.header->SetExpanded(false);
+  card_layout->addWidget(card.details);
+  agents_list_->layout()->addWidget(card.card);
+  agent_cards_[id] = card;
+}
+
+void RightRail::UpdateAgentCard(const SubagentProgress& agent, int depth,
+                                const ProfileSnapshot& snapshot,
+                                qint64 now_ms) {
+  AgentCard* card = FindAgentCard(agent.id);
+  if (card == nullptr) {
+    return;
+  }
+  card->owner_session_id =
+      !agent.owner_session_id.isEmpty()
+          ? agent.owner_session_id
+          : (!agent.session_id.isEmpty() ? agent.session_id
+                                         : snapshot.selected_session_id);
+  const QString agent_label = agent.goal.isEmpty() ? agent.id : agent.goal;
+  card->steer_input->setAccessibleName(
+      QStringLiteral("Steer %1").arg(agent_label));
+  card->stop->setAccessibleName(QStringLiteral("Stop %1").arg(agent_label));
+  card->header->SetContent(agent, depth, now_ms);
+  const QString meta = AgentMeta(agent, now_ms);
+  card->meta->setText(meta);
+  card->meta->setVisible(!meta.isEmpty());
+
+  const QString signature = AgentStreamSignature(agent);
+  if (signature != card->stream_signature) {
+    ClearLayout(card->stream_layout);
+    const std::size_t start =
+        agent.stream.size() > 8 ? agent.stream.size() - 8 : 0;
+    for (std::size_t i = start; i < agent.stream.size(); ++i) {
+      const SubagentStreamEntry& entry = agent.stream[i];
+      const QColor color = entry.error
+                               ? theme_.danger
+                               : (entry.kind == QStringLiteral("thinking")
+                                      ? theme_.text_tertiary
+                                      : theme_.text_secondary);
+      const QString stamp = entry.at_ms > 0
+                                ? QDateTime::fromMSecsSinceEpoch(entry.at_ms)
+                                      .toString(QStringLiteral("HH:mm:ss"))
+                                : QString();
+      const QString line = stamp.isEmpty()
+                               ? entry.text
+                               : stamp + QStringLiteral("  ") + entry.text;
+      auto* label =
+          RailLabel(card->stream_host, theme_, line, 10, QFont::Normal, color);
+      label->setObjectName(QStringLiteral("rightRailAgentStreamLine_") +
+                           agent.id + QStringLiteral("_") +
+                           QString::number(i - start));
+      card->stream_layout->addWidget(label);
+    }
+    if (agent.stream.empty()) {
+      auto* waiting = RailLabel(card->stream_host, theme_,
+                                QStringLiteral("Waiting for the first update."),
+                                10, QFont::Normal, theme_.text_tertiary);
+      waiting->setObjectName(QStringLiteral("rightRailAgentStreamEmpty_") +
+                             agent.id);
+      card->stream_layout->addWidget(waiting);
+    }
+    card->stream_signature = signature;
+  }
+
+  const bool live = !SubagentIsTerminal(agent.status);
+  const bool can_steer = live && on_steer_subagent != nullptr;
+  const bool can_stop = live && on_interrupt_subagent != nullptr;
+  card->steer_input->setVisible(can_steer);
+  card->steer->setVisible(can_steer);
+  card->stop->setVisible(can_stop);
+  card->controls->setVisible(can_steer || can_stop);
+  card->feedback->setVisible((can_steer || can_stop) &&
+                             !card->feedback->text().isEmpty());
+  if (!live) {
+    card->feedback->clear();
+    card->steer_input->clear();
+  }
+
+  const bool expanded = expanded_agents_.contains(agent.id);
+  card->expanded = expanded;
+  card->details->setVisible(expanded);
+  card->header->SetExpanded(expanded);
+}
+
+void RightRail::SetAgentExpanded(const QString& id, bool expanded) {
+  AgentCard* card = FindAgentCard(id);
+  if (card == nullptr) {
+    return;
+  }
+  if (expanded) {
+    expanded_agents_.insert(id);
+  } else {
+    expanded_agents_.remove(id);
+  }
+  card->expanded = expanded;
+  card->header->SetExpanded(expanded);
+  card->details->setVisible(expanded);
+  if (expanded && sections_scroll_ != nullptr) {
+    QTimer::singleShot(0, this, [this, id]() {
+      AgentCard* current = FindAgentCard(id);
+      if (current != nullptr) {
+        sections_scroll_->ensureWidgetVisible(current->card, 0, 12);
+      }
+    });
+  }
+}
+
+void RightRail::SteerAgent(const QString& id) {
+  AgentCard* card = FindAgentCard(id);
+  if (card == nullptr || card->steer_input == nullptr ||
+      card->feedback == nullptr || on_steer_subagent == nullptr) {
+    return;
+  }
+  const QString text = card->steer_input->text().trimmed();
+  if (text.isEmpty()) {
+    return;
+  }
+  card->steer->setEnabled(false);
+  card->feedback->setText(QStringLiteral("Steering…"));
+  card->feedback->setProperty("railColorRole",
+                              RailColorRole(theme_, theme_.text_secondary));
+  StyleRailLabel(card->feedback, theme_);
+  card->feedback->show();
+
+  const QPointer<QLineEdit> input_guard(card->steer_input);
+  const QPointer<QPushButton> steer_guard(card->steer);
+  const QPointer<QLabel> feedback_guard(card->feedback);
+  const Theme theme = theme_;
+  on_steer_subagent(
+      card->owner_session_id, id, text,
+      [input_guard, steer_guard, feedback_guard, theme, text](
+          const QJsonObject& result, const QString& error) {
+        if (!feedback_guard) {
+          return;
+        }
+        const auto set_feedback = [&feedback_guard, &theme](
+                                      const QString& message,
+                                      const QColor& color) {
+          feedback_guard->setText(message);
+          feedback_guard->setProperty("railColorRole",
+                                      RailColorRole(theme, color));
+          StyleRailLabel(feedback_guard, theme);
+          feedback_guard->show();
+        };
+        if (!error.isEmpty()) {
+          set_feedback(error, theme.danger);
+        } else if (result.value(QStringLiteral("status")).toString() ==
+                   QStringLiteral("queued")) {
+          if (input_guard && input_guard->text().trimmed() == text) {
+            input_guard->clear();
+          }
+          set_feedback(QStringLiteral("Steering queued for this agent."),
+                       theme.success);
+        } else {
+          set_feedback(QStringLiteral("Steering was rejected."), theme.warning);
+        }
+        if (steer_guard && input_guard) {
+          steer_guard->setEnabled(!input_guard->text().trimmed().isEmpty());
+        }
+      });
+}
+
+void RightRail::InterruptAgent(const QString& id) {
+  AgentCard* card = FindAgentCard(id);
+  if (card == nullptr || card->feedback == nullptr ||
+      on_interrupt_subagent == nullptr) {
+    return;
+  }
+  card->feedback->setText(QStringLiteral("Stopping…"));
+  card->feedback->setProperty("railColorRole",
+                              RailColorRole(theme_, theme_.text_secondary));
+  StyleRailLabel(card->feedback, theme_);
+  card->feedback->show();
+
+  const QPointer<QLabel> feedback_guard(card->feedback);
+  const Theme theme = theme_;
+  on_interrupt_subagent(
+      card->owner_session_id, id,
+      [feedback_guard, theme](const QJsonObject& result, const QString& error) {
+        if (!feedback_guard) {
+          return;
+        }
+        QString message;
+        QColor color = theme.text_secondary;
+        if (!error.isEmpty()) {
+          message = error;
+          color = theme.danger;
+        } else if (result.value(QStringLiteral("found")).toBool()) {
+          message = QStringLiteral("Stop requested.");
+          color = theme.warning;
+        } else {
+          message = QStringLiteral("Stop request was rejected.");
+          color = theme.warning;
+        }
+        feedback_guard->setText(message);
+        feedback_guard->setProperty("railColorRole",
+                                    RailColorRole(theme, color));
+        StyleRailLabel(feedback_guard, theme);
+        feedback_guard->show();
+      });
+}
+
 void RightRail::RebuildAgents(const ProfileSnapshot& snapshot) {
   auto* layout = qobject_cast<QVBoxLayout*>(agents_list_->layout());
   if (layout == nullptr) {
     return;
   }
-  ClearLayout(layout);
   const auto ordered = BuildSubagentTree(snapshot.subagents);
-  agents_empty_->setVisible(ordered.empty());
+  const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
+  QSet<QString> seen;
+  int live_count = 0;
+  int index = 0;
   for (const SubagentProgress* agent : ordered) {
-    const int depth = SubagentDepth(agent->id, snapshot.subagents);
-    QString text = QString(QStringLiteral("  ").repeated(depth)) +
-                   SubagentStatusText(agent->status) + QStringLiteral(" · ") +
-                   agent->goal;
-    if (agent->task_count > 1) {
-      text += QStringLiteral(" (%1/%2)")
-                  .arg(std::min(agent->task_index, agent->task_count))
-                  .arg(agent->task_count);
+    seen.insert(agent->id);
+    if (FindAgentCard(agent->id) == nullptr) {
+      CreateAgentCard(agent->id);
     }
-    if (agent->duration_seconds > 0) {
-      text += QStringLiteral(" · %1").arg(
-          FormatSubagentDuration(agent->duration_seconds));
+    UpdateAgentCard(*agent, SubagentDepth(agent->id, snapshot.subagents),
+                    snapshot, now_ms);
+    AgentCard* card = FindAgentCard(agent->id);
+    if (card != nullptr && layout->indexOf(card->card) != index) {
+      layout->removeWidget(card->card);
+      layout->insertWidget(index, card->card);
     }
-    auto* row =
-        RailLabel(agents_list_, theme_, text, 11, QFont::Normal,
-                  SubagentIsTerminal(agent->status) ? theme_.text_secondary
-                                                    : theme_.foreground);
-    row->setObjectName(QStringLiteral("rightRailAgent_") + agent->id);
-    layout->addWidget(row);
+    ++index;
+    if (!SubagentIsTerminal(agent->status)) {
+      ++live_count;
+      if (!announced_agents_.contains(agent->id) && isVisible() &&
+          !collapsed_) {
+        announced_agents_.insert(agent->id);
+        Section* section = FindSection(QStringLiteral("agents"));
+        if (section != nullptr && section->header != nullptr &&
+            !section->header->property("expanded").toBool()) {
+          SetSectionExpanded(QStringLiteral("agents"), true);
+        }
+      }
+    }
   }
+
+  for (auto it = agent_cards_.begin(); it != agent_cards_.end();) {
+    if (seen.contains(it->first)) {
+      ++it;
+      continue;
+    }
+    const QString id = it->first;
+    if (it->second.card != nullptr) {
+      layout->removeWidget(it->second.card);
+      it->second.card->deleteLater();
+    }
+    expanded_agents_.remove(id);
+    announced_agents_.remove(id);
+    it = agent_cards_.erase(it);
+  }
+
+  agents_empty_->setVisible(ordered.empty());
+  SetSectionTitle(QStringLiteral("agents"),
+                  live_count > 0
+                      ? QStringLiteral("Agents · %1 live").arg(live_count)
+                      : QStringLiteral("Agents"));
 }
 
 void RightRail::RebuildTodos(const ProfileSnapshot& snapshot) {

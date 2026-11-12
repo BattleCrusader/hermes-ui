@@ -455,6 +455,18 @@ void MainWindow::BuildUi() {
   } else {
     right_rail_->hide();
   }
+  right_rail_->on_steer_subagent =
+      [this](const QString& session_id, const QString& subagent_id,
+             const QString& text, RightRail::SubagentControlDone done) {
+        supervisor_.SteerSubagent(supervisor_.active_index(), session_id,
+                                  subagent_id, text, std::move(done));
+      };
+  right_rail_->on_interrupt_subagent =
+      [this](const QString& session_id, const QString& subagent_id,
+             RightRail::SubagentControlDone done) {
+        supervisor_.InterruptSubagent(supervisor_.active_index(), session_id,
+                                      subagent_id, std::move(done));
+      };
   right_rail_->on_artifact_open = [this](const SessionArtifact& artifact) {
     status_bar_->ShowTransient(
         QStringLiteral("Output: %1").arg(artifact.value));

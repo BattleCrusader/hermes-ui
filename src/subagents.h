@@ -30,6 +30,9 @@ struct SubagentProgress {
   QString id;
   QString parent_id;
   QString goal;
+  // Session that dispatched this child. Steering/interrupt RPCs are scoped to
+  // the owner, not the child's stored session.
+  QString owner_session_id;
   QString session_id;
   QString delegation_id;
   QString model;
