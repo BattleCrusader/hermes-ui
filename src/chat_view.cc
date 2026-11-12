@@ -480,6 +480,7 @@ class TranscriptWidget : public QWidget {
   }
   void SelectAllText();
   QString SelectedText() const;
+  std::vector<QRectF> SelectionRects() const;
   std::vector<std::pair<QRectF, QRectF>> BlockRectsForTest(
       BlockKind kind) const;
   QColor FirstCodeForegroundForTest() const;
@@ -1213,9 +1214,10 @@ std::vector<std::pair<QRectF, QRectF>> TranscriptWidget::BlockRectsForTest(
   return rects;
 }
 
-void TranscriptWidget::PaintSelection(QPainter& painter) const {
+std::vector<QRectF> TranscriptWidget::SelectionRects() const {
+  std::vector<QRectF> rects;
   if (!HasSelection()) {
-    return;
+    return rects;
   }
   TextPosition start = selection_anchor_;
   TextPosition end = selection_cursor_;
@@ -1224,11 +1226,6 @@ void TranscriptWidget::PaintSelection(QPainter& painter) const {
     std::swap(start, end);
   }
   const std::vector<TextRun> runs = SelectableRuns();
-  QColor wash = theme_.accent;
-  wash.setAlpha(80);
-  painter.save();
-  painter.setPen(Qt::NoPen);
-  painter.setBrush(wash);
   for (int index = start.run;
        index <= end.run && index < static_cast<int>(runs.size()); ++index) {
     const TextRun& run = runs[index];
@@ -1263,15 +1260,18 @@ void TranscriptWidget::PaintSelection(QPainter& painter) const {
             if (a >= b) {
               continue;
             }
-            const qreal x1 = line.cursorToX(a - text_start);
-            const qreal x2 = line.cursorToX(b - text_start);
+            // QTextLine::cursorToX works in block coordinates, not line
+            // coordinates. Subtracting text_start made every wrapped
+            // continuation line resolve to its left edge, so the highlight
+            // stopped after the first visual line.
+            const qreal x1 = line.cursorToX(a - block_start);
+            const qreal x2 = line.cursorToX(b - block_start);
             if (x2 <= x1) {
               continue;
             }
-            painter.drawRect(
-                QRectF(run.rect.left() + x1,
-                       run.rect.top() + block_rect.top() + line.y(), x2 - x1,
-                       line.height()));
+            rects.push_back(QRectF(run.rect.left() + x1,
+                                   run.rect.top() + block_rect.top() + line.y(),
+                                   x2 - x1, line.height()));
           }
         }
         block = block.next();
@@ -1287,9 +1287,25 @@ void TranscriptWidget::PaintSelection(QPainter& painter) const {
       }
       const qreal x1 = origin + metrics.horizontalAdvance(run.plain.left(from));
       const qreal x2 = origin + metrics.horizontalAdvance(run.plain.left(to));
-      painter.drawRect(QRectF(x1, run.rect.top(), std::max<qreal>(1, x2 - x1),
-                              run.rect.height()));
+      rects.push_back(QRectF(x1, run.rect.top(), std::max<qreal>(1, x2 - x1),
+                             run.rect.height()));
     }
+  }
+  return rects;
+}
+
+void TranscriptWidget::PaintSelection(QPainter& painter) const {
+  const std::vector<QRectF> rects = SelectionRects();
+  if (rects.empty()) {
+    return;
+  }
+  QColor wash = theme_.accent;
+  wash.setAlpha(80);
+  painter.save();
+  painter.setPen(Qt::NoPen);
+  painter.setBrush(wash);
+  for (const QRectF& rect : rects) {
+    painter.drawRect(rect);
   }
   painter.restore();
 }
@@ -2921,6 +2937,11 @@ std::vector<ClickTarget> ChatView::ClickTargets() const {
 std::vector<std::pair<QRectF, QRectF>> ChatView::BlockRectsForTest(
     BlockKind kind) const {
   return transcript_->BlockRectsForTest(kind);
+}
+
+std::vector<QRectF> ChatView::SelectionRectsForTest() const {
+  return transcript_ == nullptr ? std::vector<QRectF>()
+                                : transcript_->SelectionRects();
 }
 
 QColor ChatView::FirstCodeForegroundForTest() const {

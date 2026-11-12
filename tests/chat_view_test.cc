@@ -585,6 +585,32 @@ void ChatViewTest::codeCardContainsWrappedLines() {
            "the long token must wrap across several code lines");
   QVERIFY2(card.height() >= text.height() + 28 + 14 - 0.5,
            "the card must contain the whole wrapped code document");
+
+  // Select from the first wrapped line through the final logical line. Every
+  // visual line in between must paint its own highlight; using line-relative
+  // offsets with QTextLine::cursorToX used to collapse them all to x=0.
+  QWidget* transcript = view.widget();
+  const QPointF from(text.left() + 5, text.top() + 5);
+  const QPointF to(text.left() + 200, text.bottom() - 5);
+  QTest::mousePress(transcript, Qt::LeftButton, Qt::NoModifier, from.toPoint());
+  QMouseEvent move(QEvent::MouseMove, to, to, Qt::NoButton, Qt::LeftButton,
+                   Qt::NoModifier);
+  QApplication::sendEvent(transcript, &move);
+  QTest::mouseRelease(transcript, Qt::LeftButton, Qt::NoModifier, to.toPoint());
+  const QString selected = view.SelectedTextForTest();
+  QVERIFY2(selected.contains(QStringLiteral("int done = 1;")),
+           "drag selection must reach the final logical line");
+  const std::vector<QRectF> highlights = view.SelectionRectsForTest();
+  QVERIFY2(highlights.size() >= 5,
+           "wrapped code selection must paint one rect per visual line");
+  for (const QRectF& highlight : highlights) {
+    QVERIFY(highlight.width() > 0);
+    QVERIFY(highlight.height() > 0);
+    QVERIFY(highlight.left() >= text.left() - 0.5);
+    QVERIFY(highlight.right() <= text.right() + 0.5);
+  }
+  QVERIFY2(highlights.back().top() > highlights.front().top(),
+           "highlights must descend through the wrapped code lines");
 }
 
 void ChatViewTest::codePreviewRendersSvg() {

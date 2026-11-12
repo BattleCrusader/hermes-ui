@@ -38,6 +38,30 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-13 (sixty-ninth pass)
+
+**Transcript selection now paints every wrapped visual line.**
+
+- [x] **Root cause found.** `QTextLine::cursorToX()` takes a position in
+  block/paragraph coordinates, not line coordinates. `PaintSelection` passed
+  `offset - line.textStart()`, so every wrapped continuation line resolved both
+  endpoints to `x = 0` and painted nothing. Only the first visual line of a
+  wrapped paragraph had a highlight, which made the background appear
+  unrelated to the selected text.
+- [x] **One geometry source for paint and tests.** Selection rectangles are now
+  built by `TranscriptWidget::SelectionRects()`; `PaintSelection` just fills
+  them, and `ChatView::SelectionRectsForTest()` exposes the same rectangles.
+- [x] **Multi-block documents included.** `cursorToX` is now fed
+  `offset - blockStart`, so later paragraphs in the same `QTextDocument` are
+  highlighted as well as wrapped lines in the first paragraph.
+- [x] **Regression coverage.** `codeCardContainsWrappedLines` now drag-selects
+  a wrapped 420-character code token through the final `int done = 1;` line and
+  asserts one non-empty highlight per visual line, correct containment, and
+  descending highlight tops.
+- [x] Pixel probe: selection through the wrapped code block now paints 7
+  highlight bands matching the 7 visual lines, instead of one band.
+- [x] Full native suite: **9/9 passed** in 29.89 s.
+
 ## Status update — 2026-11-13 (sixty-eighth pass)
 
 **Auto-discovered projects can now be saved and edited.**

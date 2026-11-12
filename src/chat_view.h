@@ -97,6 +97,10 @@ class ChatView : public QScrollArea {
   // carry an inner text rect so tests can prove text stays inside the card.
   std::vector<std::pair<QRectF, QRectF>> BlockRectsForTest(
       BlockKind kind) const;
+  // Test seam: the actual highlight rectangles painted for the current text
+  // selection. Wrapped and multi-paragraph documents must contribute one rect
+  // per selected visual line.
+  std::vector<QRectF> SelectionRectsForTest() const;
   // Test seam: the first code block's base foreground. Syntax spans keep their
   // own colours; this is the colour plain code text inherits.
   QColor FirstCodeForegroundForTest() const;
