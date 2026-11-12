@@ -178,6 +178,12 @@ cmake --build build -j8
 ./build/hermes_ui
 ```
 
+On macOS the build produces `build/hermes_ui.app`; `build/hermes_ui` is a
+small launcher that runs the bundle executable. The bundle identity is what
+lets Notification Center register "Hermes" and show completion alerts. macOS
+asks for notification permission the first time the app posts one; allow it in
+System Settings → Notifications if the prompt was dismissed.
+
 Release is the shipping build. It gets `-O3`, thin LTO, `-funroll-loops` and
 host CPU tuning (`-mcpu=native` on Apple Silicon, `-march=native` on x86) when
 `HERMES_MAX_OPTIMIZATION` is on (the default). Pass

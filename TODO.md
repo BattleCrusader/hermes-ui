@@ -38,6 +38,33 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-12 (sixty-fifth pass)
+
+**macOS notifications now come from a real app bundle.**
+
+- [x] **The missing piece was bundle identity, not delivery policy.** A raw
+      Mach-O executable has `NSBundle.mainBundle.bundleIdentifier == nil`, so
+      `NSUserNotificationCenter` is nil. Embedding `Info.plist` in
+      `__TEXT,__info_plist` fixed the nil center, but Notification Center still
+      rejected the process as "app not found".
+- [x] **Build `hermes_ui.app`.** `hermes_ui` is now a `MACOSX_BUNDLE` target
+      with `resources/Info.plist` as `MACOSX_BUNDLE_INFO_PLIST`
+      (`com.nousresearch.hermes.ui`, display name "Hermes").
+- [x] **Keep `./build/hermes_ui` working.** A small generated launcher at
+      `build/hermes_ui` executes
+      `build/hermes_ui.app/Contents/MacOS/hermes_ui`. A symlink is not enough:
+      `NSBundle` does not resolve it. README now documents the layout.
+- [x] **Explain the failure path.** `MacShowNotification` reports the app
+      bundle when the notification center is unavailable, instead of a generic
+      macOS error.
+- [x] **Regression check.** New `macos_bundle_identity` CTest asserts the
+      bundle exists, its `CFBundleIdentifier`/`CFBundleExecutable` are correct,
+      and the launcher is present. Full suite 9/9 in 34.89 s.
+- [x] **Verified end to end.** Clicking `notifyTest` on
+      `settingsPage:notifications` logged `Presenting … as banner` for
+      `com.nousresearch.hermes.ui`. The first post asks for permission; allow
+      Hermes in System Settings → Notifications if the prompt is dismissed.
+
 ## Status update — 2026-11-12 (sixty-fourth pass)
 
 **Entering a project keeps conversations project-scoped.**

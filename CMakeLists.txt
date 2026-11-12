@@ -49,7 +49,7 @@ if(Qt6Multimedia_FOUND)
   add_compile_definitions(HERMES_HAS_MULTIMEDIA)
 endif()
 
-add_executable(hermes_ui
+add_executable(hermes_ui MACOSX_BUNDLE
   src/main.cc
   src/theme.cc
   src/theme_presets.cc
@@ -111,6 +111,18 @@ add_executable(hermes_ui
   resources/resources.qrc
 )
 
+if(APPLE)
+  set_target_properties(hermes_ui PROPERTIES
+    MACOSX_BUNDLE TRUE
+    MACOSX_BUNDLE_BUNDLE_NAME "Hermes"
+    MACOSX_BUNDLE_BUNDLE_VERSION "1"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "com.nousresearch.hermes.ui"
+    MACOSX_BUNDLE_INFO_PLIST
+      "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info.plist"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
+  )
+endif()
+
 target_include_directories(hermes_ui PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -140,6 +152,17 @@ if(APPLE)
     "-framework UserNotifications"
   )
   target_compile_options(hermes_ui PRIVATE -Wno-deprecated-declarations)
+
+  # Keep the familiar ./build/hermes_ui entry point, but run the executable
+  # inside the .app. NSUserNotificationCenter is nil for an unbundled
+  # executable, and Notification Center rejects an app it cannot resolve as a
+  # bundle. A symlink is not enough: NSBundle does not resolve it.
+  add_custom_command(TARGET hermes_ui POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+      "${CMAKE_CURRENT_SOURCE_DIR}/scripts/hermes_ui_launcher.sh"
+      "${CMAKE_BINARY_DIR}/hermes_ui"
+    COMMAND chmod +x "${CMAKE_BINARY_DIR}/hermes_ui"
+    VERBATIM)
 endif()
 
 
@@ -357,6 +380,14 @@ target_link_libraries(hermes_chat_tests PRIVATE
 
 add_test(NAME native_chat COMMAND hermes_chat_tests)
 
+if(APPLE)
+  add_test(NAME macos_bundle_identity
+    COMMAND ${CMAKE_COMMAND}
+      "-DAPP_BUNDLE=$<TARGET_BUNDLE_DIR:hermes_ui>"
+      "-DLAUNCHER=${CMAKE_BINARY_DIR}/hermes_ui"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_macos_bundle.cmake")
+endif()
+
 add_executable(hermes_click_tests
   tests/click_audit_test.cc
   src/chat_view.cc
@@ -441,7 +472,3 @@ target_compile_options(hermes_gateway_tests PRIVATE
 )
 
 add_test(NAME gateway_config COMMAND hermes_gateway_tests)
-
-set_target_properties(hermes_ui PROPERTIES
-  MACOSX_BUNDLE OFF
-)

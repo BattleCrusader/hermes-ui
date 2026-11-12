@@ -10,9 +10,10 @@ class QSystemTrayIcon;
 namespace hermes::ui {
 
 // Thin platform bridge for native OS notifications. The macOS build uses
-// NSUserNotification so the unbundled developer binary can deliver alerts
-// without requiring a bundle proxy; other platforms use a tray balloon. The
-// shell owns the policy; this class only delivers or reports why it could not.
+// NSUserNotification from the app bundle; the bundle identity is what lets
+// macOS register Hermes and deliver alerts. Other platforms use a tray balloon.
+// The shell owns the policy; this class only delivers or reports why it could
+// not.
 class NotificationService {
  public:
   explicit NotificationService(QObject* parent = nullptr);

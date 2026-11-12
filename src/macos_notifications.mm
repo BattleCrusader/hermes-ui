@@ -46,8 +46,9 @@ bool MacShowNotification(const QString& title, const QString& body,
           [NSUserNotificationCenter defaultUserNotificationCenter];
       if (center == nil) {
         if (error != nullptr) {
-          *error =
-              QStringLiteral("macOS did not provide a notification center.");
+          *error = QStringLiteral(
+              "macOS notifications need the Hermes app bundle. Run "
+              "./build/hermes_ui instead of copying the raw executable.");
         }
         return false;
       }
