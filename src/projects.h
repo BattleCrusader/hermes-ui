@@ -1,0 +1,121 @@
+// Copyright 2026 The Hermes Qt Spike Authors.
+
+#ifndef HERMES_UI_PROJECTS_H_
+#define HERMES_UI_PROJECTS_H_
+
+#include <QJsonObject>
+#include <QString>
+#include <QStringList>
+#include <vector>
+
+namespace hermes::ui {
+
+// Projects are per-profile multi-folder workspaces served by the gateway's
+// `projects.*` JSON-RPC surface. The native sidebar renders `projects.tree`
+// and the management dialogs read/write `projects.list` + the mutator verbs.
+inline QString AllProjectsId() { return QStringLiteral("__all_projects__"); }
+
+struct ProjectFolderInfo {
+  QString path;
+  QString label;
+  bool is_primary = false;
+};
+
+struct ProjectInfo {
+  QString id;
+  QString slug;
+  QString name;
+  QString description;
+  QString icon;
+  QString color;
+  QString board_slug;
+  QString primary_path;
+  bool archived = false;
+  qint64 created_at = 0;
+  std::vector<ProjectFolderInfo> folders;
+};
+
+// The sidebar's project -> repo -> lane tree is flattened here: the native
+// sidebar only needs the project identity, counts and the authoritative
+// session id set. Repo/lane details stay available to future panes through
+// the raw JSON in the gateway response.
+struct ProjectNode {
+  QString id;
+  QString label;
+  QString path;
+  QString color;
+  QString icon;
+  bool is_auto = false;
+  bool is_no_project = false;
+  int session_count = 0;
+  double last_active = 0.0;
+  qint64 total_tokens = 0;
+  double total_cost_usd = 0.0;
+  int repo_count = 0;
+  // Every session id the backend assigned to this project. This is the
+  // authoritative set the sidebar filters with; previewSessions alone is
+  // intentionally truncated.
+  QStringList session_ids;
+};
+
+struct ProjectsState {
+  bool loaded = false;
+  bool loading = false;
+  bool available = true;
+  QString error;
+  QString profile;
+  QString active_id;
+  std::vector<ProjectInfo> projects;
+  std::vector<ProjectNode> tree;
+};
+
+// Parsers are pure so the worker/UI handoff can be tested without a gateway.
+bool ParseProjectsList(const QJsonObject& payload, ProjectsState* state,
+                       QString* error = nullptr);
+bool ParseProjectsTree(const QJsonObject& payload, ProjectsState* state,
+                       QString* error = nullptr);
+void ParseProjectInfo(const QJsonObject& row, ProjectInfo* project);
+void ParseProjectNode(const QJsonObject& row, ProjectNode* node);
+
+// Request builders shared by the create/edit dialogs and the sidebar actions.
+QJsonObject BuildProjectCreateParams(const QString& name,
+                                     const QStringList& folders,
+                                     const QString& primary_path,
+                                     const QString& description, bool use,
+                                     const QString& icon = QString(),
+                                     const QString& color = QString());
+QJsonObject BuildProjectUpdateParams(const QString& name,
+                                     const QString& description);
+// `icon` / `color` are always present: '' clears the stored look.
+QJsonObject BuildProjectAppearanceParams(const QString& icon,
+                                         const QString& color);
+QJsonObject BuildProjectFolderParams(const QString& id, const QString& path,
+                                     bool is_primary = false);
+QJsonObject BuildProjectIdParams(const QString& id);
+
+// Auto-derived projects can be hidden from the sidebar without a gateway
+// delete. The dismissed id set is a local layout preference (paths survive
+// reconnects); explicit rows never match.
+std::vector<ProjectNode> FilterVisibleProjects(
+    const std::vector<ProjectNode>& projects, const QStringList& dismissed_ids);
+QString EncodeDismissedAutoProjectIds(const QStringList& ids);
+QStringList DecodeDismissedAutoProjectIds(const QString& encoded);
+
+// The folder a new chat should start in for the selected project scope. The
+// gateway tree's resolved path wins; `projects.list` is the fallback while the
+// tree is still loading. Unknown/All-projects scopes return an empty cwd.
+QString ProjectWorkingDirectory(const ProjectsState& state,
+                                const QString& project_id);
+
+// Default folder for the workspace file browser: the active project's
+// working directory, or the user's home when no project is selected.
+QString ArtifactsWorkingDirectory(const ProjectsState& state,
+                                  const QString& project_id);
+
+// Human-friendly one-line detail for a project row/editor.
+QString ProjectSummaryLine(const ProjectInfo& project);
+QString ProjectFolderLabel(const ProjectFolderInfo& folder);
+
+}  // namespace hermes::ui
+
+#endif  // HERMES_UI_PROJECTS_H_

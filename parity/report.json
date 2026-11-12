@@ -1,0 +1,135 @@
+{
+  "generated_at": "2026-11-11T06:50:16Z",
+  "desktop_tests": {
+    "passed": true,
+    "tests": 54,
+    "files": 3,
+    "summary": "   Duration  12.25s (transform 12.43s, setup 801ms, import 20.26s, tests 5.11s, environment 2.05s)"
+  },
+  "native_inventory": "112 named widgets",
+  "desktop_e2e": "passed",
+  "rest_routes": {
+    "backend_routes": 307,
+    "native_routes": 135,
+    "matched": 146,
+    "gaps": 161,
+    "native_only": 3,
+    "test_references": 12
+  },
+  "features": [
+    {
+      "id": "preferences",
+      "name": "Preferences / Settings",
+      "critical": true,
+      "desktop": "test src/app/settings/model-settings.test.tsx",
+      "native": "inventory:settingsView",
+      "status": "parity",
+      "case": "Open Settings. Assert the nine config sections render with schema-driven fields and a form change writes a sparse PUT /api/config patch. Desktop also exposes provider/model/reasoning in its Model view; native exposes those in the composer pills."
+    },
+    {
+      "id": "model_picker",
+      "name": "Composer model picker",
+      "critical": true,
+      "desktop": "test src/app/chat/composer/model-pill.test.tsx",
+      "native": "inventory:modelPicker",
+      "status": "parity",
+      "case": "Open the composer model pill. Assert a catalog of providers/models. Pick a model and assert config.set {key:'model', value:'<model> --provider <provider>'}."
+    },
+    {
+      "id": "reasoning",
+      "name": "Reasoning effort control",
+      "critical": true,
+      "desktop": "test src/app/chat/composer/reasoning-pill.test.tsx",
+      "native": "inventory:reasoningPill",
+      "status": "parity",
+      "case": "Click the reasoning pill. Assert effort choices. Pick a level and assert config.set {key:'reasoning', value:<level>}."
+    },
+    {
+      "id": "command_palette",
+      "name": "Command palette",
+      "critical": false,
+      "desktop": "source markers",
+      "native": "inventory:commandPalette",
+      "status": "parity",
+      "case": "Press the command-palette shortcut. Assert a filtered action list and keyboard navigation."
+    },
+    {
+      "id": "clarify",
+      "name": "Clarify requests",
+      "critical": false,
+      "desktop": "source markers",
+      "native": "inventory:requestBar",
+      "status": "partial",
+      "case": "Run a turn that calls clarify. Assert the question/choices render and the chosen answer reaches the model."
+    },
+    {
+      "id": "approval",
+      "name": "Approval requests",
+      "critical": false,
+      "desktop": "source markers",
+      "native": "inventory:requestBar",
+      "status": "partial",
+      "case": "Run an approval-gated action. Assert the approval card renders and the choice reaches the model."
+    },
+    {
+      "id": "session_search",
+      "name": "Session search",
+      "critical": false,
+      "desktop": "source markers",
+      "native": "inventory:sessionSearch",
+      "status": "parity",
+      "case": "Type in the sidebar search; assert the session rows filter."
+    },
+    {
+      "id": "theme",
+      "name": "Light/dark appearance",
+      "critical": false,
+      "desktop": "source markers",
+      "native": "source markers",
+      "status": "parity",
+      "case": "Switch theme and assert all surfaces repaint from the light/dark tokens."
+    },
+    {
+      "id": "new_chat",
+      "name": "New chat",
+      "critical": false,
+      "desktop": "source markers",
+      "native": "source markers",
+      "status": "parity",
+      "case": "Start a new chat and assert session.create opens an empty live session."
+    },
+    {
+      "id": "stop_turn",
+      "name": "Stop turn",
+      "critical": false,
+      "desktop": "source markers",
+      "native": "source markers",
+      "status": "parity",
+      "case": "Send a turn, press stop, and assert session.interrupt settles the run."
+    },
+    {
+      "id": "streaming",
+      "name": "Streaming reply",
+      "critical": false,
+      "desktop": "source markers",
+      "native": "source markers",
+      "status": "parity",
+      "case": "Send a turn and assert message.start/delta/complete update one assistant row."
+    },
+    {
+      "id": "tool_rows",
+      "name": "Tool call rows",
+      "critical": false,
+      "desktop": "source markers",
+      "native": "source markers",
+      "status": "parity",
+      "case": "Run a tool turn and assert tool.start/tool.complete render one detail row."
+    }
+  ],
+  "summary": {
+    "parity": 10,
+    "partial": 2,
+    "gaps": 0,
+    "critical_gaps": []
+  }
+}

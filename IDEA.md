@@ -1,0 +1,1 @@
+Hermes UI from ~/.hermes/hermes-agent/apps/desktop rewritten in a 3/4GL with native compilation. Agents can run in the background, not "sleeping". It should otherwise be feature complete compared to the python version.

@@ -1,0 +1,2231 @@
+// Copyright 2026 The Hermes Qt Spike Authors.
+
+#include "src/right_rail.h"
+
+#include <QClipboard>
+#include <QDateTime>
+#include <QDesktopServices>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QFileSystemModel>
+#include <QGuiApplication>
+#include <QHeaderView>
+#include <QJsonArray>
+#include <QLabel>
+#include <QLineEdit>
+#include <QPixmap>
+#include <QPlainTextEdit>
+#include <QPointer>
+#include <QProcess>
+#include <QProgressBar>
+#include <QPushButton>
+#include <QRegularExpression>
+#include <QResizeEvent>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QSet>
+#include <QSplitter>
+#include <QStyle>
+#include <QSvgRenderer>
+#include <QSvgWidget>
+#include <QTemporaryFile>
+#include <QTextBrowser>
+#include <QTextCursor>
+#include <QTextOption>
+#include <QTimer>
+#include <QTreeView>
+#include <QUrl>
+#include <QVBoxLayout>
+#include <algorithm>
+#include <memory>
+#include <vector>
+
+#include "src/flow_layout.h"
+#include "src/gateway_events.h"
+#include "src/markdown_preview_style.h"
+#include "src/search_completion.h"
+#include "src/subagents.h"
+#include "src/todo_state.h"
+
+namespace hermes::ui {
+namespace {
+
+void ClearLayout(QLayout* layout) {
+  while (QLayoutItem* item = layout->takeAt(0)) {
+    if (QWidget* widget = item->widget()) {
+      widget->deleteLater();
+    }
+    if (QLayout* child = item->layout()) {
+      ClearLayout(child);
+      delete child;
+    }
+    delete item;
+  }
+}
+
+QString RailColorRole(const Theme& theme, const QColor& color) {
+  if (!color.isValid() || color == theme.foreground) {
+    return QStringLiteral("foreground");
+  }
+  if (color == theme.text_secondary) {
+    return QStringLiteral("secondary");
+  }
+  if (color == theme.text_tertiary) {
+    return QStringLiteral("tertiary");
+  }
+  if (color == theme.accent) {
+    return QStringLiteral("accent");
+  }
+  if (color == theme.success) {
+    return QStringLiteral("success");
+  }
+  if (color == theme.warning) {
+    return QStringLiteral("warning");
+  }
+  if (color == theme.danger) {
+    return QStringLiteral("danger");
+  }
+  return QString();
+}
+
+QColor RailColorForRole(const Theme& theme, const QString& role) {
+  if (role == QStringLiteral("secondary")) {
+    return theme.text_secondary;
+  }
+  if (role == QStringLiteral("tertiary")) {
+    return theme.text_tertiary;
+  }
+  if (role == QStringLiteral("accent")) {
+    return theme.accent;
+  }
+  if (role == QStringLiteral("success")) {
+    return theme.success;
+  }
+  if (role == QStringLiteral("warning")) {
+    return theme.warning;
+  }
+  if (role == QStringLiteral("danger")) {
+    return theme.danger;
+  }
+  return theme.foreground;
+}
+
+void StyleRailLabel(QLabel* label, const Theme& theme) {
+  const QString role = label->property("railColorRole").toString();
+  if (role.isEmpty()) {
+    return;
+  }
+  const int size = label->property("railFontSize").toInt();
+  const auto weight =
+      static_cast<QFont::Weight>(label->property("railFontWeight").toInt());
+  label->setFont(theme.UiFont(size > 0 ? size : 12, weight));
+  label->setStyleSheet(QStringLiteral("color: %1; background: transparent;")
+                           .arg(RailColorForRole(theme, role).name()));
+}
+
+QLabel* RailLabel(QWidget* parent, const Theme& theme, const QString& text,
+                  int size, QFont::Weight weight = QFont::Normal,
+                  const QColor& color = QColor()) {
+  auto* label = new QLabel(text, parent);
+  label->setWordWrap(true);
+  label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  label->setProperty("railColorRole", RailColorRole(theme, color));
+  label->setProperty("railFontSize", size);
+  label->setProperty("railFontWeight", static_cast<int>(weight));
+  StyleRailLabel(label, theme);
+  return label;
+}
+
+QString WrappedToolTip(const QString& text, int width = 360) {
+  QString escaped = text.toHtmlEscaped();
+  escaped.replace(QStringLiteral("\n"), QStringLiteral("<br>"));
+  return QStringLiteral(
+             "<div style=\"width:%1px; white-space:pre-wrap; "
+             "word-wrap:break-word;\">%2</div>")
+      .arg(width)
+      .arg(escaped);
+}
+
+// A multiline QPushButton only paints its first line, so timeline rows use a
+// button as the click/focus surface and child QLabels for wrapped content.
+class TimelineRowButton : public QPushButton {
+ public:
+  TimelineRowButton(const TimelineEntry& entry, int index, QWidget* parent)
+      : QPushButton(parent) {
+    setObjectName(QStringLiteral("rightRailTimeline_%1").arg(index));
+    setProperty("railTimelineRow", true);
+    setFlat(true);
+    setText(QString());
+    setCursor(Qt::PointingHandCursor);
+    setFocusPolicy(Qt::StrongFocus);
+    setAccessibleName(entry.preview);
+    QSizePolicy policy(QSizePolicy::Expanding, QSizePolicy::Minimum);
+    policy.setHeightForWidth(true);
+    setSizePolicy(policy);
+    setMinimumHeight(36);
+
+    auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(8, 6, 8, 6);
+    layout->setSpacing(2);
+    if (entry.timestamp.isValid()) {
+      timestamp_ = new QLabel(
+          entry.timestamp.toString(QStringLiteral("MMM d, HH:mm")), this);
+      timestamp_->setObjectName(
+          QStringLiteral("rightRailTimelineTime_%1").arg(index));
+      timestamp_->setProperty("railTimelineTime", true);
+      timestamp_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+      timestamp_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+      layout->addWidget(timestamp_);
+    }
+    preview_ = new QLabel(entry.preview, this);
+    preview_->setObjectName(
+        QStringLiteral("rightRailTimelinePreview_%1").arg(index));
+    preview_->setProperty("railTimelinePreview", true);
+    preview_->setWordWrap(true);
+    preview_->setTextFormat(Qt::PlainText);
+    preview_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    preview_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    QSizePolicy preview_policy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    preview_policy.setHeightForWidth(true);
+    preview_->setSizePolicy(preview_policy);
+    layout->addWidget(preview_);
+
+    setToolTip(WrappedToolTip(entry.full_text.isEmpty() ? entry.preview
+                                                        : entry.full_text));
+  }
+
+  void SetTheme(const Theme& theme) {
+    setFont(theme.UiFont(11, QFont::Normal));
+    if (timestamp_ != nullptr) {
+      timestamp_->setFont(theme.UiFont(10, QFont::Normal));
+    }
+    if (preview_ != nullptr) {
+      preview_->setFont(theme.UiFont(11, QFont::Normal));
+    }
+  }
+
+  QLabel* preview_label() const { return preview_; }
+  QLabel* timestamp_label() const { return timestamp_; }
+
+  bool hasHeightForWidth() const override { return true; }
+
+  int heightForWidth(int width) const override {
+    if (layout() == nullptr) {
+      return QPushButton::heightForWidth(width);
+    }
+    return layout()->heightForWidth(width);
+  }
+
+  QSize sizeHint() const override {
+    if (layout() == nullptr) {
+      return QPushButton::sizeHint();
+    }
+    QSize hint = layout()->sizeHint();
+    const int height = layout()->heightForWidth(std::max(width(), 220));
+    if (height > 0) {
+      hint.setHeight(height);
+    }
+    return hint;
+  }
+
+  QSize minimumSizeHint() const override { return QSize(0, 36); }
+
+ protected:
+  void resizeEvent(QResizeEvent* event) override {
+    QPushButton::resizeEvent(event);
+    if (layout() == nullptr) {
+      return;
+    }
+    const int target = layout()->heightForWidth(width());
+    if (target > 0 && height() != target) {
+      setFixedHeight(target);
+    }
+  }
+
+ private:
+  QLabel* timestamp_ = nullptr;
+  QLabel* preview_ = nullptr;
+};
+
+QString ComposeArtifactHtml(const QString& content) {
+  static const QRegularExpression document(
+      QStringLiteral("<html[\\s>]|<!doctype\\s+html"),
+      QRegularExpression::CaseInsensitiveOption);
+  if (document.match(content).hasMatch()) {
+    return content;
+  }
+  return QStringLiteral(
+             "<!doctype html><html><head><meta charset=\"utf-8\">"
+             "<meta name=\"viewport\" content=\"width=device-width, "
+             "initial-scale=1\"><style>"
+             ":root{color-scheme:light dark}"
+             "body{margin:0;padding:20px;font-family:system-ui,-apple-system,"
+             "BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;"
+             "line-height:1.6;color:#1f2328;background:#ffffff;"
+             "max-width:760px;margin:0 auto;overflow-wrap:anywhere;"
+             "word-break:break-word}"
+             "h1,h2,h3{line-height:1.3;margin:1.2em 0 .5em}"
+             "h1{font-size:1.7em}h2{font-size:1.35em}h3{font-size:1.12em}"
+             "p{margin:0 0 1em}ul,ol{padding-left:1.5em;margin:0 0 1em}"
+             "a{color:#4c8dff;text-decoration:none}a:hover{text-decoration:"
+             "underline}code,kbd,pre{font-family:'JetBrains Mono',ui-monospace,"
+             "SFMono-Regular,Menlo,monospace}code{font-size:.9em;padding:.1em "
+             ".3em;border-radius:4px;background:rgba(127,127,127,.16)}"
+             "pre{padding:14px;border-radius:8px;overflow:auto;"
+             "background:rgba(127,127,127,.12)}pre code{padding:0;"
+             "background:transparent}blockquote{margin:0 0 1em;"
+             "padding:.65em .9em .65em 1em;border-left:3px solid "
+             "rgba(127,127,127,.55);border-radius:0 6px 6px 0;background:"
+             "rgba(127,127,127,.08);color:#57606a;overflow-wrap:anywhere;"
+             "word-break:break-word}blockquote>*:last-child{margin-bottom:0}"
+             "table{border-collapse:collapse;width:100%;"
+             "margin:0 0 1em}th,td{padding:7px 10px;text-align:left;"
+             "border-bottom:1px solid rgba(127,127,127,.28)}th{background:"
+             "rgba(127,127,127,.10);font-weight:600}img{max-width:100%;"
+             "height:auto}@media(prefers-color-scheme:dark){body{"
+             "color:#e6edf3;background:#0d1117}blockquote{color:#8b949e;"
+             "background:rgba(127,127,127,.12)}a{color:#79a8ff}}"
+             "</style></head><body>") +
+         content + QStringLiteral("</body></html>");
+}
+
+QString CurrentArtifactContent(const SessionArtifact& artifact) {
+  if (artifact.versions.empty()) {
+    return QString();
+  }
+  const int index =
+      std::max(0, std::min(artifact.version_index,
+                           static_cast<int>(artifact.versions.size()) - 1));
+  return artifact.versions[static_cast<std::size_t>(index)].content;
+}
+
+ArtifactKind RailArtifactKind(const QString& kind) {
+  if (kind == QStringLiteral("html")) {
+    return ArtifactKind::kHtml;
+  }
+  if (kind == QStringLiteral("svg")) {
+    return ArtifactKind::kSvg;
+  }
+  return ArtifactKind::kCode;
+}
+
+bool OpenArtifactHtmlInBrowser(const QString& content) {
+  QTemporaryFile file(QDir::tempPath() +
+                      QStringLiteral("/hermes-artifact-XXXXXX.html"));
+  file.setAutoRemove(false);
+  if (!file.open()) {
+    return false;
+  }
+  const QByteArray bytes = ComposeArtifactHtml(content).toUtf8();
+  if (file.write(bytes) != bytes.size()) {
+    return false;
+  }
+  const QString path = file.fileName();
+  file.close();
+  return QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+}
+
+QPushButton* PreviewAction(QWidget* parent, const QString& text,
+                           const QString& name) {
+  auto* button = new QPushButton(text, parent);
+  button->setObjectName(name);
+  button->setProperty("railAction", true);
+  button->setFlat(true);
+  button->setCursor(Qt::PointingHandCursor);
+  return button;
+}
+
+void AppendSignatureField(QString* signature, const QString& value) {
+  signature->append(value);
+  signature->append(QChar(0x1f));
+}
+
+QString ArtifactRenderSignature(const std::vector<SessionArtifact>& artifacts,
+                                const ProfileSnapshot& snapshot) {
+  QString signature;
+  signature.reserve(artifacts.size() * 96);
+  AppendSignatureField(&signature, snapshot.selected_session_id);
+  AppendSignatureField(&signature, snapshot.home);
+  for (const SessionArtifact& artifact : artifacts) {
+    AppendSignatureField(&signature, artifact.label);
+    AppendSignatureField(&signature, artifact.value);
+    AppendSignatureField(&signature, artifact.kind);
+    AppendSignatureField(&signature, artifact.id);
+    AppendSignatureField(&signature, artifact.language);
+    AppendSignatureField(&signature, artifact.generated ? QStringLiteral("1")
+                                                        : QStringLiteral("0"));
+    AppendSignatureField(&signature, QString::number(artifact.version_index));
+    AppendSignatureField(&signature, QString::number(artifact.versions.size()));
+    for (const ArtifactVersion& version : artifact.versions) {
+      AppendSignatureField(&signature, version.hash);
+      AppendSignatureField(&signature, QString::number(version.created_at_ms));
+      if (version.hash.isEmpty()) {
+        AppendSignatureField(&signature, version.content);
+      }
+    }
+  }
+  return signature;
+}
+
+}  // namespace
+
+QString CompactUsageTokens(qint64 value) {
+  value = std::max<qint64>(0, value);
+  if (value >= 1000000) {
+    const double millions = value / 1000000.0;
+    return QStringLiteral("%1M").arg(millions, 0, 'f', millions < 10.0 ? 1 : 0);
+  }
+  if (value >= 1000) {
+    const double thousands = value / 1000.0;
+    return QStringLiteral("%1k").arg(thousands, 0, 'f',
+                                     thousands < 10.0 ? 1 : 0);
+  }
+  return QString::number(value);
+}
+
+std::vector<SessionArtifact> CollectSessionArtifacts(
+    const std::vector<ChatMessage>& messages) {
+  std::vector<SessionArtifact> artifacts;
+  const std::vector<ArtifactRecord> generated =
+      CollectGeneratedArtifacts(messages, QString());
+  for (const ArtifactRecord& record : generated) {
+    SessionArtifact artifact;
+    artifact.id = record.id;
+    artifact.label = record.title;
+    artifact.kind = ArtifactKindName(record.kind);
+    artifact.language = record.language;
+    artifact.generated = true;
+    artifact.versions = record.versions;
+    artifact.version_index =
+        std::max(0, static_cast<int>(record.versions.size()) - 1);
+    artifacts.push_back(std::move(artifact));
+  }
+
+  QSet<QString> seen;
+  for (auto message = messages.rbegin(); message != messages.rend();
+       ++message) {
+    for (auto block = message->blocks.rbegin(); block != message->blocks.rend();
+         ++block) {
+      if (block->kind != BlockKind::kArtifact &&
+          block->kind != BlockKind::kImage) {
+        continue;
+      }
+      const QString value = block->detail.trimmed();
+      if (value.isEmpty() || seen.contains(value)) {
+        continue;
+      }
+      seen.insert(value);
+      SessionArtifact artifact;
+      artifact.value = value;
+      artifact.kind = block->kind == BlockKind::kImage
+                          ? QStringLiteral("image")
+                          : QStringLiteral("artifact");
+      artifact.label = block->text.trimmed();
+      if (artifact.label.isEmpty()) {
+        artifact.label = block->language.trimmed();
+      }
+      if (artifact.label.isEmpty()) {
+        artifact.label = QFileInfo(value).fileName();
+      }
+      if (artifact.label.isEmpty()) {
+        artifact.label = value;
+      }
+      artifacts.push_back(std::move(artifact));
+    }
+  }
+  return artifacts;
+}
+
+std::vector<TimelineEntry> CollectTimelineEntries(
+    const std::vector<ChatMessage>& messages) {
+  std::vector<TimelineEntry> entries;
+  for (const ChatMessage& message : messages) {
+    if (message.role != MessageRole::kUser) {
+      continue;
+    }
+    QString preview;
+    for (const MessageBlock& block : message.blocks) {
+      if (block.kind == BlockKind::kTool) {
+        continue;
+      }
+      preview = block.text.trimmed();
+      if (!preview.isEmpty()) {
+        break;
+      }
+    }
+    preview = preview.simplified();
+    if (preview.isEmpty()) {
+      continue;
+    }
+    const QString full_text = preview;
+    if (preview.size() > 160) {
+      preview = preview.left(157) + QStringLiteral("…");
+    }
+    entries.push_back(
+        TimelineEntry{message.row_id, preview, message.timestamp, full_text});
+  }
+  return entries;
+}
+
+RightRail::RightRail(const Theme& theme, QWidget* parent)
+    : QWidget(parent), theme_(theme) {
+  setObjectName(QStringLiteral("rightRail"));
+  setMinimumWidth(260);
+  setMaximumWidth(800);
+  setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+  setAttribute(Qt::WA_StyledBackground, true);
+  auto* root = new QVBoxLayout(this);
+  root->setContentsMargins(0, 0, 0, 0);
+  root->setSpacing(0);
+
+  // The rail is an accordion, not a tab strip: each surface is a collapsible
+  // row with the same disclosure affordance as a tool call. One pane scroll
+  // owns the rail so expanding a section never leaves a tiny nested viewport.
+  workspace_ = new QWidget(this);
+  workspace_->setObjectName(QStringLiteral("rightRailWorkspace"));
+  workspace_->setAttribute(Qt::WA_StyledBackground, true);
+  auto* workspace_layout = new QVBoxLayout(workspace_);
+  workspace_layout->setContentsMargins(0, 0, 0, 0);
+  workspace_layout->setSpacing(0);
+  auto* header = new QWidget(workspace_);
+  header->setObjectName(QStringLiteral("rightRailHeader"));
+  header->setAttribute(Qt::WA_StyledBackground, true);
+  auto* header_layout = new QHBoxLayout(header);
+  header_layout->setContentsMargins(12, 7, 7, 7);
+  header_layout->setSpacing(6);
+  auto* title = new QLabel(QStringLiteral("Workspace"), header);
+  title->setObjectName(QStringLiteral("rightRailTitle"));
+  title->setFont(theme_.UiFont(12, QFont::DemiBold));
+  header_layout->addWidget(title, 1);
+  auto* collapse = PreviewAction(header, QStringLiteral("›"),
+                                 QStringLiteral("rightRailCollapse"));
+  collapse->setFixedSize(22, 22);
+  collapse->setToolTip(QStringLiteral("Collapse sidebar"));
+  header_layout->addWidget(collapse);
+  workspace_layout->addWidget(header);
+  sections_scroll_ = new QScrollArea(workspace_);
+  sections_scroll_->setObjectName(QStringLiteral("rightRailSectionsScroll"));
+  sections_scroll_->setWidgetResizable(true);
+  sections_scroll_->setFrameShape(QFrame::NoFrame);
+  sections_scroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  sections_host_ = new QWidget(sections_scroll_);
+  sections_host_->setObjectName(QStringLiteral("rightRailSections"));
+  sections_host_->setAttribute(Qt::WA_StyledBackground, true);
+  sections_host_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+  sections_layout_ = new QVBoxLayout(sections_host_);
+  sections_layout_->setContentsMargins(0, 0, 0, 10);
+  sections_layout_->setSpacing(0);
+  sections_scroll_->setWidget(sections_host_);
+  workspace_layout->addWidget(sections_scroll_, 1);
+  root->addWidget(workspace_);
+  QObject::connect(collapse, &QPushButton::clicked, collapse, [this]() {
+    SetCollapsed(true);
+    if (on_collapsed_changed) {
+      on_collapsed_changed(true);
+    }
+  });
+
+  // Project files, git and a local shell live beside the chat transcript.
+  // They are scoped by SetProjectContext rather than inferred from messages.
+  project_pane_ = new QWidget(sections_host_);
+  project_pane_->setObjectName(QStringLiteral("rightRailProjectPane"));
+  auto* project_layout = new QVBoxLayout(project_pane_);
+  project_layout->setContentsMargins(10, 10, 10, 10);
+  project_layout->setSpacing(6);
+  project_root_label_ = RailLabel(project_pane_, theme_, QString(), 11,
+                                  QFont::DemiBold, theme_.text_secondary);
+  project_root_label_->setObjectName(QStringLiteral("rightRailProjectRoot"));
+  project_layout->addWidget(project_root_label_);
+  auto* project_split = new QSplitter(Qt::Vertical, project_pane_);
+  project_split->setObjectName(QStringLiteral("rightRailProjectSplit"));
+  project_model_ = new QFileSystemModel(project_pane_);
+  project_model_->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot);
+  project_model_->setRootPath(QDir::homePath());
+  project_tree_ = new QTreeView(project_split);
+  project_tree_->setObjectName(QStringLiteral("rightRailProjectTree"));
+  project_tree_->setModel(project_model_);
+  project_tree_->setRootIndex(project_model_->index(QDir::homePath()));
+  project_tree_->setHeaderHidden(true);
+  project_tree_->setAnimated(false);
+  project_tree_->setUniformRowHeights(true);
+  project_tree_->setTextElideMode(Qt::ElideMiddle);
+  project_tree_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  project_tree_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+  project_tree_->setMinimumHeight(120);
+  project_tree_->setFont(theme_.UiFont(11, QFont::Normal));
+  project_split->addWidget(project_tree_);
+  project_preview_ = new QTextBrowser(project_split);
+  project_preview_->setObjectName(QStringLiteral("rightRailProjectPreview"));
+  project_preview_->setOpenExternalLinks(true);
+  project_preview_->setLineWrapMode(QTextEdit::WidgetWidth);
+  project_preview_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
+  project_preview_->setMinimumHeight(120);
+  project_preview_->setFont(theme_.UiFont(11, QFont::Normal));
+  project_split->addWidget(project_preview_);
+  project_split->setSizes({240, 180});
+  project_layout->addWidget(project_split, 1);
+  QObject::connect(
+      project_tree_, &QTreeView::clicked, project_tree_,
+      [this](const QModelIndex& index) {
+        if (project_model_ == nullptr || !project_model_->isDir(index)) {
+          ShowProjectPreview(project_model_->filePath(index));
+        }
+      });
+  QObject::connect(
+      project_tree_, &QTreeView::doubleClicked, project_tree_,
+      [this](const QModelIndex& index) {
+        if (project_model_ == nullptr || project_model_->isDir(index)) {
+          return;
+        }
+        QDesktopServices::openUrl(
+            QUrl::fromLocalFile(project_model_->filePath(index)));
+      });
+  project_pane_->setMinimumHeight(360);
+  AddSection(QStringLiteral("project"), QStringLiteral("Project"),
+             project_pane_);
+
+  git_pane_ = new QWidget(sections_host_);
+  git_pane_->setObjectName(QStringLiteral("rightRailGitPane"));
+  auto* git_layout = new QVBoxLayout(git_pane_);
+  git_layout->setContentsMargins(10, 10, 10, 10);
+  git_layout->setSpacing(6);
+  git_root_label_ = RailLabel(git_pane_, theme_, QString(), 11, QFont::DemiBold,
+                              theme_.text_secondary);
+  git_root_label_->setObjectName(QStringLiteral("rightRailGitRoot"));
+  git_layout->addWidget(git_root_label_);
+  git_status_ = new QPlainTextEdit(git_pane_);
+  git_status_->setObjectName(QStringLiteral("rightRailGitStatus"));
+  git_status_->setReadOnly(true);
+  git_status_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+  git_status_->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+  git_status_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  git_status_->setFont(theme_.MonoFont(10, QFont::Normal));
+  git_status_->setMinimumHeight(120);
+  git_layout->addWidget(git_status_, 1);
+  git_message_ = new QPlainTextEdit(git_pane_);
+  git_message_->setObjectName(QStringLiteral("rightRailGitMessage"));
+  git_message_->setPlaceholderText(QStringLiteral("Commit message"));
+  git_message_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+  git_message_->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+  git_message_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  git_message_->setFont(theme_.UiFont(11, QFont::Normal));
+  git_message_->setFixedHeight(64);
+  git_layout->addWidget(git_message_);
+  git_message_status_ = RailLabel(git_pane_, theme_, QString(), 10,
+                                  QFont::Normal, theme_.text_secondary);
+  git_message_status_->setObjectName(
+      QStringLiteral("rightRailGitMessageStatus"));
+  git_layout->addWidget(git_message_status_);
+  auto* git_actions = new FlowLayout(0, 4, 4);
+  git_refresh_ = PreviewAction(git_pane_, QStringLiteral("Refresh"),
+                               QStringLiteral("rightRailGitRefresh"));
+  git_actions->addWidget(git_refresh_);
+  git_generate_ = PreviewAction(git_pane_, QStringLiteral("AI Generate"),
+                                QStringLiteral("rightRailGitGenerate"));
+  git_generate_->setToolTip(
+      QStringLiteral("Draft a commit message from the staged changes"));
+  git_actions->addWidget(git_generate_);
+  git_commit_ = PreviewAction(git_pane_, QStringLiteral("Commit"),
+                              QStringLiteral("rightRailGitCommit"));
+  git_actions->addWidget(git_commit_);
+  git_push_ = PreviewAction(git_pane_, QStringLiteral("Commit & Push"),
+                            QStringLiteral("rightRailGitPush"));
+  git_actions->addWidget(git_push_);
+  git_layout->addLayout(git_actions);
+  QObject::connect(git_refresh_, &QPushButton::clicked, git_refresh_,
+                   [this]() { RefreshGitStatus(); });
+  QObject::connect(git_generate_, &QPushButton::clicked, git_generate_,
+                   [this]() { GenerateCommitMessage(); });
+  QObject::connect(git_commit_, &QPushButton::clicked, git_commit_,
+                   [this]() { CommitGit(); });
+  QObject::connect(git_push_, &QPushButton::clicked, git_push_,
+                   [this]() { PushGit(); });
+  git_pane_->setMinimumHeight(340);
+  AddSection(QStringLiteral("git"), QStringLiteral("Git"), git_pane_);
+
+  terminal_pane_ = new QWidget(sections_host_);
+  terminal_pane_->setObjectName(QStringLiteral("rightRailTerminalPane"));
+  auto* terminal_layout = new QVBoxLayout(terminal_pane_);
+  terminal_layout->setContentsMargins(8, 8, 8, 8);
+  terminal_layout->setSpacing(5);
+  auto* terminal_actions = new FlowLayout(0, 4, 4);
+  auto* terminal_title =
+      RailLabel(terminal_pane_, theme_, QStringLiteral("Terminal"), 11,
+                QFont::DemiBold, theme_.text_secondary);
+  terminal_layout->addWidget(terminal_title);
+  terminal_copy_ = PreviewAction(terminal_pane_, QStringLiteral("Copy"),
+                                 QStringLiteral("rightRailTerminalCopy"));
+  terminal_copy_->setToolTip(
+      QStringLiteral("Copy selected terminal text (Cmd/Ctrl+Shift+C)"));
+  terminal_actions->addWidget(terminal_copy_);
+  terminal_paste_ = PreviewAction(terminal_pane_, QStringLiteral("Paste"),
+                                  QStringLiteral("rightRailTerminalPaste"));
+  terminal_paste_->setToolTip(
+      QStringLiteral("Paste clipboard text (Cmd/Ctrl+Shift+V)"));
+  terminal_actions->addWidget(terminal_paste_);
+  terminal_clear_ = PreviewAction(terminal_pane_, QStringLiteral("Clear"),
+                                  QStringLiteral("rightRailTerminalClear"));
+  terminal_actions->addWidget(terminal_clear_);
+  terminal_restart_ = PreviewAction(terminal_pane_, QStringLiteral("Restart"),
+                                    QStringLiteral("rightRailTerminalRestart"));
+  terminal_actions->addWidget(terminal_restart_);
+  terminal_layout->addLayout(terminal_actions);
+  terminal_ = new TerminalWidget(terminal_pane_);
+  terminal_->setMinimumHeight(260);
+  terminal_layout->addWidget(terminal_, 1);
+  QObject::connect(terminal_copy_, &QPushButton::clicked, terminal_copy_,
+                   [this]() {
+                     if (terminal_ != nullptr) {
+                       terminal_->CopySelection();
+                       terminal_->setFocus(Qt::OtherFocusReason);
+                     }
+                   });
+  QObject::connect(terminal_paste_, &QPushButton::clicked, terminal_paste_,
+                   [this]() {
+                     if (terminal_ != nullptr) {
+                       terminal_->PasteClipboard();
+                       terminal_->setFocus(Qt::OtherFocusReason);
+                     }
+                   });
+  QObject::connect(terminal_clear_, &QPushButton::clicked, terminal_clear_,
+                   [this]() {
+                     if (terminal_ != nullptr) {
+                       terminal_->ClearDisplay();
+                     }
+                   });
+  QObject::connect(terminal_restart_, &QPushButton::clicked, terminal_restart_,
+                   [this]() { RestartTerminal(); });
+  QObject::connect(terminal_, &TerminalWidget::StartFailed, this,
+                   [this](const QString& error) {
+                     if (terminal_ != nullptr) {
+                       terminal_->FeedForTest(
+                           QStringLiteral("\r\n[%1]\r\n").arg(error).toUtf8());
+                     }
+                   });
+  terminal_pane_->setMinimumHeight(360);
+  AddSection(QStringLiteral("terminal"), QStringLiteral("Terminal"),
+             terminal_pane_);
+
+  collapsed_bar_ = new QWidget(this);
+  collapsed_bar_->setObjectName(QStringLiteral("rightRailCollapsedBar"));
+  auto* collapsed_layout = new QVBoxLayout(collapsed_bar_);
+  collapsed_layout->setContentsMargins(5, 8, 5, 8);
+  collapsed_layout->setSpacing(5);
+  auto* expand = PreviewAction(collapsed_bar_, QStringLiteral("‹"),
+                               QStringLiteral("rightRailExpand"));
+  expand->setFixedSize(32, 26);
+  collapsed_layout->addWidget(expand);
+  QObject::connect(expand, &QPushButton::clicked, expand, [this]() {
+    SetCollapsed(false);
+    if (on_collapsed_changed) {
+      on_collapsed_changed(false);
+    }
+  });
+  collapsed_layout->addStretch(1);
+  collapsed_bar_->hide();
+  root->addWidget(collapsed_bar_);
+
+  context_pane_ = new QWidget(sections_host_);
+  context_pane_->setObjectName(QStringLiteral("rightRailContextPane"));
+  auto* context_layout = new QVBoxLayout(context_pane_);
+  context_layout->setContentsMargins(12, 10, 12, 12);
+  context_layout->setSpacing(8);
+  context_pane_->setMinimumHeight(220);
+  AddSection(QStringLiteral("context"), QStringLiteral("Context"),
+             context_pane_);
+  QWidget* context_content = context_pane_;
+  context_session_ =
+      RailLabel(context_content, theme_, QString(), 13, QFont::DemiBold);
+  context_session_->setObjectName(QStringLiteral("rightRailSession"));
+  context_layout->addWidget(context_session_);
+  context_summary_ = RailLabel(context_content, theme_, QString(), 12);
+  context_summary_->setObjectName(QStringLiteral("rightRailContextSummary"));
+  context_layout->addWidget(context_summary_);
+  context_bar_ = new QProgressBar(context_content);
+  context_bar_->setObjectName(QStringLiteral("rightRailContextBar"));
+  context_bar_->setRange(0, 100);
+  context_bar_->setTextVisible(false);
+  context_bar_->setFixedHeight(6);
+  context_layout->addWidget(context_bar_);
+  context_detail_ = RailLabel(context_content, theme_, QString(), 11,
+                              QFont::Normal, theme_.text_secondary);
+  context_detail_->setObjectName(QStringLiteral("rightRailContextDetail"));
+  context_layout->addWidget(context_detail_);
+  context_control_ = RailLabel(context_content, theme_, QString(), 11,
+                               QFont::Normal, theme_.text_secondary);
+  context_control_->setObjectName(QStringLiteral("rightRailContextControl"));
+  context_control_->setWordWrap(true);
+  context_layout->addWidget(context_control_);
+  context_notice_ = RailLabel(context_content, theme_, QString(), 11,
+                              QFont::Normal, theme_.text_secondary);
+  context_notice_->setObjectName(QStringLiteral("rightRailContextNotice"));
+  context_notice_->setWordWrap(true);
+  context_layout->addWidget(context_notice_);
+  context_layout->addStretch(1);
+
+  agents_pane_ = new QWidget(sections_host_);
+  agents_pane_->setObjectName(QStringLiteral("rightRailAgentsPane"));
+  auto* agents_layout = new QVBoxLayout(agents_pane_);
+  agents_layout->setContentsMargins(12, 10, 12, 12);
+  agents_layout->setSpacing(8);
+  agents_pane_->setMinimumHeight(180);
+  AddSection(QStringLiteral("agents"), QStringLiteral("Agents"), agents_pane_);
+  QWidget* agents_content = agents_pane_;
+  agents_empty_ = RailLabel(agents_content, theme_,
+                            QStringLiteral("No delegated agents yet."), 12,
+                            QFont::Normal, theme_.text_secondary);
+  agents_empty_->setObjectName(QStringLiteral("rightRailAgentsEmpty"));
+  agents_layout->addWidget(agents_empty_);
+  agents_list_ = new QWidget(agents_content);
+  agents_list_->setObjectName(QStringLiteral("rightRailAgentsList"));
+  auto* agent_rows = new QVBoxLayout(agents_list_);
+  agent_rows->setContentsMargins(0, 0, 0, 0);
+  agent_rows->setSpacing(6);
+  agents_layout->addWidget(agents_list_);
+  agents_layout->addStretch(1);
+
+  todos_pane_ = new QWidget(sections_host_);
+  todos_pane_->setObjectName(QStringLiteral("rightRailTodosPane"));
+  auto* todos_layout = new QVBoxLayout(todos_pane_);
+  todos_layout->setContentsMargins(12, 10, 12, 12);
+  todos_layout->setSpacing(8);
+  todos_pane_->setMinimumHeight(180);
+  AddSection(QStringLiteral("todos"), QStringLiteral("Todo"), todos_pane_);
+  QWidget* todos_content = todos_pane_;
+  todos_summary_ = RailLabel(todos_content, theme_, QString(), 11,
+                             QFont::Normal, theme_.text_secondary);
+  todos_summary_->setObjectName(QStringLiteral("rightRailTodoSummary"));
+  todos_layout->addWidget(todos_summary_);
+  todos_empty_ = RailLabel(todos_content, theme_,
+                           QStringLiteral("No task list for this chat."), 12,
+                           QFont::Normal, theme_.text_secondary);
+  todos_empty_->setObjectName(QStringLiteral("rightRailTodosEmpty"));
+  todos_layout->addWidget(todos_empty_);
+  todos_list_ = new QWidget(todos_content);
+  todos_list_->setObjectName(QStringLiteral("rightRailTodosList"));
+  auto* todo_rows = new QVBoxLayout(todos_list_);
+  todo_rows->setContentsMargins(0, 0, 0, 0);
+  todo_rows->setSpacing(5);
+  todos_layout->addWidget(todos_list_);
+  todos_layout->addStretch(1);
+
+  timeline_pane_ = new QWidget(sections_host_);
+  timeline_pane_->setObjectName(QStringLiteral("rightRailTimelinePane"));
+  auto* timeline_layout = new QVBoxLayout(timeline_pane_);
+  timeline_layout->setContentsMargins(12, 10, 12, 12);
+  timeline_layout->setSpacing(8);
+  timeline_pane_->setMinimumHeight(240);
+  AddSection(QStringLiteral("timeline"), QStringLiteral("Timeline"),
+             timeline_pane_);
+  QWidget* timeline_content = timeline_pane_;
+  timeline_search_ = new QLineEdit(timeline_content);
+  timeline_search_->setObjectName(QStringLiteral("rightRailTimelineSearch"));
+  timeline_search_->setPlaceholderText(QStringLiteral("Search prompts"));
+  timeline_search_->setClearButtonEnabled(true);
+  timeline_layout->addWidget(timeline_search_);
+  timeline_empty_ =
+      RailLabel(timeline_content, theme_,
+                QStringLiteral("Prompts from this chat appear here."), 12,
+                QFont::Normal, theme_.text_secondary);
+  timeline_empty_->setObjectName(QStringLiteral("rightRailTimelineEmpty"));
+  timeline_layout->addWidget(timeline_empty_);
+  timeline_list_ = new QWidget(timeline_content);
+  timeline_list_->setObjectName(QStringLiteral("rightRailTimelineList"));
+  auto* timeline_rows = new QVBoxLayout(timeline_list_);
+  timeline_rows->setContentsMargins(0, 0, 0, 0);
+  timeline_rows->setSpacing(4);
+  timeline_layout->addWidget(timeline_list_);
+  timeline_layout->addStretch(1);
+  QObject::connect(timeline_search_, &QLineEdit::textChanged, timeline_search_,
+                   [this]() { RebuildTimelineRows(); });
+  AttachContextCompleter(timeline_search_, [this]() {
+    QStringList prompts;
+    for (const TimelineEntry& entry : timeline_entries_) {
+      if (!entry.preview.trimmed().isEmpty()) {
+        prompts.append(entry.preview.trimmed());
+      }
+      if (prompts.size() >= 200) {
+        break;
+      }
+    }
+    return prompts;
+  });
+
+  artifacts_pane_ = new QWidget(sections_host_);
+  artifacts_pane_->setObjectName(QStringLiteral("rightRailArtifactsPane"));
+  auto* artifacts_layout = new QVBoxLayout(artifacts_pane_);
+  artifacts_layout->setContentsMargins(12, 10, 12, 12);
+  artifacts_layout->setSpacing(8);
+  artifacts_pane_->setMinimumHeight(320);
+  AddSection(QStringLiteral("artifacts"), QStringLiteral("Outputs"),
+             artifacts_pane_);
+  QWidget* artifacts_content = artifacts_pane_;
+  artifacts_empty_ = RailLabel(
+      artifacts_content, theme_,
+      QStringLiteral("Artifacts and images from this chat appear here."), 12,
+      QFont::Normal, theme_.text_secondary);
+  artifacts_empty_->setObjectName(QStringLiteral("rightRailArtifactsEmpty"));
+  artifacts_layout->addWidget(artifacts_empty_);
+  artifacts_list_ = new QWidget(artifacts_content);
+  artifacts_list_->setObjectName(QStringLiteral("rightRailArtifactsList"));
+  auto* artifact_rows = new QVBoxLayout(artifacts_list_);
+  artifact_rows->setContentsMargins(0, 0, 0, 0);
+  artifact_rows->setSpacing(6);
+  artifacts_layout->addWidget(artifacts_list_);
+  artifact_preview_ = new QWidget(artifacts_content);
+  artifact_preview_->setObjectName(QStringLiteral("rightRailArtifactPreview"));
+  auto* preview_layout = new QVBoxLayout(artifact_preview_);
+  preview_layout->setContentsMargins(8, 8, 8, 8);
+  preview_layout->setSpacing(6);
+  artifact_preview_title_ = RailLabel(artifact_preview_, theme_, QString(), 11,
+                                      QFont::DemiBold, theme_.foreground);
+  artifact_preview_title_->setObjectName(
+      QStringLiteral("rightRailArtifactPreviewTitle"));
+  preview_layout->addWidget(artifact_preview_title_);
+
+  auto* version_row = new QWidget(artifact_preview_);
+  version_row->setObjectName(QStringLiteral("rightRailArtifactVersionRow"));
+  auto* version_layout = new QHBoxLayout(version_row);
+  version_layout->setContentsMargins(0, 0, 0, 0);
+  version_layout->setSpacing(4);
+  artifact_version_prev_ =
+      PreviewAction(version_row, QStringLiteral("‹"),
+                    QStringLiteral("rightRailArtifactVersionPrev"));
+  artifact_version_prev_->setFixedWidth(22);
+  version_layout->addWidget(artifact_version_prev_);
+  artifact_version_label_ = RailLabel(version_row, theme_, QString(), 10,
+                                      QFont::DemiBold, theme_.text_secondary);
+  artifact_version_label_->setObjectName(
+      QStringLiteral("rightRailArtifactVersionLabel"));
+  artifact_version_label_->setAlignment(Qt::AlignCenter);
+  version_layout->addWidget(artifact_version_label_, 1);
+  artifact_version_next_ =
+      PreviewAction(version_row, QStringLiteral("›"),
+                    QStringLiteral("rightRailArtifactVersionNext"));
+  artifact_version_next_->setFixedWidth(22);
+  version_layout->addWidget(artifact_version_next_);
+  preview_layout->addWidget(version_row);
+  version_row->hide();
+
+  artifact_preview_body_ = RailLabel(artifact_preview_, theme_, QString(), 11,
+                                     QFont::Normal, theme_.text_secondary);
+  artifact_preview_body_->setObjectName(
+      QStringLiteral("rightRailArtifactPreviewBody"));
+  artifact_preview_body_->setWordWrap(true);
+  artifact_preview_body_->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  preview_layout->addWidget(artifact_preview_body_);
+
+  artifact_preview_document_ = new QTextBrowser(artifact_preview_);
+  artifact_preview_document_->setObjectName(
+      QStringLiteral("rightRailArtifactPreviewDocument"));
+  artifact_preview_document_->setMinimumHeight(240);
+  artifact_preview_document_->setOpenExternalLinks(true);
+  preview_layout->addWidget(artifact_preview_document_);
+  artifact_preview_document_->hide();
+
+  artifact_preview_svg_ = new QSvgWidget(artifact_preview_);
+  artifact_preview_svg_->setObjectName(
+      QStringLiteral("rightRailArtifactPreviewSvg"));
+  artifact_preview_svg_->setMinimumHeight(220);
+  preview_layout->addWidget(artifact_preview_svg_);
+  artifact_preview_svg_->hide();
+
+  auto* action_row = new QWidget(artifact_preview_);
+  action_row->setObjectName(QStringLiteral("rightRailArtifactPreviewActions"));
+  auto* action_layout = new FlowLayout(action_row, 0, 4, 4);
+  artifact_preview_copy_ =
+      PreviewAction(action_row, QStringLiteral("Copy"),
+                    QStringLiteral("rightRailArtifactPreviewCopy"));
+  action_layout->addWidget(artifact_preview_copy_);
+  artifact_preview_save_ =
+      PreviewAction(action_row, QStringLiteral("Save…"),
+                    QStringLiteral("rightRailArtifactPreviewSave"));
+  action_layout->addWidget(artifact_preview_save_);
+  artifact_preview_source_ =
+      PreviewAction(action_row, QStringLiteral("Source"),
+                    QStringLiteral("rightRailArtifactPreviewSource"));
+  action_layout->addWidget(artifact_preview_source_);
+  artifact_preview_browser_ =
+      PreviewAction(action_row, QStringLiteral("Browser"),
+                    QStringLiteral("rightRailArtifactPreviewBrowser"));
+  action_layout->addWidget(artifact_preview_browser_);
+  artifact_preview_open_ =
+      PreviewAction(action_row, QStringLiteral("Open"),
+                    QStringLiteral("rightRailArtifactPreviewOpen"));
+  action_layout->addWidget(artifact_preview_open_);
+  preview_layout->addWidget(action_row);
+  artifact_preview_copy_->hide();
+  artifact_preview_save_->hide();
+  artifact_preview_source_->hide();
+  artifact_preview_browser_->hide();
+
+  QObject::connect(
+      artifact_version_prev_, &QPushButton::clicked, artifact_version_prev_,
+      [this]() { ShowArtifactVersion(preview_artifact_.version_index - 1); });
+  QObject::connect(
+      artifact_version_next_, &QPushButton::clicked, artifact_version_next_,
+      [this]() { ShowArtifactVersion(preview_artifact_.version_index + 1); });
+  QObject::connect(
+      artifact_preview_copy_, &QPushButton::clicked, artifact_preview_copy_,
+      [this]() {
+        const QString content = CurrentArtifactContent(preview_artifact_);
+        if (content.isEmpty()) {
+          return;
+        }
+        QGuiApplication::clipboard()->setText(content);
+        artifact_preview_copy_->setText(QStringLiteral("Copied"));
+        QTimer::singleShot(1200, this, [this]() {
+          if (artifact_preview_copy_ != nullptr) {
+            artifact_preview_copy_->setText(QStringLiteral("Copy"));
+          }
+        });
+      });
+  QObject::connect(
+      artifact_preview_save_, &QPushButton::clicked, artifact_preview_save_,
+      [this]() {
+        if (on_artifact_save == nullptr) {
+          return;
+        }
+        on_artifact_save(
+            preview_artifact_,
+            ArtifactDownloadName(RailArtifactKind(preview_artifact_.kind),
+                                 preview_artifact_.language,
+                                 preview_artifact_.label));
+      });
+  QObject::connect(artifact_preview_source_, &QPushButton::clicked,
+                   artifact_preview_source_, [this]() {
+                     artifact_show_source_ = !artifact_show_source_;
+                     RenderArtifactPreview();
+                   });
+  QObject::connect(artifact_preview_browser_, &QPushButton::clicked,
+                   artifact_preview_browser_, [this]() {
+                     const QString content =
+                         CurrentArtifactContent(preview_artifact_);
+                     if (!content.isEmpty()) {
+                       OpenArtifactHtmlInBrowser(content);
+                     }
+                   });
+  QObject::connect(
+      artifact_preview_open_, &QPushButton::clicked, artifact_preview_open_,
+      [this]() {
+        if (on_artifact_open && !preview_artifact_.value.isEmpty()) {
+          on_artifact_open(preview_artifact_);
+        }
+      });
+  artifact_preview_->hide();
+  artifacts_layout->addWidget(artifact_preview_);
+  artifacts_layout->addStretch(1);
+
+  project_root_ = QDir::homePath();
+  project_label_ = QStringLiteral("Home");
+  project_root_label_->setText(
+      QStringLiteral("Home\n%1").arg(QDir::toNativeSeparators(project_root_)));
+  git_root_label_->setText(
+      QStringLiteral("Home\n%1").arg(QDir::toNativeSeparators(project_root_)));
+
+  const QStringList collapsed_labels = {
+      QStringLiteral("F"), QStringLiteral("G"), QStringLiteral(">_"),
+      QStringLiteral("C"), QStringLiteral("A"), QStringLiteral("T"),
+      QStringLiteral("L"), QStringLiteral("O")};
+  for (std::size_t i = 0; i < sections_.size(); ++i) {
+    const Section& section = sections_[i];
+    auto* button = PreviewAction(
+        collapsed_bar_,
+        collapsed_labels.value(static_cast<int>(i), section.title.left(1)),
+        QStringLiteral("rightRailCollapsedTab%1").arg(i));
+    button->setFixedSize(32, 26);
+    button->setToolTip(section.title);
+    collapsed_layout->insertWidget(collapsed_layout->count() - 1, button);
+    const QString id = section.id;
+    QObject::connect(button, &QPushButton::clicked, button, [this, id]() {
+      ExpandSection(id);
+      if (on_collapsed_changed) {
+        on_collapsed_changed(false);
+      }
+    });
+  }
+
+  SetSectionExpanded(QStringLiteral("project"), true);
+  SetTheme(theme);
+  SetCollapsed(false);
+}
+
+RightRail::~RightRail() {
+  // Git jobs are child QProcesses. Disconnect them before killing: a finished
+  // signal emitted from the child-destruction path would otherwise call back
+  // into already-destroyed document widgets. The terminal owns its PTY and
+  // shuts it down from TerminalWidget's own destructor.
+  const QList<QProcess*> processes = findChildren<QProcess*>();
+  for (QProcess* process : processes) {
+    process->disconnect();
+    if (process->state() != QProcess::NotRunning) {
+      process->kill();
+      process->waitForFinished(300);
+    }
+  }
+}
+
+void RightRail::AddSection(const QString& id, const QString& title,
+                           QWidget* content) {
+  if (content == nullptr || sections_layout_ == nullptr) {
+    return;
+  }
+  auto* header = new QPushButton(content->parentWidget());
+  header->setObjectName(QStringLiteral("rightRailSection_%1").arg(id));
+  header->setProperty("rightRailSectionHeader", true);
+  header->setProperty("expanded", false);
+  header->setFlat(true);
+  header->setCursor(Qt::PointingHandCursor);
+  header->setText(QStringLiteral("\u25b8  %1").arg(title));
+  header->setFocusPolicy(Qt::NoFocus);
+  content->setProperty("rightRailSectionContent", true);
+  content->setVisible(false);
+  sections_layout_->addWidget(header);
+  sections_layout_->addWidget(content);
+  sections_.push_back(Section{id, title, header, content});
+  QObject::connect(header, &QPushButton::clicked, header, [this, id]() {
+    Section* section = FindSection(id);
+    if (section == nullptr) {
+      return;
+    }
+    const bool expanded = section->content->isVisible();
+    SetSectionExpanded(id, !expanded);
+  });
+}
+
+void RightRail::SetSectionExpanded(const QString& id, bool expanded) {
+  Section* section = FindSection(id);
+  if (section == nullptr || section->header == nullptr ||
+      section->content == nullptr) {
+    return;
+  }
+  section->header->setText(QStringLiteral("%1  %2").arg(
+      expanded ? QStringLiteral("\u25be") : QStringLiteral("\u25b8"),
+      section->title));
+  section->header->setProperty("expanded", expanded);
+  section->header->style()->unpolish(section->header);
+  section->header->style()->polish(section->header);
+  section->content->setVisible(expanded);
+  if (expanded && id == QStringLiteral("terminal")) {
+    EnsureTerminal();
+  }
+  if (expanded && sections_scroll_ != nullptr) {
+    QTimer::singleShot(0, this, [this, id]() {
+      Section* current = FindSection(id);
+      if (current != nullptr && current->header != nullptr) {
+        sections_scroll_->ensureWidgetVisible(current->header, 0, 8);
+      }
+    });
+  }
+}
+
+RightRail::Section* RightRail::FindSection(const QString& id) {
+  for (Section& section : sections_) {
+    if (section.id == id) {
+      return &section;
+    }
+  }
+  return nullptr;
+}
+
+void RightRail::ExpandSection(const QString& id) {
+  if (collapsed_) {
+    SetCollapsed(false);
+  }
+  SetSectionExpanded(id, true);
+}
+
+void RightRail::SetTheme(const Theme& theme) {
+  theme_ = theme;
+  setStyleSheet(
+      QStringLiteral(
+          "QWidget#rightRail { background: %1; border-left: 1px solid %2; }"
+          "QWidget#rightRailWorkspace, QWidget#rightRailHeader, "
+          "QWidget#rightRailSections { background: %1; }"
+          "QWidget#rightRailHeader { border-bottom: 1px solid %2; }"
+          "QLabel#rightRailTitle { color: %4; }"
+          "QScrollArea#rightRailSectionsScroll { background: %1; border: 0; }"
+          "QScrollArea#rightRailSectionsScroll > QWidget > QWidget { "
+          "background: %1; }"
+          "QPushButton[rightRailSectionHeader=\"true\"] { "
+          "text-align: left; padding: 8px 10px; border: 0; "
+          "border-bottom: 1px solid %2; background: %1; color: %3; "
+          "font-weight: 600; }"
+          "QPushButton[rightRailSectionHeader=\"true\"]:hover { "
+          "background: %7; color: %4; }"
+          "QPushButton[rightRailSectionHeader=\"true\"][expanded=\"true\"] "
+          "{ color: %4; background: %6; }"
+          "QWidget[rightRailSectionContent=\"true\"] { background: %1; "
+          "border-bottom: 1px solid %2; }"
+          "QPushButton[railAction=\"true\"] { background: transparent; "
+          "color: %3; border: 1px solid %2; border-radius: 5px; "
+          "padding: 4px 7px; }"
+          "QPushButton[railAction=\"true\"]:hover { color: %4; "
+          "background: %7; }"
+          "QPushButton[railAction=\"true\"]:disabled { color: %2; "
+          "border-color: %2; }"
+          "QPushButton[railTimelineRow=\"true\"] { text-align: left; "
+          "padding: 0; border: 1px solid transparent; border-radius: 6px; "
+          "color: %4; background: transparent; }"
+          "QPushButton[railTimelineRow=\"true\"]:hover { background: %7; }"
+          "QPushButton[railTimelineRow=\"true\"]:focus, "
+          "QPushButton[railTimelineRow=\"true\"]:pressed, "
+          "QPushButton[railTimelineRow=\"true\"]:checked { "
+          "background: %6; border-color: %5; color: %4; }"
+          "QPushButton[railTimelineRow=\"true\"] QLabel { "
+          "background: transparent; }"
+          "QPushButton[railTimelineRow=\"true\"] "
+          "QLabel[railTimelinePreview=\"true\"] { color: %4; }"
+          "QPushButton[railTimelineRow=\"true\"] "
+          "QLabel[railTimelineTime=\"true\"] { color: %3; }"
+          "QPushButton[railTimelineRow=\"true\"]:focus "
+          "QLabel[railTimelinePreview=\"true\"], "
+          "QPushButton[railTimelineRow=\"true\"]:pressed "
+          "QLabel[railTimelinePreview=\"true\"] { color: %4; }"
+          "QPushButton[railArtifactCard=\"true\"] { text-align: left; "
+          "padding: 7px 8px; border: 1px solid %2; border-radius: 6px; "
+          "color: %3; background: %6; }"
+          "QPushButton[railArtifactCard=\"true\"]:hover { background: %7; }"
+          "QProgressBar { background: %6; border: 0; border-radius: 3px; }"
+          "QProgressBar::chunk { background: %5; border-radius: 3px; }"
+          "QLineEdit#rightRailTimelineSearch, "
+          "QLineEdit#rightRailProjectSearch { background: %6; color: %4; "
+          "border: 1px solid %2; border-radius: 5px; padding: 4px 6px; }"
+          "QPlainTextEdit#rightRailGitStatus, "
+          "QPlainTextEdit#rightRailGitMessage, "
+          "QTextBrowser#rightRailProjectPreview, "
+          "QTreeView#rightRailProjectTree { background: %6; color: %4; "
+          "border: 1px solid %2; border-radius: 5px; }"
+          "QSplitter#rightRailProjectSplit::handle { background: %2; }"
+          "QWidget#rightRailCollapsedBar { background: %1; "
+          "border-left: 1px solid %2; }"
+          "QPushButton#rightRailCollapse, QPushButton#rightRailExpand { "
+          "background: transparent; color: %3; border: 0; padding: 0; }"
+          "QPushButton#rightRailCollapse:hover, "
+          "QPushButton#rightRailExpand:hover { background: %7; "
+          "border-radius: 5px; }"
+          "QWidget#rightRailCollapsedBar QPushButton:hover { "
+          "background: %7; border-radius: 5px; }")
+          .arg(theme.surface.name(), theme.stroke.name(),
+               theme.text_secondary.name(), theme.foreground.name(),
+               theme.accent.name(), theme.code_background.name(),
+               theme.hover.name()));
+  if (auto* title = findChild<QLabel*>(QStringLiteral("rightRailTitle"))) {
+    title->setFont(theme_.UiFont(12, QFont::DemiBold));
+  }
+  for (Section& section : sections_) {
+    if (section.header != nullptr) {
+      section.header->setFont(theme_.UiFont(11, QFont::DemiBold));
+    }
+  }
+  for (QLabel* label : findChildren<QLabel*>()) {
+    StyleRailLabel(label, theme_);
+  }
+  if (timeline_search_ != nullptr) {
+    timeline_search_->setFont(theme_.UiFont(11, QFont::Normal));
+  }
+  for (QPushButton* button : findChildren<QPushButton*>()) {
+    if (auto* timeline_row = dynamic_cast<TimelineRowButton*>(button)) {
+      timeline_row->SetTheme(theme_);
+      continue;
+    }
+    if (button->property("railArtifactCard").toBool() ||
+        button->property("railAction").toBool()) {
+      button->setFont(theme_.UiFont(11, QFont::Normal));
+    }
+  }
+  if (git_status_ != nullptr) {
+    git_status_->setFont(theme_.MonoFont(10, QFont::Normal));
+  }
+  if (git_message_ != nullptr) {
+    git_message_->setFont(theme_.UiFont(11, QFont::Normal));
+  }
+  if (terminal_ != nullptr) {
+    terminal_->SetTheme(theme_);
+  }
+  if (project_tree_ != nullptr) {
+    project_tree_->setFont(theme_.UiFont(11, QFont::Normal));
+  }
+  if (project_preview_ != nullptr) {
+    project_preview_->setFont(theme_.UiFont(11, QFont::Normal));
+  }
+  if (!project_preview_path_.isEmpty()) {
+    ShowProjectPreview(project_preview_path_);
+  }
+  if (preview_artifact_.generated && !preview_artifact_.versions.empty() &&
+      artifact_preview_ != nullptr && artifact_preview_->isVisible()) {
+    RenderArtifactPreview();
+  }
+  RebuildTimelineRows();
+  update();
+}
+
+void RightRail::SetCollapsed(bool collapsed) {
+  collapsed_ = collapsed;
+  if (workspace_ != nullptr) {
+    workspace_->setVisible(!collapsed_);
+  }
+  if (collapsed_bar_ != nullptr) {
+    collapsed_bar_->setVisible(collapsed_);
+  }
+  setMinimumWidth(collapsed_ ? 44 : 260);
+  setMaximumWidth(collapsed_ ? 44 : 800);
+  updateGeometry();
+}
+
+void RightRail::SetProjectContext(const QString& project_id,
+                                  const QString& label, const QString& root) {
+  QString resolved = root.trimmed();
+  if (resolved.isEmpty() || !QFileInfo(resolved).isDir()) {
+    resolved = QDir::homePath();
+  }
+  resolved = QFileInfo(resolved).absoluteFilePath();
+  if (project_id == project_id_ && label == project_label_ &&
+      resolved == project_root_) {
+    if (git_status_ != nullptr && git_status_->toPlainText().isEmpty()) {
+      RefreshGitStatus();
+    }
+    return;
+  }
+  const bool root_changed = resolved != project_root_;
+  project_id_ = project_id;
+  project_label_ = label;
+  project_root_ = resolved;
+  if (root_changed) {
+    ++ai_generation_;
+    ai_generating_ = false;
+    if (git_generate_ != nullptr) {
+      git_generate_->setEnabled(true);
+    }
+  }
+  SyncProjectViews();
+  if (root_changed && terminal_ != nullptr) {
+    terminal_->SetWorkingDirectory(project_root_);
+    if (terminal_->IsRunning()) {
+      RestartTerminal();
+    }
+  }
+}
+
+void RightRail::SyncProjectViews() {
+  const QString label =
+      project_label_.isEmpty() ? QStringLiteral("Home") : project_label_;
+  const QString path = QDir::toNativeSeparators(project_root_);
+  if (project_root_label_ != nullptr) {
+    project_root_label_->setText(QStringLiteral("%1\n%2").arg(label, path));
+    project_root_label_->setToolTip(project_root_);
+  }
+  if (git_root_label_ != nullptr) {
+    git_root_label_->setText(QStringLiteral("%1\n%2").arg(label, path));
+    git_root_label_->setToolTip(project_root_);
+  }
+  if (project_model_ != nullptr && project_tree_ != nullptr) {
+    const QModelIndex root_index = project_model_->setRootPath(project_root_);
+    project_tree_->setRootIndex(root_index);
+  }
+  if (project_preview_ != nullptr) {
+    project_preview_->clear();
+    project_preview_path_.clear();
+  }
+  RefreshGitStatus();
+}
+
+void RightRail::ShowProjectPreview(const QString& path) {
+  if (project_preview_ == nullptr) {
+    return;
+  }
+  project_preview_path_ = path;
+  const QFileInfo info(path);
+  if (!info.isFile()) {
+    return;
+  }
+  if (info.size() > 512 * 1024) {
+    project_preview_->document()->setBaseUrl(QUrl());
+    project_preview_->setPlainText(
+        QStringLiteral("Preview unavailable · file is larger than 512 KB."));
+    return;
+  }
+  QFile file(path);
+  if (!file.open(QIODevice::ReadOnly)) {
+    project_preview_->document()->setBaseUrl(QUrl());
+    project_preview_->setPlainText(QStringLiteral("Unable to read file."));
+    return;
+  }
+  const QByteArray bytes = file.readAll();
+  const QString suffix = info.suffix().toLower();
+  const bool image =
+      suffix == QStringLiteral("png") || suffix == QStringLiteral("jpg") ||
+      suffix == QStringLiteral("jpeg") || suffix == QStringLiteral("gif") ||
+      suffix == QStringLiteral("webp") || suffix == QStringLiteral("bmp") ||
+      suffix == QStringLiteral("svg") || suffix == QStringLiteral("ico");
+  if (bytes.contains('\0') && !image) {
+    project_preview_->document()->setBaseUrl(QUrl());
+    project_preview_->setPlainText(
+        QStringLiteral("Preview unavailable · binary file."));
+    return;
+  }
+  const QUrl base =
+      QUrl::fromLocalFile(info.absolutePath() + QStringLiteral("/"));
+  const QString text = QString::fromUtf8(bytes);
+  const bool markdown =
+      suffix == QStringLiteral("md") || suffix == QStringLiteral("markdown") ||
+      suffix == QStringLiteral("mdown") || suffix == QStringLiteral("mkd");
+  const bool html = suffix == QStringLiteral("html") ||
+                    suffix == QStringLiteral("htm") ||
+                    suffix == QStringLiteral("xhtml");
+  if (image) {
+    project_preview_->document()->setBaseUrl(base);
+    project_preview_->document()->setDefaultFont(
+        theme_.UiFont(13, QFont::Normal));
+    project_preview_->setHtml(
+        QStringLiteral(
+            "<html><body style=\"margin:12px; background:%1;\">"
+            "<img src=\"%2\" style=\"max-width:100%;\"></body></html>")
+            .arg(theme_.surface.name(),
+                 QUrl::fromLocalFile(info.absoluteFilePath()).toString()));
+    return;
+  }
+  if (markdown || html) {
+    project_preview_->document()->setBaseUrl(base);
+    if (markdown) {
+      project_preview_->setMarkdown(text);
+    } else {
+      project_preview_->setHtml(text);
+    }
+    StyleMarkdownPreview(project_preview_, theme_);
+    project_preview_->moveCursor(QTextCursor::Start);
+    return;
+  }
+  const bool monospace =
+      suffix == QStringLiteral("cc") || suffix == QStringLiteral("cpp") ||
+      suffix == QStringLiteral("h") || suffix == QStringLiteral("hpp") ||
+      suffix == QStringLiteral("py") || suffix == QStringLiteral("js") ||
+      suffix == QStringLiteral("ts") || suffix == QStringLiteral("tsx") ||
+      suffix == QStringLiteral("jsx") || suffix == QStringLiteral("json") ||
+      suffix == QStringLiteral("yaml") || suffix == QStringLiteral("yml") ||
+      suffix == QStringLiteral("toml") || suffix == QStringLiteral("sh") ||
+      suffix == QStringLiteral("zsh") || suffix == QStringLiteral("bash") ||
+      suffix == QStringLiteral("css") || suffix == QStringLiteral("scss") ||
+      suffix == QStringLiteral("xml") || suffix == QStringLiteral("cmake") ||
+      suffix == QStringLiteral("txt") || suffix == QStringLiteral("log");
+  project_preview_->document()->setBaseUrl(base);
+  project_preview_->document()->setDefaultFont(
+      monospace ? theme_.MonoFont(12, QFont::Normal)
+                : theme_.UiFont(13, QFont::Normal));
+  project_preview_->document()->setDocumentMargin(12);
+  project_preview_->setPlainText(text);
+  project_preview_->moveCursor(QTextCursor::Start);
+}
+
+void RightRail::RefreshGitStatus() {
+  if (git_status_ == nullptr) {
+    return;
+  }
+  if (project_root_.isEmpty()) {
+    git_status_->setPlainText(QStringLiteral("No project selected."));
+    return;
+  }
+  const QString root = project_root_;
+  git_status_->setPlainText(QStringLiteral("Checking git status…"));
+  RunGit({QStringLiteral("status"), QStringLiteral("--short"),
+          QStringLiteral("--branch")},
+         [this, root](bool ok, const QString& output) {
+           if (project_root_ != root || git_status_ == nullptr) {
+             return;
+           }
+           if (!ok) {
+             git_status_->setPlainText(
+                 output.isEmpty() ? QStringLiteral("Not a git repository.")
+                                  : output);
+             if (git_commit_ != nullptr) {
+               git_commit_->setEnabled(false);
+             }
+             if (git_push_ != nullptr) {
+               git_push_->setEnabled(false);
+             }
+             return;
+           }
+           git_status_->setPlainText(output.isEmpty()
+                                         ? QStringLiteral("Working tree clean.")
+                                         : output);
+           if (git_commit_ != nullptr) {
+             git_commit_->setEnabled(true);
+           }
+           if (git_push_ != nullptr) {
+             git_push_->setEnabled(true);
+           }
+           if (git_generate_ != nullptr && !ai_generating_) {
+             git_generate_->setEnabled(true);
+           }
+         });
+}
+
+void RightRail::RunGit(
+    const QStringList& arguments,
+    std::function<void(bool ok, const QString& output)> done) {
+  if (project_root_.isEmpty()) {
+    done(false, QStringLiteral("No project selected."));
+    return;
+  }
+  auto* process = new QProcess(this);
+  process->setWorkingDirectory(project_root_);
+  process->setProcessChannelMode(QProcess::MergedChannels);
+  auto completed = std::make_shared<bool>(false);
+  auto finish = [process, done, completed](bool ok, const QString& output) {
+    if (*completed) {
+      return;
+    }
+    *completed = true;
+    done(ok, output);
+    process->deleteLater();
+  };
+  QObject::connect(
+      process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+      process, [process, finish](int code, QProcess::ExitStatus status) {
+        finish(
+            status == QProcess::NormalExit && code == 0,
+            QString::fromLocal8Bit(process->readAllStandardOutput()).trimmed());
+      });
+  QObject::connect(process, &QProcess::errorOccurred, process,
+                   [process, finish](QProcess::ProcessError error) {
+                     if (error != QProcess::FailedToStart) {
+                       return;
+                     }
+                     finish(false, QStringLiteral("Unable to run git: %1")
+                                       .arg(process->errorString()));
+                   });
+  process->start(QStringLiteral("git"), arguments);
+}
+
+void RightRail::CommitGit() {
+  if (git_message_ == nullptr || git_message_status_ == nullptr) {
+    return;
+  }
+  const QString message = git_message_->toPlainText().trimmed();
+  if (message.isEmpty()) {
+    git_message_status_->setText(QStringLiteral("Enter a commit message."));
+    return;
+  }
+  const QString root = project_root_;
+  git_message_status_->setText(QStringLiteral("Staging…"));
+  RunGit({QStringLiteral("add"), QStringLiteral("-A")},
+         [this, message, root](bool staged, const QString& stage_output) {
+           if (project_root_ != root || git_message_status_ == nullptr) {
+             return;
+           }
+           if (!staged) {
+             git_message_status_->setText(stage_output);
+             return;
+           }
+           git_message_status_->setText(QStringLiteral("Committing…"));
+           RunGit(
+               {QStringLiteral("commit"), QStringLiteral("-m"), message},
+               [this, root](bool committed, const QString& output) {
+                 if (project_root_ != root || git_message_status_ == nullptr) {
+                   return;
+                 }
+                 if (!committed) {
+                   git_message_status_->setText(output);
+                   return;
+                 }
+                 git_message_->clear();
+                 git_message_status_->setText(QStringLiteral("Committed."));
+                 RefreshGitStatus();
+               });
+         });
+}
+
+void RightRail::GenerateCommitMessage() {
+  if (git_message_status_ == nullptr || git_generate_ == nullptr) {
+    return;
+  }
+  if (ai_generating_) {
+    return;
+  }
+  if (!on_generate_commit_message) {
+    git_message_status_->setText(
+        QStringLiteral("AI generation is unavailable."));
+    return;
+  }
+  const QString root = project_root_;
+  if (root.isEmpty()) {
+    git_message_status_->setText(QStringLiteral("No project selected."));
+    return;
+  }
+  const QString avoid = git_message_ == nullptr
+                            ? QString()
+                            : git_message_->toPlainText().trimmed();
+  const quint64 generation = ++ai_generation_;
+  ai_generating_ = true;
+  git_generate_->setEnabled(false);
+  git_message_status_->setText(QStringLiteral("Reading staged changes…"));
+  GatherCommitContext(root, [this, root, generation, avoid](
+                                bool ok, const QString& diff,
+                                const QString& recent_commits,
+                                const QString& error) {
+    if (project_root_ != root || generation != ai_generation_) {
+      return;
+    }
+    if (!ok) {
+      FinishCommitGeneration();
+      if (git_message_status_ != nullptr) {
+        git_message_status_->setText(
+            error.isEmpty() ? QStringLiteral("Unable to read git diff.")
+                            : error);
+      }
+      return;
+    }
+    if (diff.trimmed().isEmpty()) {
+      FinishCommitGeneration();
+      if (git_message_status_ != nullptr) {
+        git_message_status_->setText(QStringLiteral("No changes to describe."));
+      }
+      return;
+    }
+    if (git_message_status_ != nullptr) {
+      git_message_status_->setText(QStringLiteral("Generating…"));
+    }
+    on_generate_commit_message(
+        diff, recent_commits, avoid,
+        [this, root, generation](const QString& text_in,
+                                 const QString& error_in) {
+          if (project_root_ != root || generation != ai_generation_) {
+            return;
+          }
+          FinishCommitGeneration();
+          const QString text = text_in.trimmed();
+          const QString error = error_in.trimmed();
+          if (git_message_status_ == nullptr) {
+            return;
+          }
+          if (!error.isEmpty()) {
+            git_message_status_->setText(
+                QStringLiteral("AI generation failed: %1").arg(error));
+            return;
+          }
+          if (text.isEmpty()) {
+            git_message_status_->setText(
+                QStringLiteral("No commit message returned."));
+            return;
+          }
+          if (git_message_ != nullptr) {
+            git_message_->setPlainText(text);
+          }
+          git_message_status_->setText(
+              QStringLiteral("Generated · review and commit."));
+        });
+  });
+}
+
+void RightRail::GatherCommitContext(
+    const QString& root,
+    std::function<void(bool ok, const QString& diff,
+                       const QString& recent_commits, const QString& error)>
+        done) {
+  auto after_diff = [this, root, done](bool ok, const QString& diff) {
+    if (project_root_ != root) {
+      return;
+    }
+    if (!ok) {
+      done(false, QString(), QString(),
+           diff.isEmpty() ? QStringLiteral("Unable to read git diff.") : diff);
+      return;
+    }
+    QString context = diff;
+    RunGit(
+        {QStringLiteral("ls-files"), QStringLiteral("--others"),
+         QStringLiteral("--exclude-standard")},
+        [this, root, done, context](bool, const QString& untracked) mutable {
+          if (project_root_ != root) {
+            return;
+          }
+          if (!untracked.trimmed().isEmpty()) {
+            context += QStringLiteral("\n# Untracked files:\n");
+            context += untracked;
+            context += QChar('\n');
+          }
+          RunGit(
+              {QStringLiteral("log"), QStringLiteral("-n"),
+               QStringLiteral("10"), QStringLiteral("--pretty=format:%s")},
+              [this, root, done, context](bool, const QString& recent) mutable {
+                if (project_root_ != root) {
+                  return;
+                }
+                constexpr int kDiffMaxChars = 120000;
+                if (context.size() > kDiffMaxChars) {
+                  const int omitted =
+                      static_cast<int>(context.size()) - kDiffMaxChars;
+                  context = context.left(kDiffMaxChars);
+                  context +=
+                      QStringLiteral("\n# diff truncated (%1 chars omitted)\n")
+                          .arg(omitted);
+                }
+                done(true, context, recent.trimmed(), QString());
+              });
+        });
+  };
+  RunGit({QStringLiteral("diff"), QStringLiteral("--cached"),
+          QStringLiteral("--name-only")},
+         [this, root, done, after_diff](bool listed,
+                                        const QString& staged) mutable {
+           if (project_root_ != root) {
+             return;
+           }
+           if (listed && !staged.trimmed().isEmpty()) {
+             RunGit({QStringLiteral("diff"), QStringLiteral("--cached")},
+                    after_diff);
+             return;
+           }
+           RunGit({QStringLiteral("diff"), QStringLiteral("HEAD")},
+                  [this, root, done, after_diff](bool ok,
+                                                 const QString& diff) mutable {
+                    if (project_root_ != root) {
+                      return;
+                    }
+                    if (ok) {
+                      after_diff(true, diff);
+                      return;
+                    }
+                    RunGit({QStringLiteral("diff")}, after_diff);
+                  });
+         });
+}
+
+void RightRail::FinishCommitGeneration() {
+  ai_generating_ = false;
+  if (git_generate_ != nullptr) {
+    git_generate_->setEnabled(true);
+  }
+}
+
+void RightRail::PushGit() {
+  if (git_message_status_ == nullptr) {
+    return;
+  }
+  const QString root = project_root_;
+  const QString message = git_message_ == nullptr
+                              ? QString()
+                              : git_message_->toPlainText().trimmed();
+  const auto push = [this, root]() {
+    git_message_status_->setText(QStringLiteral("Pushing…"));
+    RunGit(
+        {QStringLiteral("push")}, [this, root](bool ok, const QString& output) {
+          if (project_root_ != root || git_message_status_ == nullptr) {
+            return;
+          }
+          git_message_status_->setText(ok ? QStringLiteral("Pushed.") : output);
+          if (ok) {
+            RefreshGitStatus();
+          }
+        });
+  };
+  if (message.isEmpty()) {
+    push();
+    return;
+  }
+  git_message_status_->setText(QStringLiteral("Committing…"));
+  RunGit({QStringLiteral("add"), QStringLiteral("-A")},
+         [this, message, root, push](bool staged, const QString& output) {
+           if (project_root_ != root || git_message_status_ == nullptr) {
+             return;
+           }
+           if (!staged) {
+             git_message_status_->setText(output);
+             return;
+           }
+           RunGit(
+               {QStringLiteral("commit"), QStringLiteral("-m"), message},
+               [this, root, push](bool committed, const QString& text) {
+                 if (project_root_ != root || git_message_status_ == nullptr) {
+                   return;
+                 }
+                 if (!committed) {
+                   git_message_status_->setText(text);
+                   return;
+                 }
+                 if (git_message_ != nullptr) {
+                   git_message_->clear();
+                 }
+                 push();
+               });
+         });
+}
+
+void RightRail::EnsureTerminal() {
+  if (terminal_ == nullptr) {
+    return;
+  }
+  const QString cwd =
+      QFileInfo(project_root_).isDir() ? project_root_ : QDir::homePath();
+  terminal_->SetWorkingDirectory(cwd);
+  if (!terminal_->IsRunning()) {
+    terminal_->Start();
+  }
+}
+
+void RightRail::RestartTerminal() {
+  if (terminal_ == nullptr) {
+    return;
+  }
+  const QString cwd =
+      QFileInfo(project_root_).isDir() ? project_root_ : QDir::homePath();
+  terminal_->SetWorkingDirectory(cwd);
+  terminal_->Restart();
+}
+
+void RightRail::RunTerminalCommandForTest(const QString& command) {
+  EnsureTerminal();
+  if (terminal_ == nullptr) {
+    return;
+  }
+  terminal_->RunCommandForTest(command);
+}
+
+void RightRail::RebuildContext(const ProfileSnapshot& snapshot) {
+  const SessionUsage& usage = snapshot.usage;
+  context_session_->setText(
+      snapshot.selected_session_id.isEmpty()
+          ? QStringLiteral("No session selected")
+          : QStringLiteral("Session · %1").arg(snapshot.selected_session_id));
+  int total_messages = 0;
+  for (const ChatMessage& message : snapshot.messages) {
+    if (!message.blocks.empty() || !message.reasoning.isEmpty()) {
+      ++total_messages;
+    }
+  }
+  if (usage.context_max > 0) {
+    const int percent =
+        usage.context_percent > 0
+            ? usage.context_percent
+            : static_cast<int>(std::min<qint64>(
+                  100, (usage.context_used * 100 + usage.context_max / 2) /
+                           usage.context_max));
+    context_summary_->setText(QStringLiteral("%1 / %2 tokens · %3%")
+                                  .arg(CompactUsageTokens(usage.context_used),
+                                       CompactUsageTokens(usage.context_max))
+                                  .arg(percent));
+    context_bar_->setValue(std::max(0, std::min(100, percent)));
+    context_bar_->setVisible(true);
+  } else {
+    context_summary_->setText(QStringLiteral("Context usage has not arrived."));
+    context_bar_->setVisible(false);
+  }
+  QString detail = QStringLiteral("%1 messages").arg(total_messages);
+  if (!snapshot.model.isEmpty()) {
+    detail += QStringLiteral(" · %1").arg(snapshot.model);
+  }
+  if (!snapshot.reasoning_effort.isEmpty()) {
+    detail += QStringLiteral(" · %1 reasoning").arg(snapshot.reasoning_effort);
+  }
+  if (usage.total > 0) {
+    detail += QStringLiteral(" · %1 total tokens")
+                  .arg(CompactUsageTokens(usage.total));
+  }
+  context_detail_->setText(detail);
+  context_control_->setText(snapshot.session_control_summary.trimmed());
+  context_control_->setVisible(
+      !snapshot.session_control_summary.trimmed().isEmpty());
+  const GatewayNotice* latest = nullptr;
+  for (const GatewayNotice& notice : snapshot.gateway_notices) {
+    if (latest == nullptr || notice.serial >= latest->serial) {
+      latest = &notice;
+    }
+  }
+  if (latest == nullptr) {
+    context_notice_->clear();
+    context_notice_->setVisible(false);
+  } else {
+    context_notice_->setText(QStringLiteral("%1 · %2").arg(
+        GatewayNoticeTitle(latest->level), GatewayNoticeLine(*latest)));
+    context_notice_->setVisible(true);
+  }
+}
+
+void RightRail::RebuildAgents(const ProfileSnapshot& snapshot) {
+  auto* layout = qobject_cast<QVBoxLayout*>(agents_list_->layout());
+  if (layout == nullptr) {
+    return;
+  }
+  ClearLayout(layout);
+  const auto ordered = BuildSubagentTree(snapshot.subagents);
+  agents_empty_->setVisible(ordered.empty());
+  for (const SubagentProgress* agent : ordered) {
+    const int depth = SubagentDepth(agent->id, snapshot.subagents);
+    QString text = QString(QStringLiteral("  ").repeated(depth)) +
+                   SubagentStatusText(agent->status) + QStringLiteral(" · ") +
+                   agent->goal;
+    if (agent->task_count > 1) {
+      text += QStringLiteral(" (%1/%2)")
+                  .arg(std::min(agent->task_index, agent->task_count))
+                  .arg(agent->task_count);
+    }
+    if (agent->duration_seconds > 0) {
+      text += QStringLiteral(" · %1").arg(
+          FormatSubagentDuration(agent->duration_seconds));
+    }
+    auto* row =
+        RailLabel(agents_list_, theme_, text, 11, QFont::Normal,
+                  SubagentIsTerminal(agent->status) ? theme_.text_secondary
+                                                    : theme_.foreground);
+    row->setObjectName(QStringLiteral("rightRailAgent_") + agent->id);
+    layout->addWidget(row);
+  }
+}
+
+void RightRail::RebuildTodos(const ProfileSnapshot& snapshot) {
+  auto* layout = qobject_cast<QVBoxLayout*>(todos_list_->layout());
+  if (layout == nullptr) {
+    return;
+  }
+  ClearLayout(layout);
+  todos_empty_->setVisible(snapshot.todos.empty());
+  todos_summary_->setVisible(!snapshot.todos.empty());
+  todos_summary_->setText(TodoSummaryText(snapshot.todos));
+  for (std::size_t index = 0; index < snapshot.todos.size(); ++index) {
+    const TodoItem& item = snapshot.todos[index];
+    QString text = QStringLiteral("  ").repeated(
+                       std::min(16, TodoDepth(item, snapshot.todos))) +
+                   TodoStatusMarker(item.status) + QStringLiteral(" ") +
+                   item.content;
+    auto* row = RailLabel(todos_list_, theme_, text, 11, QFont::Normal,
+                          item.status == QStringLiteral("completed") ||
+                                  item.status == QStringLiteral("cancelled")
+                              ? theme_.text_secondary
+                              : theme_.foreground);
+    row->setObjectName(QStringLiteral("rightRailTodo_") +
+                       (item.id.isEmpty() ? QString::number(index) : item.id));
+    row->setToolTip(item.status);
+    layout->addWidget(row);
+  }
+}
+
+void RightRail::RebuildTimeline(const ProfileSnapshot& snapshot) {
+  timeline_entries_ = CollectTimelineEntries(snapshot.messages);
+  RebuildTimelineRows();
+}
+
+void RightRail::RebuildTimelineRows() {
+  auto* layout = qobject_cast<QVBoxLayout*>(timeline_list_->layout());
+  if (layout == nullptr) {
+    return;
+  }
+  ClearLayout(layout);
+  const QString query = timeline_search_ == nullptr
+                            ? QString()
+                            : timeline_search_->text().trimmed();
+  int shown = 0;
+  for (const TimelineEntry& entry : timeline_entries_) {
+    if (!query.isEmpty() &&
+        !entry.preview.contains(query, Qt::CaseInsensitive)) {
+      continue;
+    }
+    auto* button = new TimelineRowButton(entry, shown, timeline_list_);
+    button->SetTheme(theme_);
+    const qint64 row_id = entry.row_id;
+    QObject::connect(button, &QPushButton::clicked, button, [this, row_id]() {
+      if (on_timeline_open) {
+        on_timeline_open(row_id);
+      }
+    });
+    layout->addWidget(button);
+    ++shown;
+  }
+  timeline_empty_->setVisible(shown == 0);
+  timeline_empty_->setText(
+      timeline_entries_.empty()
+          ? QStringLiteral("Prompts from this chat appear here.")
+          : QStringLiteral("No prompts match this search."));
+}
+
+void RightRail::RestoreArtifactScroll(int pane_value, int document_value,
+                                      quint64 generation) {
+  const auto apply = [this, pane_value, document_value](bool only_if_zero) {
+    if (sections_scroll_ != nullptr) {
+      QScrollBar* bar = sections_scroll_->verticalScrollBar();
+      if (!only_if_zero || (pane_value > 0 && bar->value() == 0)) {
+        bar->setValue(pane_value);
+      }
+    }
+    if (artifact_preview_document_ != nullptr &&
+        artifact_preview_document_->isVisible()) {
+      QScrollBar* bar = artifact_preview_document_->verticalScrollBar();
+      if (!only_if_zero || (document_value > 0 && bar->value() == 0)) {
+        bar->setValue(document_value);
+      }
+    }
+  };
+  QTimer::singleShot(0, this, [this, generation, apply]() {
+    if (generation == artifact_scroll_generation_) {
+      apply(false);
+    }
+  });
+  for (int delay : {16, 100, 300}) {
+    QTimer::singleShot(delay, this, [this, generation, apply]() {
+      if (generation == artifact_scroll_generation_) {
+        apply(true);
+      }
+    });
+  }
+}
+
+void RightRail::RebuildArtifacts(const ProfileSnapshot& snapshot) {
+  auto* layout = qobject_cast<QVBoxLayout*>(artifacts_list_->layout());
+  if (layout == nullptr) {
+    return;
+  }
+  const int pane_scroll = sections_scroll_ != nullptr
+                              ? sections_scroll_->verticalScrollBar()->value()
+                              : 0;
+  const int document_scroll =
+      artifact_preview_document_ != nullptr
+          ? artifact_preview_document_->verticalScrollBar()->value()
+          : 0;
+  const std::vector<SessionArtifact> artifacts =
+      CollectSessionArtifacts(snapshot.messages);
+  const QString render_signature = ArtifactRenderSignature(artifacts, snapshot);
+  if (artifacts_rendered_ && render_signature == artifact_render_signature_) {
+    return;
+  }
+  artifacts_rendered_ = true;
+  artifact_render_signature_ = render_signature;
+  const quint64 scroll_generation = ++artifact_scroll_generation_;
+  ClearLayout(layout);
+  artifacts_empty_->setVisible(artifacts.empty());
+  artifact_home_ = snapshot.home;
+  const SessionArtifact* preview_match = nullptr;
+  for (const SessionArtifact& artifact : artifacts) {
+    if (preview_artifact_.generated) {
+      if (artifact.generated && artifact.id == preview_artifact_.id) {
+        preview_match = &artifact;
+      }
+    } else if (!artifact.generated &&
+               artifact.value == preview_artifact_.value) {
+      preview_match = &artifact;
+    }
+  }
+  if (preview_match == nullptr) {
+    CloseArtifactPreview();
+  } else if (preview_artifact_.generated) {
+    const int index = preview_artifact_.version_index;
+    preview_artifact_ = *preview_match;
+    preview_artifact_.version_index =
+        preview_artifact_.versions.empty()
+            ? 0
+            : std::max(0,
+                       std::min(index, static_cast<int>(
+                                           preview_artifact_.versions.size()) -
+                                           1));
+    artifact_preview_title_->setText(preview_artifact_.label);
+    RenderArtifactPreview();
+  }
+  for (std::size_t index = 0; index < artifacts.size(); ++index) {
+    const SessionArtifact artifact = artifacts[index];
+    const QString detail = artifact.generated
+                               ? QStringLiteral("%1 · %2 version(s)")
+                                     .arg(artifact.language)
+                                     .arg(artifact.versions.size())
+                               : (QFileInfo(artifact.value).fileName().isEmpty()
+                                      ? artifact.value
+                                      : QFileInfo(artifact.value).fileName());
+    const QString label = QStringLiteral("%1\n%2").arg(artifact.label, detail);
+    auto* button = new QPushButton(label, artifacts_list_);
+    button->setObjectName(
+        QStringLiteral("rightRailArtifact_%1").arg(static_cast<int>(index)));
+    button->setProperty("railArtifactCard", true);
+    button->setFlat(true);
+    button->setCursor(Qt::PointingHandCursor);
+    button->setFont(theme_.UiFont(11, QFont::Normal));
+    button->setToolTip(
+        artifact.generated
+            ? QStringLiteral("%1 artifact: %2")
+                  .arg(artifact.kind, artifact.label)
+            : QStringLiteral("%1: %2").arg(artifact.kind, artifact.value));
+    const auto handler = [this, artifact]() {
+      if (artifact.generated) {
+        ShowArtifactPreview(artifact);
+        return;
+      }
+      if (on_artifact_open) {
+        on_artifact_open(artifact);
+      }
+    };
+    QObject::connect(button, &QPushButton::clicked, button, handler);
+    auto* row = new QWidget(artifacts_list_);
+    auto* row_layout = new QHBoxLayout(row);
+    row_layout->setContentsMargins(0, 0, 0, 0);
+    row_layout->setSpacing(4);
+    row_layout->addWidget(button, 1);
+    auto* preview = new QPushButton(QStringLiteral("Preview"), row);
+    preview->setObjectName(QStringLiteral("rightRailArtifactPreview_%1")
+                               .arg(static_cast<int>(index)));
+    preview->setProperty("railAction", true);
+    preview->setFlat(true);
+    preview->setCursor(Qt::PointingHandCursor);
+    QObject::connect(preview, &QPushButton::clicked, preview,
+                     [this, artifact]() { ShowArtifactPreview(artifact); });
+    row_layout->addWidget(preview);
+    layout->addWidget(row);
+  }
+  RestoreArtifactScroll(pane_scroll, document_scroll, scroll_generation);
+}
+
+void RightRail::CloseArtifactPreview() {
+  preview_artifact_ = SessionArtifact{};
+  artifact_show_source_ = false;
+  if (artifact_preview_ == nullptr) {
+    return;
+  }
+  artifact_preview_->hide();
+  if (artifact_preview_body_ != nullptr) {
+    artifact_preview_body_->setPixmap(QPixmap());
+    artifact_preview_body_->setTextFormat(Qt::AutoText);
+    artifact_preview_body_->clear();
+  }
+  if (artifact_preview_document_ != nullptr) {
+    artifact_preview_document_->hide();
+  }
+  if (artifact_preview_svg_ != nullptr) {
+    artifact_preview_svg_->hide();
+  }
+}
+
+void RightRail::ShowArtifactPreview(const SessionArtifact& artifact) {
+  preview_artifact_ = artifact;
+  artifact_show_source_ = false;
+  artifact_preview_->show();
+  artifact_preview_body_->show();
+  artifact_preview_document_->hide();
+  artifact_preview_svg_->hide();
+  artifact_preview_title_->setText(
+      artifact.label.isEmpty() ? QStringLiteral("Artifact") : artifact.label);
+
+  const bool has_versions = artifact.versions.size() > 1;
+  artifact_version_prev_->setVisible(has_versions);
+  artifact_version_label_->setVisible(has_versions);
+  artifact_version_next_->setVisible(has_versions);
+  artifact_preview_copy_->setVisible(artifact.generated);
+  artifact_preview_save_->setVisible(artifact.generated);
+  const bool renderable =
+      artifact.generated && (artifact.kind == QStringLiteral("html") ||
+                             artifact.kind == QStringLiteral("svg"));
+  artifact_preview_source_->setVisible(renderable);
+  artifact_preview_browser_->setVisible(
+      artifact.generated && artifact.kind == QStringLiteral("html"));
+  artifact_preview_open_->setVisible(!artifact.generated);
+
+  if (artifact.generated) {
+    RenderArtifactPreview();
+    return;
+  }
+
+  QString path = artifact.value;
+  if (QFileInfo(path).isRelative() && !artifact_home_.isEmpty()) {
+    path = QDir(artifact_home_).filePath(path);
+  }
+  QFile file(path);
+  if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
+    artifact_preview_body_->setTextFormat(Qt::PlainText);
+    artifact_preview_body_->setPixmap(QPixmap());
+    artifact_preview_body_->setText(
+        QStringLiteral("%1\n%2\n\nNot a local file; open it in the "
+                       "workspace to view.")
+            .arg(artifact.kind, artifact.value));
+    return;
+  }
+  const QByteArray bytes = file.read(64 * 1024);
+  file.close();
+  artifact_preview_body_->setTextFormat(Qt::PlainText);
+  if (artifact.kind == QStringLiteral("image")) {
+    QPixmap pixmap;
+    if (pixmap.loadFromData(bytes)) {
+      artifact_preview_body_->setPixmap(
+          pixmap.scaledToWidth(250, Qt::SmoothTransformation));
+      artifact_preview_body_->setText(QString());
+      return;
+    }
+  }
+  QString text = QString::fromUtf8(bytes);
+  if (bytes.size() == 64 * 1024) {
+    text += QStringLiteral("\n\n… preview truncated at 64 KB");
+  }
+  artifact_preview_body_->setPixmap(QPixmap());
+  artifact_preview_body_->setText(text);
+}
+
+void RightRail::ShowArtifactVersion(int index) {
+  if (!preview_artifact_.generated || preview_artifact_.versions.empty()) {
+    return;
+  }
+  preview_artifact_.version_index = std::max(
+      0,
+      std::min(index, static_cast<int>(preview_artifact_.versions.size()) - 1));
+  RenderArtifactPreview();
+}
+
+void RightRail::RenderArtifactPreview() {
+  if (!preview_artifact_.generated || preview_artifact_.versions.empty()) {
+    return;
+  }
+  const int total = static_cast<int>(preview_artifact_.versions.size());
+  const int index =
+      std::max(0, std::min(preview_artifact_.version_index, total - 1));
+  preview_artifact_.version_index = index;
+  const QString content = CurrentArtifactContent(preview_artifact_);
+  artifact_version_label_->setText(
+      QStringLiteral("v%1 of %2").arg(index + 1).arg(total));
+  artifact_version_prev_->setEnabled(index > 0);
+  artifact_version_next_->setEnabled(index + 1 < total);
+
+  artifact_preview_body_->setPixmap(QPixmap());
+  artifact_preview_document_->hide();
+  artifact_preview_svg_->hide();
+  const bool renderable = preview_artifact_.kind == QStringLiteral("html") ||
+                          preview_artifact_.kind == QStringLiteral("svg");
+  artifact_preview_source_->setText(artifact_show_source_
+                                        ? QStringLiteral("Rendered")
+                                        : QStringLiteral("Source"));
+
+  if (preview_artifact_.kind == QStringLiteral("html") &&
+      !artifact_show_source_) {
+    artifact_preview_body_->hide();
+    artifact_preview_document_->setHtml(ComposeArtifactHtml(content));
+    artifact_preview_document_->show();
+    return;
+  }
+  if (preview_artifact_.kind == QStringLiteral("svg") &&
+      !artifact_show_source_) {
+    artifact_preview_svg_->load(content.toUtf8());
+    if (artifact_preview_svg_->renderer() != nullptr &&
+        artifact_preview_svg_->renderer()->isValid()) {
+      artifact_preview_body_->hide();
+      artifact_preview_svg_->show();
+      return;
+    }
+  }
+
+  QString source = content;
+  constexpr int kPreviewLimit = 128 * 1024;
+  if (source.size() > kPreviewLimit) {
+    source = source.left(kPreviewLimit) +
+             QStringLiteral("\n\n… source preview truncated at 128 KB");
+  }
+  artifact_preview_body_->setTextFormat(Qt::PlainText);
+  artifact_preview_body_->setText(source);
+  artifact_preview_body_->show();
+  if (!renderable) {
+    artifact_preview_source_->hide();
+  } else {
+    artifact_preview_source_->show();
+  }
+}
+
+void RightRail::SetSnapshot(const ProfileSnapshot& snapshot) {
+  RebuildContext(snapshot);
+  RebuildAgents(snapshot);
+  RebuildTodos(snapshot);
+  RebuildTimeline(snapshot);
+  RebuildArtifacts(snapshot);
+}
+
+}  // namespace hermes::ui

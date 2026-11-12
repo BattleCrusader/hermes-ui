@@ -1,0 +1,1868 @@
+{
+  "summary": {
+    "backend_routes": 307,
+    "native_routes": 135,
+    "matched": 146,
+    "gaps": 161,
+    "native_only": 3,
+    "test_references": 12
+  },
+  "routes": [
+    {
+      "method": "DELETE",
+      "path": "/api/credentials/pool/{provider}/{index}",
+      "normalized": "/api/credentials/pool/{}/{}",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/cron/jobs/{job_id}",
+      "normalized": "/api/cron/jobs/{}",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/dashboard/agent-plugins/{name:path}",
+      "normalized": "/api/dashboard/agent-plugins/{}",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/env",
+      "normalized": "/api/env",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/files",
+      "normalized": "/api/files",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/learning/node",
+      "normalized": "/api/learning/node",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/local-models/models/{model_id}",
+      "normalized": "/api/local-models/models/{}",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/mcp/oauth/flows/{flow_id}",
+      "normalized": "/api/mcp/oauth/flows/{}",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/mcp/servers/{name}",
+      "normalized": "/api/mcp/servers/{}",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/messaging/relay/{platform}/accounts/{platform_user_id}",
+      "normalized": "/api/messaging/relay/{}/accounts/{}",
+      "native": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/messaging/telegram/onboarding/{pairing_id}",
+      "normalized": "/api/messaging/telegram/onboarding/{}",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/messaging/whatsapp/onboarding/{pairing_id}",
+      "normalized": "/api/messaging/whatsapp/onboarding/{}",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/ops/hooks",
+      "normalized": "/api/ops/hooks",
+      "native": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/profiles/{name}",
+      "normalized": "/api/profiles/{}",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/providers/custom-endpoints/{endpoint_id}",
+      "normalized": "/api/providers/custom-endpoints/{}",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/providers/oauth/sessions/{session_id}",
+      "normalized": "/api/providers/oauth/sessions/{}",
+      "native": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/providers/oauth/{provider_id}",
+      "normalized": "/api/providers/oauth/{}",
+      "native": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/sessions/empty",
+      "normalized": "/api/sessions/empty",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/sessions/{session_id}",
+      "normalized": "/api/sessions/{}",
+      "native": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/webhooks/{name}",
+      "normalized": "/api/webhooks/{}",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/actions/{name}/status",
+      "normalized": "/api/actions/{}/status",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/models",
+      "normalized": "/api/analytics/models",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/analytics/usage",
+      "normalized": "/api/analytics/usage",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/audio/elevenlabs/voices",
+      "normalized": "/api/audio/elevenlabs/voices",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/audio/voice-config",
+      "normalized": "/api/audio/voice-config",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/audio/voice-live/status",
+      "normalized": "/api/audio/voice-live/status",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/chat/workspaces",
+      "normalized": "/api/chat/workspaces",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/config",
+      "normalized": "/api/config",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/config/defaults",
+      "normalized": "/api/config/defaults",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/config/raw",
+      "normalized": "/api/config/raw",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/config/schema",
+      "normalized": "/api/config/schema",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/credentials/pool",
+      "normalized": "/api/credentials/pool",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/cron/blueprints",
+      "normalized": "/api/cron/blueprints",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/cron/delivery-targets",
+      "normalized": "/api/cron/delivery-targets",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/cron/jobs",
+      "normalized": "/api/cron/jobs",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/cron/jobs/{job_id}",
+      "normalized": "/api/cron/jobs/{}",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/cron/jobs/{job_id}/runs",
+      "normalized": "/api/cron/jobs/{}/runs",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/curator",
+      "normalized": "/api/curator",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/font",
+      "normalized": "/api/dashboard/font",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/plugins",
+      "normalized": "/api/dashboard/plugins",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/plugins/auto-update",
+      "normalized": "/api/dashboard/plugins/auto-update",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/plugins/catalog",
+      "normalized": "/api/dashboard/plugins/catalog",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/plugins/hub",
+      "normalized": "/api/dashboard/plugins/hub",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/plugins/rescan",
+      "normalized": "/api/dashboard/plugins/rescan",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/dashboard/themes",
+      "normalized": "/api/dashboard/themes",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/delegation/routing",
+      "normalized": "/api/delegation/routing",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/desktop-plugins/list",
+      "normalized": "/api/desktop-plugins/list",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/desktop-plugins/read",
+      "normalized": "/api/desktop-plugins/read",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/desktop-plugins/root",
+      "normalized": "/api/desktop-plugins/root",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/egress/status",
+      "normalized": "/api/egress/status",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/env",
+      "normalized": "/api/env",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/files",
+      "normalized": "/api/files",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/files/download",
+      "normalized": "/api/files/download",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/files/read",
+      "normalized": "/api/files/read",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/files/stream",
+      "normalized": "/api/files/stream",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/fs/default-cwd",
+      "normalized": "/api/fs/default-cwd",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/fs/download",
+      "normalized": "/api/fs/download",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/fs/git-root",
+      "normalized": "/api/fs/git-root",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/fs/list",
+      "normalized": "/api/fs/list",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/fs/read-data-url",
+      "normalized": "/api/fs/read-data-url",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/fs/read-text",
+      "normalized": "/api/fs/read-text",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/gateway/migrate/plan",
+      "normalized": "/api/gateway/migrate/plan",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/git/base-branches",
+      "normalized": "/api/git/base-branches",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/git/branches",
+      "normalized": "/api/git/branches",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/git/file-diff",
+      "normalized": "/api/git/file-diff",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/git/gh-auth",
+      "normalized": "/api/git/gh-auth",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/git/review/commit-context",
+      "normalized": "/api/git/review/commit-context",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/git/review/diff",
+      "normalized": "/api/git/review/diff",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/git/review/list",
+      "normalized": "/api/git/review/list",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/git/review/rev-parse",
+      "normalized": "/api/git/review/rev-parse",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/git/review/ship-info",
+      "normalized": "/api/git/review/ship-info",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/git/status",
+      "normalized": "/api/git/status",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/git/worktrees",
+      "normalized": "/api/git/worktrees",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "normalized": "/api/health",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/health/idle",
+      "normalized": "/api/health/idle",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/hermes/update/check",
+      "normalized": "/api/hermes/update/check",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/hermes/update/receipt",
+      "normalized": "/api/hermes/update/receipt",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/host/identity",
+      "normalized": "/api/host/identity",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/learning/graph",
+      "normalized": "/api/learning/graph",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/learning/node",
+      "normalized": "/api/learning/node",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/local-models/catalog",
+      "normalized": "/api/local-models/catalog",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/local-models/hardware",
+      "normalized": "/api/local-models/hardware",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/local-models/jobs",
+      "normalized": "/api/local-models/jobs",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/local-models/jobs/{job_id}",
+      "normalized": "/api/local-models/jobs/{}",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/local-models/search",
+      "normalized": "/api/local-models/search",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/local-models/search/files",
+      "normalized": "/api/local-models/search/files",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/local-models/status",
+      "normalized": "/api/local-models/status",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/logs",
+      "normalized": "/api/logs",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp/catalog",
+      "normalized": "/api/mcp/catalog",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp/oauth/callback/{server_name:path}",
+      "normalized": "/api/mcp/oauth/callback/{}",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp/oauth/flows/{flow_id}",
+      "normalized": "/api/mcp/oauth/flows/{}",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcp/servers",
+      "normalized": "/api/mcp/servers",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/media",
+      "normalized": "/api/media",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/media/proxy",
+      "normalized": "/api/media/proxy",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory",
+      "normalized": "/api/memory",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/memory/providers/{name}/config",
+      "normalized": "/api/memory/providers/{}/config",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/messaging/platforms",
+      "normalized": "/api/messaging/platforms",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/messaging/relay",
+      "normalized": "/api/messaging/relay",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/messaging/relay/link/{code}",
+      "normalized": "/api/messaging/relay/link/{}",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/messaging/telegram/onboarding/{pairing_id}",
+      "normalized": "/api/messaging/telegram/onboarding/{}",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/messaging/whatsapp/onboarding/{pairing_id}",
+      "normalized": "/api/messaging/whatsapp/onboarding/{}",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/auxiliary",
+      "normalized": "/api/model/auxiliary",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/info",
+      "normalized": "/api/model/info",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/moa",
+      "normalized": "/api/model/moa",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/options",
+      "normalized": "/api/model/options",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/model/recommended-default",
+      "normalized": "/api/model/recommended-default",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/backup/download",
+      "normalized": "/api/ops/backup/download",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/checkpoints",
+      "normalized": "/api/ops/checkpoints",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/ops/hooks",
+      "normalized": "/api/ops/hooks",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/pairing",
+      "normalized": "/api/pairing",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/portal",
+      "normalized": "/api/portal",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles",
+      "normalized": "/api/profiles",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles/active",
+      "normalized": "/api/profiles/active",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles/projects/tree",
+      "normalized": "/api/profiles/projects/tree",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles/sessions",
+      "normalized": "/api/profiles/sessions",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles/sessions/sidebar",
+      "normalized": "/api/profiles/sessions/sidebar",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles/{name}/desktop-overlay",
+      "normalized": "/api/profiles/{}/desktop-overlay",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles/{name}/setup-command",
+      "normalized": "/api/profiles/{}/setup-command",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/profiles/{name}/soul",
+      "normalized": "/api/profiles/{}/soul",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/providers/custom-endpoints",
+      "normalized": "/api/providers/custom-endpoints",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/providers/oauth",
+      "normalized": "/api/providers/oauth",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/providers/oauth/nous/handoff",
+      "normalized": "/api/providers/oauth/nous/handoff",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/providers/oauth/{provider_id}/poll/{session_id}",
+      "normalized": "/api/providers/oauth/{}/poll/{}",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions",
+      "normalized": "/api/sessions",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/empty/count",
+      "normalized": "/api/sessions/empty/count",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/search",
+      "normalized": "/api/sessions/search",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/stats",
+      "normalized": "/api/sessions/stats",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/{session_id}",
+      "normalized": "/api/sessions/{}",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/{session_id}/export",
+      "normalized": "/api/sessions/{}/export",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/{session_id}/latest-descendant",
+      "normalized": "/api/sessions/{}/latest-descendant",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/{session_id}/messages",
+      "normalized": "/api/sessions/{}/messages",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/{session_id}/messages/around",
+      "normalized": "/api/sessions/{}/messages/around",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/{session_id}/mutation-snapshot",
+      "normalized": "/api/sessions/{}/mutation-snapshot",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/sessions/{session_id}/timeline",
+      "normalized": "/api/sessions/{}/timeline",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/shared-metrics/consent",
+      "normalized": "/api/shared-metrics/consent",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills",
+      "normalized": "/api/skills",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/content",
+      "normalized": "/api/skills/content",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/hub/official",
+      "normalized": "/api/skills/hub/official",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/hub/preview",
+      "normalized": "/api/skills/hub/preview",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/hub/scan",
+      "normalized": "/api/skills/hub/scan",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/hub/search",
+      "normalized": "/api/skills/hub/search",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/skills/hub/sources",
+      "normalized": "/api/skills/hub/sources",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/ssh/ownership",
+      "normalized": "/api/ssh/ownership",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/status",
+      "normalized": "/api/status",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/system/stats",
+      "normalized": "/api/system/stats",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/computer-use/status",
+      "normalized": "/api/tools/computer-use/status",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/terminal/backends",
+      "normalized": "/api/tools/terminal/backends",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/toolsets",
+      "normalized": "/api/tools/toolsets",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/toolsets/{name}/config",
+      "normalized": "/api/tools/toolsets/{}/config",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/tools/toolsets/{name}/models",
+      "normalized": "/api/tools/toolsets/{}/models",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/ui-preferences",
+      "normalized": "/api/ui-preferences",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/webapp-access/status",
+      "normalized": "/api/webapp-access/status",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/webhooks",
+      "normalized": "/api/webhooks",
+      "native": true
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard-plugins/@{profile}/{plugin_name}/{file_path:path}",
+      "normalized": "/dashboard-plugins/@{}/{}/{}",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/dashboard-plugins/{plugin_name}/{file_path:path}",
+      "normalized": "/dashboard-plugins/{}/{}",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/webapp/launch",
+      "normalized": "/webapp/launch",
+      "native": false
+    },
+    {
+      "method": "GET",
+      "path": "/webapp/window",
+      "normalized": "/webapp/window",
+      "native": false
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/profiles/{name}",
+      "normalized": "/api/profiles/{}",
+      "native": true
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/sessions/{session_id}",
+      "normalized": "/api/sessions/{}",
+      "native": true
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/ui-preferences",
+      "normalized": "/api/ui-preferences",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/audio/speak",
+      "normalized": "/api/audio/speak",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/audio/stt-lease",
+      "normalized": "/api/audio/stt-lease",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/audio/transcribe",
+      "normalized": "/api/audio/transcribe",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/audio/tts-lease",
+      "normalized": "/api/audio/tts-lease",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/audio/voice-live/session",
+      "normalized": "/api/audio/voice-live/session",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/file-upload",
+      "normalized": "/api/chat/file-upload",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/chat/image-upload",
+      "normalized": "/api/chat/image-upload",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/credentials/pool",
+      "normalized": "/api/credentials/pool",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/cron/blueprints/instantiate",
+      "normalized": "/api/cron/blueprints/instantiate",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/cron/fire",
+      "normalized": "/api/cron/fire",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/cron/jobs",
+      "normalized": "/api/cron/jobs",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/cron/jobs/{job_id}/cancel",
+      "normalized": "/api/cron/jobs/{}/cancel",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/cron/jobs/{job_id}/pause",
+      "normalized": "/api/cron/jobs/{}/pause",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/cron/jobs/{job_id}/resume",
+      "normalized": "/api/cron/jobs/{}/resume",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/cron/jobs/{job_id}/trigger",
+      "normalized": "/api/cron/jobs/{}/trigger",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/curator/run",
+      "normalized": "/api/curator/run",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/dashboard/agent-plugins/activate",
+      "normalized": "/api/dashboard/agent-plugins/activate",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/dashboard/agent-plugins/install",
+      "normalized": "/api/dashboard/agent-plugins/install",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/dashboard/agent-plugins/update-all",
+      "normalized": "/api/dashboard/agent-plugins/update-all",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/dashboard/agent-plugins/{name:path}/disable",
+      "normalized": "/api/dashboard/agent-plugins/{}/disable",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/dashboard/agent-plugins/{name:path}/enable",
+      "normalized": "/api/dashboard/agent-plugins/{}/enable",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/dashboard/agent-plugins/{name:path}/update",
+      "normalized": "/api/dashboard/agent-plugins/{}/update",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/dashboard/plugins/{name:path}/visibility",
+      "normalized": "/api/dashboard/plugins/{}/visibility",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktop-plugins/reconcile",
+      "normalized": "/api/desktop-plugins/reconcile",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/env/reveal",
+      "normalized": "/api/env/reveal",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/files/mkdir",
+      "normalized": "/api/files/mkdir",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/files/ticket",
+      "normalized": "/api/files/ticket",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/files/upload",
+      "normalized": "/api/files/upload",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/files/upload-stream",
+      "normalized": "/api/files/upload-stream",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/fs/write-text",
+      "normalized": "/api/fs/write-text",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/gateway/drain",
+      "normalized": "/api/gateway/drain",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/gateway/migrate",
+      "normalized": "/api/gateway/migrate",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/gateway/restart",
+      "normalized": "/api/gateway/restart",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/gateway/start",
+      "normalized": "/api/gateway/start",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/gateway/stop",
+      "normalized": "/api/gateway/stop",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/git/branch/switch",
+      "normalized": "/api/git/branch/switch",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/git/review/commit",
+      "normalized": "/api/git/review/commit",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/git/review/create-pr",
+      "normalized": "/api/git/review/create-pr",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/git/review/pr-list",
+      "normalized": "/api/git/review/pr-list",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/git/review/push",
+      "normalized": "/api/git/review/push",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/git/review/revert",
+      "normalized": "/api/git/review/revert",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/git/review/stage",
+      "normalized": "/api/git/review/stage",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/git/review/unstage",
+      "normalized": "/api/git/review/unstage",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/git/worktree/add",
+      "normalized": "/api/git/worktree/add",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/git/worktree/remove",
+      "normalized": "/api/git/worktree/remove",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/health/retirement",
+      "normalized": "/api/health/retirement",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/hermes/update",
+      "normalized": "/api/hermes/update",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/local-models/activate",
+      "normalized": "/api/local-models/activate",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/local-models/download",
+      "normalized": "/api/local-models/download",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/local-models/download-browsed",
+      "normalized": "/api/local-models/download-browsed",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/local-models/download/pause",
+      "normalized": "/api/local-models/download/pause",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/local-models/download/resume",
+      "normalized": "/api/local-models/download/resume",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/local-models/eject",
+      "normalized": "/api/local-models/eject",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/local-models/quickstart",
+      "normalized": "/api/local-models/quickstart",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/local-models/runtime/install",
+      "normalized": "/api/local-models/runtime/install",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/local-models/server",
+      "normalized": "/api/local-models/server",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/local-models/sideload",
+      "normalized": "/api/local-models/sideload",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/catalog/install",
+      "normalized": "/api/mcp/catalog/install",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/servers",
+      "normalized": "/api/mcp/servers",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/servers/{name}/auth",
+      "normalized": "/api/mcp/servers/{}/auth",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/mcp/servers/{name}/test",
+      "normalized": "/api/mcp/servers/{}/test",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/providers/{name}/setup",
+      "normalized": "/api/memory/providers/{}/setup",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/memory/reset",
+      "normalized": "/api/memory/reset",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/messaging/platforms/{platform_id}/test",
+      "normalized": "/api/messaging/platforms/{}/test",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/messaging/relay/{platform}/link",
+      "normalized": "/api/messaging/relay/{}/link",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/messaging/telegram/onboarding/start",
+      "normalized": "/api/messaging/telegram/onboarding/start",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/messaging/telegram/onboarding/{pairing_id}/apply",
+      "normalized": "/api/messaging/telegram/onboarding/{}/apply",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/messaging/whatsapp/onboarding/start",
+      "normalized": "/api/messaging/whatsapp/onboarding/start",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/messaging/whatsapp/onboarding/{pairing_id}/apply",
+      "normalized": "/api/messaging/whatsapp/onboarding/{}/apply",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/model/set",
+      "normalized": "/api/model/set",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/backup",
+      "normalized": "/api/ops/backup",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/checkpoints/prune",
+      "normalized": "/api/ops/checkpoints/prune",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/config-migrate",
+      "normalized": "/api/ops/config-migrate",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/debug-share",
+      "normalized": "/api/ops/debug-share",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/doctor",
+      "normalized": "/api/ops/doctor",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/dump",
+      "normalized": "/api/ops/dump",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/hooks",
+      "normalized": "/api/ops/hooks",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/import",
+      "normalized": "/api/ops/import",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/import-upload",
+      "normalized": "/api/ops/import-upload",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/prompt-size",
+      "normalized": "/api/ops/prompt-size",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/ops/security-audit",
+      "normalized": "/api/ops/security-audit",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/pairing/approve",
+      "normalized": "/api/pairing/approve",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/pairing/clear-pending",
+      "normalized": "/api/pairing/clear-pending",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/pairing/revoke",
+      "normalized": "/api/pairing/revoke",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles",
+      "normalized": "/api/profiles",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles/active",
+      "normalized": "/api/profiles/active",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles/import",
+      "normalized": "/api/profiles/import",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles/sessions/pull-requests",
+      "normalized": "/api/profiles/sessions/pull-requests",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles/{name}/describe-auto",
+      "normalized": "/api/profiles/{}/describe-auto",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles/{name}/export",
+      "normalized": "/api/profiles/{}/export",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/profiles/{name}/open-terminal",
+      "normalized": "/api/profiles/{}/open-terminal",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/providers/custom-endpoints",
+      "normalized": "/api/providers/custom-endpoints",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/providers/custom-endpoints/validate",
+      "normalized": "/api/providers/custom-endpoints/validate",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/providers/custom-endpoints/{endpoint_id}/activate",
+      "normalized": "/api/providers/custom-endpoints/{}/activate",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/providers/oauth/{provider_id}/start",
+      "normalized": "/api/providers/oauth/{}/start",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/providers/oauth/{provider_id}/submit",
+      "normalized": "/api/providers/oauth/{}/submit",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/providers/validate",
+      "normalized": "/api/providers/validate",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/sessions/bulk-delete",
+      "normalized": "/api/sessions/bulk-delete",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/sessions/import",
+      "normalized": "/api/sessions/import",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/sessions/owner-backfill",
+      "normalized": "/api/sessions/owner-backfill",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/sessions/prune",
+      "normalized": "/api/sessions/prune",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/skills",
+      "normalized": "/api/skills",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/skills/hub/install",
+      "normalized": "/api/skills/hub/install",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/skills/hub/uninstall",
+      "normalized": "/api/skills/hub/uninstall",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/skills/hub/update",
+      "normalized": "/api/skills/hub/update",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/computer-use/permissions/grant",
+      "normalized": "/api/tools/computer-use/permissions/grant",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/tools/toolsets/{name}/post-setup",
+      "normalized": "/api/tools/toolsets/{}/post-setup",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/webapp-access/restart",
+      "normalized": "/api/webapp-access/restart",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/webapp-access/start",
+      "normalized": "/api/webapp-access/start",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/webapp-access/stop",
+      "normalized": "/api/webapp-access/stop",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/webapp/socket-ticket",
+      "normalized": "/api/webapp/socket-ticket",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/webapp/window-ticket",
+      "normalized": "/api/webapp/window-ticket",
+      "native": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/webhooks",
+      "normalized": "/api/webhooks",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/webhooks/enable",
+      "normalized": "/api/webhooks/enable",
+      "native": true
+    },
+    {
+      "method": "POST",
+      "path": "/webapp/window-session",
+      "normalized": "/webapp/window-session",
+      "native": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/config",
+      "normalized": "/api/config",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/config/raw",
+      "normalized": "/api/config/raw",
+      "native": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/cron/jobs/{job_id}",
+      "normalized": "/api/cron/jobs/{}",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/curator/paused",
+      "normalized": "/api/curator/paused",
+      "native": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/dashboard/font",
+      "normalized": "/api/dashboard/font",
+      "native": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/dashboard/plugin-providers",
+      "normalized": "/api/dashboard/plugin-providers",
+      "native": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/dashboard/plugins/auto-update",
+      "normalized": "/api/dashboard/plugins/auto-update",
+      "native": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/dashboard/theme",
+      "normalized": "/api/dashboard/theme",
+      "native": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/delegation/backend",
+      "normalized": "/api/delegation/backend",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/delegation/backends/model_map",
+      "normalized": "/api/delegation/backends/model_map",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/delegation/backends/profile_routes",
+      "normalized": "/api/delegation/backends/profile_routes",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/env",
+      "normalized": "/api/env",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/learning/node",
+      "normalized": "/api/learning/node",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/mcp/servers",
+      "normalized": "/api/mcp/servers",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/mcp/servers/{name}/enabled",
+      "normalized": "/api/mcp/servers/{}/enabled",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/memory/provider",
+      "normalized": "/api/memory/provider",
+      "native": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/memory/providers/{name}/config",
+      "normalized": "/api/memory/providers/{}/config",
+      "native": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/messaging/platforms/{platform_id}",
+      "normalized": "/api/messaging/platforms/{}",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/model/moa",
+      "normalized": "/api/model/moa",
+      "native": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/profiles/{name}/description",
+      "normalized": "/api/profiles/{}/description",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/profiles/{name}/model",
+      "normalized": "/api/profiles/{}/model",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/profiles/{name}/soul",
+      "normalized": "/api/profiles/{}/soul",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/shared-metrics/consent",
+      "normalized": "/api/shared-metrics/consent",
+      "native": false
+    },
+    {
+      "method": "PUT",
+      "path": "/api/skills/content",
+      "normalized": "/api/skills/content",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/skills/lock",
+      "normalized": "/api/skills/lock",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/skills/toggle",
+      "normalized": "/api/skills/toggle",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tools/terminal/backend",
+      "normalized": "/api/tools/terminal/backend",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tools/toolsets/{name}",
+      "normalized": "/api/tools/toolsets/{}",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tools/toolsets/{name}/env",
+      "normalized": "/api/tools/toolsets/{}/env",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tools/toolsets/{name}/model",
+      "normalized": "/api/tools/toolsets/{}/model",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/tools/toolsets/{name}/provider",
+      "normalized": "/api/tools/toolsets/{}/provider",
+      "native": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/webhooks/{name}/enabled",
+      "normalized": "/api/webhooks/{}/enabled",
+      "native": true
+    }
+  ],
+  "native_only": [
+    {
+      "path": "/api/cron/jobs/{}/{}",
+      "source": "src/settings_pages.cc"
+    },
+    {
+      "path": "/api/dashboard/agent-plugins/{}/{}",
+      "source": "src/settings_pages.cc"
+    },
+    {
+      "path": "/api/ws",
+      "source": "src/gateway_socket.cc"
+    }
+  ]
+}

@@ -1,0 +1,196 @@
+{
+  "features": [
+    {
+      "id": "preferences",
+      "name": "Preferences / Settings",
+      "critical": true,
+      "case": "Open Settings. Assert the nine config sections render with schema-driven fields and a form change writes a sparse PUT /api/config patch. Desktop also exposes provider/model/reasoning in its Model view; native exposes those in the composer pills.",
+      "desktop": {
+        "test": "src/app/settings/model-settings.test.tsx",
+        "markers": [
+          ["src/app/routes.ts", "/settings"],
+          ["src/app/settings/model-settings.tsx", "aria-label={m.reasoning}"],
+          ["src/app/settings/model-settings.tsx", "aria-label={m.provider}"],
+          ["src/app/settings/model-settings.tsx", "aria-label={m.model}"]
+        ]
+      },
+      "native": {
+        "inventory": ["settingsView", "settingsNav", "settingsForm", "settingsTitle"],
+        "markers": []
+      }
+    },
+    {
+      "id": "model_picker",
+      "name": "Composer model picker",
+      "critical": true,
+      "case": "Open the composer model pill. Assert a catalog of providers/models. Pick a model and assert config.set {key:'model', value:'<model> --provider <provider>'}.",
+      "desktop": {
+        "test": "src/app/chat/composer/model-pill.test.tsx",
+        "markers": [
+          ["src/app/chat/composer/model-pill.tsx", "data-tour={tourMarker}"],
+          ["src/app/session/hooks/use-model-controls.ts", "key: 'model'"]
+        ]
+      },
+      "native": {
+        "inventory": ["modelPicker", "modelPill", "modelMenu"],
+        "markers": []
+      }
+    },
+    {
+      "id": "reasoning",
+      "name": "Reasoning effort control",
+      "critical": true,
+      "case": "Click the reasoning pill. Assert effort choices. Pick a level and assert config.set {key:'reasoning', value:<level>}.",
+      "desktop": {
+        "test": "src/app/chat/composer/reasoning-pill.test.tsx",
+        "markers": [
+          ["src/app/chat/composer/reasoning-pill.tsx", "data-testid=\"reasoning-pill\""],
+          ["src/store/model-presets.ts", "key: dimension === 'effort' ? 'reasoning' : 'fast'"]
+        ]
+      },
+      "native": {
+        "inventory": ["reasoningPill", "reasoningButton", "reasoningMenu"],
+        "markers": []
+      }
+    },
+    {
+      "id": "command_palette",
+      "name": "Command palette",
+      "critical": false,
+      "case": "Press the command-palette shortcut. Assert a filtered action list and keyboard navigation.",
+      "desktop": {
+        "test": null,
+        "markers": [
+          ["src/app/command-palette", null],
+          ["src/store/command-palette.ts", null]
+        ]
+      },
+      "native": {
+        "inventory": ["commandPalette", "paletteSearch", "paletteList"],
+        "markers": []
+      }
+    },
+    {
+      "id": "clarify",
+      "name": "Clarify requests",
+      "critical": false,
+      "case": "Run a turn that calls clarify. Assert the question/choices render and the chosen answer reaches the model.",
+      "desktop": {
+        "test": null,
+        "markers": [
+          ["e2e/core/interactive-prompts.spec.ts", "clarify:"]
+        ]
+      },
+      "native": {
+        "inventory": ["requestBar"],
+        "markers": [["src/profile_worker.cc", "kind=clarify"]]
+      }
+    },
+    {
+      "id": "approval",
+      "name": "Approval requests",
+      "critical": false,
+      "case": "Run an approval-gated action. Assert the approval card renders and the choice reaches the model.",
+      "desktop": {
+        "test": null,
+        "markers": [
+          ["e2e/core/interactive-prompts.spec.ts", "denial reached the model"]
+        ]
+      },
+      "native": {
+        "inventory": ["requestBar"],
+        "markers": [["src/profile_worker.cc", "method == QStringLiteral(\"approval\")"]]
+      }
+    },
+    {
+      "id": "session_search",
+      "name": "Session search",
+      "critical": false,
+      "case": "Type in the sidebar search; assert the session rows filter.",
+      "desktop": {
+        "test": null,
+        "markers": [["src/app/chat/sidebar", null]]
+      },
+      "native": {
+        "inventory": ["sessionSearch"],
+        "markers": []
+      }
+    },
+    {
+      "id": "theme",
+      "name": "Light/dark appearance",
+      "critical": false,
+      "case": "Switch theme and assert all surfaces repaint from the light/dark tokens.",
+      "desktop": {
+        "test": null,
+        "markers": [["src/app/settings/appearance-settings.tsx", null]]
+      },
+      "native": {
+        "inventory": [],
+        "markers": [
+          ["src/main.cc", "theme"],
+          ["src/main_window.cc", "SetThemeMode"]
+        ]
+      }
+    },
+    {
+      "id": "new_chat",
+      "name": "New chat",
+      "critical": false,
+      "case": "Start a new chat and assert session.create opens an empty live session.",
+      "desktop": {
+        "test": null,
+        "markers": [["src/app/chat/sidebar", null]]
+      },
+      "native": {
+        "inventory": [],
+        "markers": [
+          ["src/main_window.cc", "NewSession"],
+          ["src/sidebar.cc", "on_new_chat"]
+        ]
+      }
+    },
+    {
+      "id": "stop_turn",
+      "name": "Stop turn",
+      "critical": false,
+      "case": "Send a turn, press stop, and assert session.interrupt settles the run.",
+      "desktop": {
+        "test": null,
+        "markers": [["src/app/chat/composer", null]]
+      },
+      "native": {
+        "inventory": [],
+        "markers": [["src/composer.cc", "on_stop"]]
+      }
+    },
+    {
+      "id": "streaming",
+      "name": "Streaming reply",
+      "critical": false,
+      "case": "Send a turn and assert message.start/delta/complete update one assistant row.",
+      "desktop": {
+        "test": null,
+        "markers": [["e2e/core/transcript-integrity.spec.ts", "reasoning turn"]]
+      },
+      "native": {
+        "inventory": [],
+        "markers": [["src/profile_worker.cc", "message.delta"]]
+      }
+    },
+    {
+      "id": "tool_rows",
+      "name": "Tool call rows",
+      "critical": false,
+      "case": "Run a tool turn and assert tool.start/tool.complete render one detail row.",
+      "desktop": {
+        "test": null,
+        "markers": [["e2e/core/transcript-integrity.spec.ts", "tool"]]
+      },
+      "native": {
+        "inventory": [],
+        "markers": [["src/profile_worker.cc", "tool.start"]]
+      }
+    }
+  ]
+}

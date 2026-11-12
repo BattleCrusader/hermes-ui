@@ -1,0 +1,19 @@
+<RCC>
+  <qresource prefix="/fonts">
+    <file alias="JetBrainsMono-Regular.ttf">fonts/JetBrainsMono-Regular.ttf</file>
+    <file alias="JetBrainsMono-Bold.ttf">fonts/JetBrainsMono-Bold.ttf</file>
+    <file alias="codicon.ttf">fonts/codicon.ttf</file>
+  </qresource>
+  <qresource prefix="/sounds">
+    <file alias="complete.wav">sounds/complete.wav</file>
+  </qresource>
+  <qresource prefix="/">
+    <file alias="check.svg">check.svg</file>
+    <file alias="arrow-up-light.svg">arrow-up-light.svg</file>
+    <file alias="arrow-down-light.svg">arrow-down-light.svg</file>
+    <file alias="arrow-up-dark.svg">arrow-up-dark.svg</file>
+    <file alias="arrow-down-dark.svg">arrow-down-dark.svg</file>
+    <file alias="chevron-down-light.svg">chevron-down-light.svg</file>
+    <file alias="chevron-down-dark.svg">chevron-down-dark.svg</file>
+  </qresource>
+</RCC>
