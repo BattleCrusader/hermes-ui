@@ -421,6 +421,11 @@ void ProfileWorker::SelectSession(const QString& session_id) {
     if (state_.selected_session_id == session_id && !state_.messages.empty()) {
       return;
     }
+    if (state_.selected_session_id != session_id) {
+      pinned_session_id_.clear();
+      pinned_provider_.clear();
+      pinned_model_.clear();
+    }
     state_.selected_session_id = session_id;
     // Never let the previous chat's runtime controls leak into a placeholder
     // session that has not reached /api/sessions yet.
@@ -900,15 +905,32 @@ void ProfileWorker::FetchSessions() {
       // if the websocket has not connected yet.
       fetch_session_id = state_.selected_session_id;
     }
+    const bool pinned_selection =
+        !pinned_model_.isEmpty() &&
+        pinned_session_id_ == state_.selected_session_id;
     for (const SessionSummary& session : state_.sessions) {
-      if (session.id == state_.selected_session_id) {
+      if (session.id != state_.selected_session_id) {
+        continue;
+      }
+      if (pinned_selection && session.model == pinned_model_ &&
+          session.provider == pinned_provider_) {
+        // The backend caught up with the pick; stop overriding its rows.
+        pinned_session_id_.clear();
+        pinned_provider_.clear();
+        pinned_model_.clear();
+      }
+      if (!pinned_model_.isEmpty() &&
+          pinned_session_id_ == state_.selected_session_id) {
+        state_.model = pinned_model_;
+        state_.provider = pinned_provider_;
+      } else {
         state_.model = session.model;
         state_.provider = session.provider;
-        state_.reasoning_effort = session.reasoning_effort.isEmpty()
-                                      ? QStringLiteral("medium")
-                                      : session.reasoning_effort;
-        break;
       }
+      state_.reasoning_effort = session.reasoning_effort.isEmpty()
+                                    ? QStringLiteral("medium")
+                                    : session.reasoning_effort;
+      break;
     }
     state_.connected = true;
     if (state_.status_text.isEmpty() ||
@@ -935,16 +957,20 @@ void ProfileWorker::FetchSessions() {
   }
 }
 
-void ProfileWorker::FetchModelOptions() {
+void ProfileWorker::RefreshModelOptions() { FetchModelOptions(true); }
+
+void ProfileWorker::FetchModelOptions(bool refresh) {
   if (shutting_down_ || http_ == nullptr) {
     return;
   }
   QJsonDocument document;
   QString error;
-  if (!http_->GetJson(
-          QStringLiteral("/api/model/options?profile=%1")
-              .arg(QString::fromLatin1(QUrl::toPercentEncoding(name_))),
-          &document, &error)) {
+  QString path = QStringLiteral("/api/model/options?profile=%1")
+                     .arg(QString::fromLatin1(QUrl::toPercentEncoding(name_)));
+  if (refresh) {
+    path += QStringLiteral("&refresh=true");
+  }
+  if (!http_->GetJson(path, &document, &error)) {
     qInfo("model options profile=%s failed: %s", qUtf8Printable(name_),
           qUtf8Printable(error));
     return;
@@ -975,13 +1001,18 @@ void ProfileWorker::FetchModelOptions() {
 
   std::lock_guard<std::mutex> lock(mutex_);
   state_.model_providers = std::move(providers);
-  const QString provider = root.value(QStringLiteral("provider")).toString();
-  if (!provider.isEmpty()) {
-    state_.provider = provider;
-  }
-  const QString model = root.value(QStringLiteral("model")).toString();
-  if (!model.isEmpty()) {
-    state_.model = model;
+  // Root defaults describe the profile's configured model, not necessarily
+  // the model the user picked in this composer. Keep an explicit pick until
+  // the session row or the backend confirms it.
+  if (pinned_model_.isEmpty()) {
+    const QString provider = root.value(QStringLiteral("provider")).toString();
+    if (!provider.isEmpty()) {
+      state_.provider = provider;
+    }
+    const QString model = root.value(QStringLiteral("model")).toString();
+    if (!model.isEmpty()) {
+      state_.model = model;
+    }
   }
   models_loaded_ = true;
   PublishLocked();
@@ -999,6 +1030,9 @@ void ProfileWorker::SetModel(const QString& provider, const QString& model) {
     session_id = state_.selected_session_id;
     state_.provider = provider;
     state_.model = model;
+    pinned_session_id_ = session_id;
+    pinned_provider_ = provider;
+    pinned_model_ = model;
     for (SessionSummary& session : state_.sessions) {
       if (session.id == session_id) {
         session.provider = provider;
@@ -1127,24 +1161,29 @@ struct PageSource {
   const char* key;
   const char* path;
   bool profile_scoped = false;
+  int timeout_ms = 0;
 };
 
 constexpr PageSource kPageSources[] = {
     {"providers", "options", "/api/model/options"},
     {"providers", "endpoints", "/api/providers/custom-endpoints"},
     {"providers", "env", "/api/env"},
+    {"modelaux", "auxiliary", "/api/model/auxiliary", true},
+    {"modelmoa", "moa", "/api/model/moa", true},
     {"keys", "env", "/api/env"},
     {"vault", "pool", "/api/credentials/pool"},
     {"gateway", "access", "/api/webapp-access/status"},
+    {"gateway", "status", "/api/status"},
     // Memory status is profile-scoped: the configured provider and the
     // built-in MEMORY.md/USER.md layers can differ per profile.
     {"memory", "status", "/api/memory", true},
-    {"plugins", "plugins", "/api/dashboard/plugins"},
-    {"plugins", "hub", "/api/dashboard/plugins/hub"},
+    {"plugins", "plugins", "/api/dashboard/plugins", false, 60000},
+    {"plugins", "hub", "/api/dashboard/plugins/hub", false, 60000},
     // Catalog scans every installed plugin and clones nothing, but it is slow
     // enough to keep off the page's critical path: it has its own lazy state,
     // fetched only when the user asks for it.
-    {"plugincatalog", "catalog", "/api/dashboard/plugins/catalog"},
+    {"plugincatalog", "catalog", "/api/dashboard/plugins/catalog", false,
+     120000},
     {"billing", "portal", "/api/portal"},
     {"about", "status", "/api/status"},
     {"update", "update", "/api/hermes/update/check"},
@@ -1228,9 +1267,14 @@ void ProfileWorker::FetchPage(const QString& page) {
       }
       QJsonDocument document;
       QString source_error;
-      if (!http_->GetJson(source_path, &document, &source_error)) {
+      if (!http_->GetJson(source_path, &document, &source_error, true,
+                          source.timeout_ms)) {
+        const QString labelled = QStringLiteral("%1: %2").arg(
+            QLatin1String(source.key), source_error);
         if (error.isEmpty()) {
-          error = source_error;
+          error = labelled;
+        } else {
+          error += QStringLiteral("\n") + labelled;
         }
         continue;
       }
@@ -2077,11 +2121,29 @@ void ProfileWorker::PageAction(const QString& page, const QString& method,
     std::lock_guard<std::mutex> lock(mutex_);
     // A created webhook's secret is returned exactly once, so surface the
     // server's response instead of a generic "applied" notice.
-    const QString secret =
-        document.object().value(QStringLiteral("secret")).toString();
-    state_.pages[page].notice =
-        secret.isEmpty() ? QStringLiteral("%1 applied").arg(method)
-                         : QStringLiteral("Secret (copy now): %1").arg(secret);
+    const QJsonObject result = document.object();
+    const QString secret = result.value(QStringLiteral("secret")).toString();
+    const QString message = result.value(QStringLiteral("message")).toString();
+    const QString action_id =
+        result.value(QStringLiteral("action_id")).toString();
+    QString notice;
+    if (!secret.isEmpty()) {
+      notice = QStringLiteral("Secret (copy now): %1").arg(secret);
+    } else if (result.value(QStringLiteral("ok")).isBool() &&
+               !result.value(QStringLiteral("ok")).toBool()) {
+      notice = message.isEmpty()
+                   ? result.value(QStringLiteral("error")).toString()
+                   : message;
+    } else if (!message.isEmpty()) {
+      notice = message;
+    } else if (result.value(QStringLiteral("already_running")).toBool()) {
+      notice = QStringLiteral("Action is already running.");
+    } else if (!action_id.isEmpty()) {
+      notice = QStringLiteral("%1 started (action %2).").arg(method, action_id);
+    } else {
+      notice = QStringLiteral("%1 applied").arg(method);
+    }
+    state_.pages[page].notice = notice;
     PublishLocked();
   }
   qInfo("settings action profile=%s %s %s", qUtf8Printable(name_),
@@ -3481,6 +3543,12 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
     {
       std::lock_guard<std::mutex> lock(mutex_);
       state_.selected_session_id = session_id;
+      // A model picked in the fresh-chat composer is pinned against an empty
+      // session id. Adopt the new session here so the first /api/sessions
+      // refresh cannot snap the composer back to the default model.
+      if (pinned_session_id_.isEmpty() && !pinned_model_.isEmpty()) {
+        pinned_session_id_ = session_id;
+      }
       state_.messages.clear();
       state_.todos.clear();
       state_.todo_revision = 0;

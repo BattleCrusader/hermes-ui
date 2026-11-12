@@ -60,6 +60,7 @@ class Supervisor {
   // Capabilities can render account progress after a page rebuild.
   void RememberAccountOperation(int index, const QJsonObject& result);
   void SetModel(int index, const QString& provider, const QString& model);
+  void RefreshModelOptions(int index);
   void SetReasoning(int index, const QString& effort);
   void FetchSettings(int index);
   void SaveConfig(int index, const QJsonObject& patch);

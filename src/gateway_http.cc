@@ -84,7 +84,7 @@ GatewayHttp::Result GatewayHttp::Perform(const QByteArray& method,
                                          const QUrl& url, const QString& ticket,
                                          const QByteArray& body,
                                          const QByteArray& content_type,
-                                         bool parse_json) {
+                                         bool parse_json, int timeout_ms) {
   Result result;
   QNetworkRequest request(url);
   request.setRawHeader("Accept", "application/json");
@@ -112,7 +112,7 @@ GatewayHttp::Result GatewayHttp::Perform(const QByteArray& method,
   QTimer timeout;
   QObject::connect(&timeout, &QTimer::timeout, &loop, &QEventLoop::quit);
   QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-  timeout.start(kRequestTimeoutMs);
+  timeout.start(timeout_ms > 0 ? timeout_ms : kRequestTimeoutMs);
   loop.exec();
   if (active_reply_ == reply) {
     active_reply_ = nullptr;
@@ -150,9 +150,27 @@ GatewayHttp::Result GatewayHttp::Perform(const QByteArray& method,
     return result;
   }
   if (result.status < 200 || result.status >= 300) {
-    result.error = QStringLiteral("gateway HTTP %1: %2")
-                       .arg(result.status)
-                       .arg(QString::fromUtf8(response.left(240)));
+    QString detail;
+    const QJsonDocument failure = QJsonDocument::fromJson(response);
+    if (failure.isObject()) {
+      const QJsonObject object = failure.object();
+      for (const QString& key :
+           {QStringLiteral("detail"), QStringLiteral("error"),
+            QStringLiteral("message")}) {
+        const QJsonValue value = object.value(key);
+        if (value.isString() && !value.toString().trimmed().isEmpty()) {
+          detail = value.toString().trimmed();
+          break;
+        }
+      }
+    }
+    result.error = detail.isEmpty()
+                       ? QStringLiteral("gateway HTTP %1: %2")
+                             .arg(result.status)
+                             .arg(QString::fromUtf8(response.left(240)))
+                       : QStringLiteral("gateway HTTP %1: %2")
+                             .arg(result.status)
+                             .arg(detail);
     return result;
   }
 
@@ -283,7 +301,8 @@ bool GatewayHttp::DownloadFile(const QString& path, const QString& local_path,
 
 bool GatewayHttp::RequestJson(const QString& method, const QString& path,
                               const QJsonObject& body, QJsonDocument* document,
-                              QString* error, bool authenticate) {
+                              QString* error, bool authenticate,
+                              int timeout_ms) {
   const QByteArray payload =
       body.isEmpty() && method == QLatin1String("GET")
           ? QByteArray()
@@ -298,7 +317,7 @@ bool GatewayHttp::RequestJson(const QString& method, const QString& path,
       return false;
     }
     last = Perform(verb, ScopedUrl(endpoint_, profile_name_, path), ticket,
-                   payload);
+                   payload, QByteArray(), true, timeout_ms);
     if (last.ok) {
       if (document != nullptr) {
         *document = last.document;
@@ -319,9 +338,9 @@ bool GatewayHttp::RequestJson(const QString& method, const QString& path,
 }
 
 bool GatewayHttp::GetJson(const QString& path, QJsonDocument* document,
-                          QString* error, bool authenticate) {
+                          QString* error, bool authenticate, int timeout_ms) {
   return RequestJson(QStringLiteral("GET"), path, QJsonObject(), document,
-                     error, authenticate);
+                     error, authenticate, timeout_ms);
 }
 
 bool GatewayHttp::PutJson(const QString& path, const QJsonObject& body,

@@ -38,6 +38,43 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-13 (seventy-third pass)
+
+**Work status moved to the footer; the model pages became real editors.**
+
+- [x] **Footer owns live work state.** The composer no longer grows a status
+  line. `StatusBar` shows `Working · 2m 03s` (h/m/s formatting), queues a
+  `· N queued` suffix, and keeps the elapsed timer repainting during long
+  reasoning. Centre precedence is transient → voice activity → work → normal.
+  Clicking a queued work state opens the queued-prompts review.
+- [x] **Model settings are editable.** The Model/Main subpage now has
+  provider, default-model and reasoning-effort controls backed by
+  `model.provider`, `model.default` and `agent.reasoning_effort`. The provider
+  is recovered from the catalog when `/api/config` normalizes the model
+  section to a bare string.
+- [x] **Fallbacks are structured rows.** Provider/model/reasoning-effort cards
+  with add/remove, editable known options and custom text; extra keys such as
+  `base_url` survive edits. The hidden `fallback_providers` field remains for
+  compatibility.
+- [x] **Auxiliary and MoA pages read their real routes.** Auxiliary shows every
+  task with a friendly label, provider/model pickers and per-task Save to
+  `/api/model/set`; MoA shows active/default presets, references and aggregator
+  or an explicit empty state. Both use lazy page loads.
+- [x] **Gateway, plugins and updates diagnostics.** Gateway separates process
+  state from the web-app listener; plugin fetches use a 60 s (catalog 120 s)
+  timeout and label every failing source; update actions surface action/process
+  ids, server messages and errors; capabilities expand read-only tool lists.
+- [x] **Visible models ergonomics.** Dialog widened to 520 px, 18 px
+  indicators, collapsible routers with only the composer's current provider
+  expanded, a **Refresh models** button that busts the gateway cache and
+  reopens the dialog, and provider-header select-all retained.
+- [x] **Composer model picks survive refreshes.** `ProfileWorker` pins an
+  explicit pick until the backend session row or model response echoes it, and
+  gates root model defaults so a poll cannot reset the composer.
+- [x] Regressions: status-bar formatting/queue click, model main edits,
+  auxiliary save/MoA render, provider collapse/refresh, fallback rows.
+- [x] Full native suite: **9/9 passed** in 32.09 s.
+
 ## Status update — 2026-11-13 (seventy-second pass)
 
 **Router headers select or clear every model in one click.**

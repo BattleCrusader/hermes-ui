@@ -95,6 +95,10 @@ class SettingsView : public QWidget {
   void UpdateVoiceFieldVisibility();
   void AppendMemoryRows();
   void AppendAudioDeviceRows();
+  void AppendModelMainRows();
+  void AppendAuxiliaryRows();
+  void AppendMoaRows();
+  void AppendFallbackRows(const QJsonValue& value);
   QWidget* BuildAudioDeviceRow(const QString& key, const QString& label,
                                const QString& description, bool input);
   QJsonValue ValueAt(const QString& key) const;

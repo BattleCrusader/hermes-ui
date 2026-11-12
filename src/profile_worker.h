@@ -85,6 +85,8 @@ class ProfileWorker : public QObject {
   // any broadcast arrives; keep it so the Capabilities page survives a rebuild.
   void RememberAccountOperation(const QJsonObject& result);
   void SetModel(const QString& provider, const QString& model);
+  // Bust the gateway's 1h model-id cache and republish the provider catalog.
+  void RefreshModelOptions();
   void SetReasoning(const QString& effort);
   void FetchSettings();
   void SaveConfig(const QJsonObject& patch);
@@ -176,7 +178,7 @@ class ProfileWorker : public QObject {
   void LoadCachedState();
   void FlushSessionCache();
   void FetchMessages(const QString& session_id);
-  void FetchModelOptions();
+  void FetchModelOptions(bool refresh = false);
   void OnSocketConnected(const QString& subprotocol);
   void OnSocketDisconnected();
   void OnSocketEvent(const QString& type, const QString& session_id,
@@ -282,6 +284,12 @@ class ProfileWorker : public QObject {
   QString pending_new_session_cwd_;
   QString pending_new_session_project_id_;
   bool models_loaded_ = false;
+  // A composer model pick is locally authoritative until the backend echoes
+  // it back or the user changes sessions. Polls must not revert it to the
+  // profile default or a stale session row.
+  QString pinned_session_id_;
+  QString pinned_provider_;
+  QString pinned_model_;
   bool settings_requested_ = false;
   // Bytes the spot editor was seeded with, so a save can detect an
   // out-of-band edit instead of clobbering it.

@@ -5,6 +5,7 @@
 
 #include <QHash>
 #include <QJsonArray>
+#include <QPointer>
 #include <QString>
 #include <QWidget>
 #include <functional>
@@ -92,6 +93,9 @@ class Composer : public QWidget {
   std::function<void()> on_stop;
   std::function<void(const QString& provider, const QString& model)>
       on_model_selected;
+  // Bust the gateway's provider model cache. The dialog closes and reopens
+  // with the refreshed catalog so newly discovered models appear in place.
+  std::function<void()> on_refresh_models;
   std::function<void(const QString& effort)> on_reasoning_selected;
 
   // Bare `@dir/file` tokens become typed `@file:`/`@folder:` directives, which
@@ -192,9 +196,9 @@ class Composer : public QWidget {
   QString history_draft_;
   bool send_hovered_ = false;
   bool editor_focused_ = false;
-  QTimer* activity_timer_ = nullptr;
-  qint64 running_since_ms_ = 0;
-  int activity_tick_ = 0;
+  QPointer<QDialog> model_visibility_dialog_;
+  bool model_refresh_pending_ = false;
+  bool model_refresh_completed_ = false;
 };
 
 }  // namespace hermes::ui

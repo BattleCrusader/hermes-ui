@@ -582,6 +582,17 @@ void Supervisor::SetModel(int index, const QString& provider,
   }
 }
 
+void Supervisor::RefreshModelOptions(int index) {
+  if (index < 0 || index >= profile_count()) {
+    return;
+  }
+  ProfileWorker* worker = entries_[static_cast<std::size_t>(index)].worker;
+  if (worker != nullptr) {
+    QMetaObject::invokeMethod(worker, "RefreshModelOptions",
+                              Qt::QueuedConnection);
+  }
+}
+
 void Supervisor::SetReasoning(int index, const QString& effort) {
   if (index < 0 || index >= profile_count()) {
     return;

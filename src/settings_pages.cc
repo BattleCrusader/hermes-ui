@@ -1111,18 +1111,37 @@ QWidget* GatewayPage(const PageContext& context, QWidget* parent) {
   AddHeading(page, layout, context, QStringLiteral("gateway"),
              QStringLiteral("Gateway & web access"));
   layout->addWidget(Description(
-      page, QStringLiteral("Connection registry and the web app listener "
-                           "(/api/webapp-access).")));
+      page,
+      QStringLiteral("The gateway process is separate from the optional "
+                     "web app listener. Restarting the gateway drops live "
+                     "socket sessions briefly.")));
 
   const PageState* state = PageStateFor(context, QStringLiteral("gateway"));
   const QJsonObject access =
       state == nullptr ? QJsonObject() : ObjectField(state->data, "access");
+  const QJsonObject status =
+      state == nullptr ? QJsonObject() : ObjectField(state->data, "status");
   const auto act = context.action;
 
+  layout->addWidget(
+      Label(page, QStringLiteral("Gateway process"), "settingTitle"));
+  const QString gateway_state =
+      status.value(QStringLiteral("gateway_state")).toString();
+  AddRow(page, layout, QStringLiteral("State"),
+         gateway_state.isEmpty() ? QStringLiteral("unknown") : gateway_state);
+  AddRowIfPresent(page, layout, QStringLiteral("Version"),
+                  Text(status.value(QStringLiteral("version"))));
+  AddRowIfPresent(page, layout, QStringLiteral("Process ID"),
+                  Text(status.value(QStringLiteral("gateway_pid"))));
+  AddRowIfPresent(page, layout, QStringLiteral("Active agents"),
+                  Text(status.value(QStringLiteral("active_agents"))));
+
+  layout->addWidget(
+      Label(page, QStringLiteral("Web app listener"), "settingTitle"));
   if (!access.isEmpty()) {
     if (access.contains(QStringLiteral("enabled"))) {
       Row enabled_row =
-          AddRow(page, layout, QStringLiteral("Enabled"), QString());
+          AddRow(page, layout, QStringLiteral("Web app enabled"), QString());
       BoolCheck(enabled_row.widget, QStringLiteral("gatewayEnabled"),
                 access.value(QStringLiteral("enabled")).toBool(),
                 std::function<void(bool)>(), enabled_row.layout);
@@ -1135,11 +1154,11 @@ QWidget* GatewayPage(const PageContext& context, QWidget* parent) {
                     Text(access.value(QStringLiteral("public_url"))));
     AddRowIfPresent(page, layout, QStringLiteral("LAN address"),
                     Text(access.value(QStringLiteral("lan_address"))));
-    const QJsonValue gateway_state = access.value(QStringLiteral("gateway"));
-    AddRow(page, layout, QStringLiteral("Gateway state"),
-           gateway_state.isObject()
-               ? Text(gateway_state.toObject().value(QStringLiteral("state")))
-               : Text(gateway_state));
+    const QJsonValue webapp_state = access.value(QStringLiteral("gateway"));
+    AddRow(page, layout, QStringLiteral("Web app state"),
+           webapp_state.isObject()
+               ? Text(webapp_state.toObject().value(QStringLiteral("state")))
+               : Text(webapp_state));
     if (access.contains(QStringLiteral("nous_signed_in"))) {
       Row nous_row =
           AddRow(page, layout, QStringLiteral("Signed in to Nous"), QString());
@@ -1345,6 +1364,17 @@ QWidget* PluginsPage(const PageContext& context, QWidget* parent) {
                            "by this gateway.")
                 .arg(plugins.size())
                 .arg(hub.size())));
+  if (state != nullptr && !state->error.isEmpty()) {
+    auto* error = Description(page, state->error);
+    error->setObjectName(QStringLiteral("pluginsError"));
+    error->setWordWrap(true);
+    layout->addWidget(error);
+  } else if (state != nullptr && state->loading && !state->loaded) {
+    layout->addWidget(Description(
+        page,
+        QStringLiteral("Loading plugins… slow agent hubs can take up to a "
+                       "minute on first scan.")));
+  }
 
   // Agent plugins carry the enable/disable state; dashboard plugins are tabs
   // contributed by some of the same packages.
@@ -2167,6 +2197,21 @@ QWidget* AboutPage(const PageContext& context, QWidget* parent) {
            Text(update.value(QStringLiteral("behind"))));
     AddRow(page, layout, QStringLiteral("Message"),
            Text(update.value(QStringLiteral("message"))));
+    AddRowIfPresent(page, layout, QStringLiteral("Action ID"),
+                    Text(update.value(QStringLiteral("action_id"))));
+    AddRowIfPresent(page, layout, QStringLiteral("Process ID"),
+                    Text(update.value(QStringLiteral("pid"))));
+  }
+  if (update_state != nullptr && !update_state->error.isEmpty()) {
+    auto* error = Label(page, update_state->error, "settingDescription");
+    error->setObjectName(QStringLiteral("updateError"));
+    error->setWordWrap(true);
+    layout->addWidget(error);
+  } else if (update_state != nullptr && !update_state->notice.isEmpty()) {
+    auto* notice = Label(page, update_state->notice, "settingDescription");
+    notice->setObjectName(QStringLiteral("updateStatus"));
+    notice->setWordWrap(true);
+    layout->addWidget(notice);
   }
 
   auto* row = new QWidget(page);
@@ -4056,6 +4101,33 @@ QWidget* CapabilitiesPage(const PageContext& context, QWidget* parent) {
     // Keep the toggle near the content column instead of pinned to the window
     // edge (the page scroll area is much wider than the form).
     row.widget->setMaximumWidth(760);
+    if (!tool_names.isEmpty()) {
+      QStringList names;
+      for (const QJsonValue& tool : tool_names) {
+        names.append(tool.toString());
+      }
+      auto* tools_button = Button(
+          row.widget, QStringLiteral("Tools (%1)").arg(tool_names.size()));
+      tools_button->setObjectName(QStringLiteral("toolsetToolsButton_") + name);
+      tools_button->setCheckable(true);
+      row.layout->addWidget(tools_button);
+      auto* tools_list = new QLabel(names.join(QStringLiteral(", ")), page);
+      tools_list->setObjectName(QStringLiteral("toolsetTools_") + name);
+      tools_list->setWordWrap(true);
+      tools_list->setTextInteractionFlags(Qt::TextSelectableByMouse);
+      tools_list->setStyleSheet(QStringLiteral("color: %1; padding-left: 12px;")
+                                    .arg(context.theme.text_secondary.name()));
+      tools_list->hide();
+      layout->addWidget(tools_list);
+      QObject::connect(
+          tools_button, &QPushButton::toggled, tools_button,
+          [tools_button, tools_list, count = tool_names.size()](bool expanded) {
+            tools_list->setVisible(expanded);
+            tools_button->setText(
+                expanded ? QStringLiteral("Hide tools")
+                         : QStringLiteral("Tools (%1)").arg(count));
+          });
+    }
     // PUT /api/tools/toolsets/{name} is the route the CLI's own picker uses:
     // a capability really can be switched off.
     BoolCheck(row.widget, QStringLiteral("toolsetToggle_") + name, enabled,

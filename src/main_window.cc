@@ -430,6 +430,9 @@ void MainWindow::BuildUi() {
                                         const QString& model) {
     supervisor_.SetModel(supervisor_.active_index(), provider, model);
   };
+  composer_->on_refresh_models = [this]() {
+    supervisor_.RefreshModelOptions(supervisor_.active_index());
+  };
   composer_->on_reasoning_selected = [this](const QString& effort) {
     supervisor_.SetReasoning(supervisor_.active_index(), effort);
   };
@@ -581,6 +584,8 @@ void MainWindow::BuildUi() {
           });
 #endif
   status_bar_ = new StatusBar(theme_, this);
+  connect(status_bar_, &StatusBar::QueuedReviewRequested, this,
+          [this]() { ShowQueuedPromptsDialog(); });
   root->addWidget(status_bar_);
 
   // A child of the window, not of the layout: the palette covers the title
@@ -2524,6 +2529,9 @@ void MainWindow::ShowDetachedChat() {
                                        const QString& model) {
     supervisor_.SetModel(supervisor_.active_index(), provider, model);
   };
+  composer->on_refresh_models = [this]() {
+    supervisor_.RefreshModelOptions(supervisor_.active_index());
+  };
   composer->on_reasoning_selected = [this](const QString& effort) {
     supervisor_.SetReasoning(supervisor_.active_index(), effort);
   };
@@ -3088,13 +3096,14 @@ void MainWindow::DemoCompleteForProbe() {
   OnGenerationFinished(snapshot, 12400);
   composer_->SetRunning(false);
   sidebar_->SetRunning(false);
-  status_bar_->SetBusy(false);
+  status_bar_->SetWorkState(false, 0);
 }
 
 void MainWindow::SetDemoRunningForProbe(bool running) {
   composer_->SetRunning(running);
   sidebar_->SetRunning(running);
-  status_bar_->SetBusy(running);
+  status_bar_->SetWorkState(running,
+                            running ? QDateTime::currentMSecsSinceEpoch() : 0);
 }
 
 void MainWindow::PressKeyForProbe(const QString& sequence) {
@@ -4761,6 +4770,16 @@ void MainWindow::ApplyGatewayEvents(const ProfileSnapshot& snapshot) {
 void MainWindow::ApplyVoiceState(const ProfileSnapshot& snapshot) {
   composer_->SetVoiceState(snapshot.voice_recording, snapshot.voice_partial,
                            snapshot.voice_status);
+  QString activity;
+  if (!snapshot.voice_partial.trimmed().isEmpty()) {
+    activity = snapshot.voice_partial.trimmed();
+  } else if (snapshot.voice_recording) {
+    activity = QStringLiteral("Listening…");
+  } else if (!snapshot.voice_status.isEmpty() &&
+             snapshot.voice_status != QStringLiteral("idle")) {
+    activity = snapshot.voice_status;
+  }
+  status_bar_->SetActivity(activity);
   composer_->SetPinnedContextCount(static_cast<int>(pinned_context_.size()));
   if (snapshot.voice_transcript_serial < last_voice_transcript_serial_) {
     // Profile switch or worker restart: adopt the new counter without
@@ -4849,7 +4868,8 @@ void MainWindow::ApplyRunIndicators(const ProfileSnapshot& snapshot) {
   composer_->SetRunning(selected_running, started);
   SyncComposerQueueBadge();
   sidebar_->SetRunning(snapshot.running || selected_streaming);
-  status_bar_->SetBusy(selected_running);
+  status_bar_->SetWorkState(selected_running, started,
+                            PendingQueueCount(snapshot));
 
   if (snapshot.slash_catalog_serial != last_slash_catalog_serial_ &&
       !snapshot.slash_commands.empty()) {

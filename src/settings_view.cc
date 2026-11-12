@@ -553,7 +553,6 @@ void SettingsView::BuildNav() {
   add(QStringLiteral("API keys"), QStringLiteral("keys"));
   add(QStringLiteral("Credential vault"), QStringLiteral("vault"));
   add(QStringLiteral("Gateway"), QStringLiteral("gateway"));
-  add(QStringLiteral("Appearance"), QStringLiteral("appearance"));
   add(QStringLiteral("Themes"), QStringLiteral("themes"));
   add(QStringLiteral("Notifications"), QStringLiteral("notifications"));
   add(QStringLiteral("Keybinds"), QStringLiteral("keybinds"));
@@ -622,7 +621,11 @@ void SettingsView::SetTheme(const Theme& theme) {
 void SettingsView::SetSnapshot(const ProfileSnapshot& snapshot) {
   snapshot_ = snapshot;
   PublishPreferences();
-  const bool special_page = IsDataPage(active_id_);
+  const bool model_data_page =
+      active_id_ == QStringLiteral("model") &&
+      (subpage_by_section_.value(active_id_) == QStringLiteral("auxiliary") ||
+       subpage_by_section_.value(active_id_) == QStringLiteral("moa"));
+  const bool special_page = IsDataPage(active_id_) || model_data_page;
   const bool memory_page = active_id_ == QStringLiteral("memory");
   const bool revision_changed = snapshot_.revision != last_revision_;
   const bool artifacts_page_unchanged =
@@ -742,6 +745,16 @@ void SettingsView::Open() {
   if (active_id_ == QStringLiteral("memory") && on_page_request &&
       !snapshot_.pages.contains(QStringLiteral("memory"))) {
     on_page_request(QStringLiteral("memory"));
+  }
+  if (active_id_ == QStringLiteral("model") && on_page_request) {
+    const QString subpage = subpage_by_section_.value(active_id_);
+    if (subpage == QStringLiteral("auxiliary") &&
+        !snapshot_.pages.contains(QStringLiteral("modelaux"))) {
+      on_page_request(QStringLiteral("modelaux"));
+    } else if (subpage == QStringLiteral("moa") &&
+               !snapshot_.pages.contains(QStringLiteral("modelmoa"))) {
+      on_page_request(QStringLiteral("modelmoa"));
+    }
   }
   if (snapshot_.config_loaded) {
     RebuildForm();
@@ -1074,7 +1087,30 @@ void SettingsView::RebuildForm() {
     form_layout_->addWidget(chip_row);
   }
 
+  const bool model_main = active_id_ == QStringLiteral("model") &&
+                          selected_subpage == QStringLiteral("main");
+  const bool auxiliary_page = active_id_ == QStringLiteral("model") &&
+                              selected_subpage == QStringLiteral("auxiliary");
+  const bool moa_page = active_id_ == QStringLiteral("model") &&
+                        selected_subpage == QStringLiteral("moa");
+  const bool fallback_page = active_id_ == QStringLiteral("model") &&
+                             selected_subpage == QStringLiteral("fallbacks");
+  if (model_main) {
+    AppendModelMainRows();
+  } else if (auxiliary_page) {
+    AppendAuxiliaryRows();
+  } else if (moa_page) {
+    AppendMoaRows();
+  } else if (fallback_page) {
+    AppendFallbackRows(ValueAt(QStringLiteral("fallback_providers")));
+  }
+
   for (const QString& key : it->keys) {
+    if ((model_main && (key == QStringLiteral("model") ||
+                        key == QStringLiteral("agent.reasoning_effort"))) ||
+        (fallback_page && key == QStringLiteral("fallback_providers"))) {
+      continue;
+    }
     if (filter_fields) {
       if (!key.toLower().contains(query) &&
           !PrettyKey(key).toLower().contains(query)) {
@@ -1637,6 +1673,606 @@ void SettingsView::AppendAudioDeviceRows() {
       QStringLiteral("audio.input_device"), QStringLiteral("Microphone"),
       QStringLiteral("Preferred microphone for native capture surfaces."),
       true));
+}
+
+namespace {
+
+QWidget* ModelSettingRow(QWidget* parent, QVBoxLayout* form_layout,
+                         const QString& title_text, const QString& description,
+                         QWidget* control) {
+  auto* row = new QWidget(parent);
+  auto* outer = new QHBoxLayout(row);
+  outer->setContentsMargins(0, 0, 0, 0);
+  outer->setSpacing(16);
+  auto* labels = new QVBoxLayout();
+  labels->setSpacing(2);
+  auto* title = new QLabel(title_text, row);
+  title->setObjectName(QStringLiteral("settingTitle"));
+  auto* detail = new QLabel(description, row);
+  detail->setObjectName(QStringLiteral("settingDescription"));
+  detail->setWordWrap(true);
+  labels->addWidget(title);
+  labels->addWidget(detail);
+  outer->addLayout(labels, 1);
+  control->setFixedWidth(300);
+  outer->addWidget(control, 0, Qt::AlignTop);
+  form_layout->addWidget(row);
+  return row;
+}
+
+}  // namespace
+
+QString AuxiliaryTaskLabel(const QString& task_id) {
+  QString text = task_id;
+  text.replace(QLatin1Char('_'), QLatin1Char(' '));
+  if (!text.isEmpty()) {
+    text[0] = text[0].toUpper();
+  }
+  return text;
+}
+
+QString DefaultModelProvider(const ProfileSnapshot& snapshot,
+                             const QString& model) {
+  if (!snapshot.provider.isEmpty()) {
+    return snapshot.provider;
+  }
+  // The raw config can carry an alias (deepseek-v4.1-flash) while the catalog
+  // lists the provider-qualified id. Try both, case-insensitively, before
+  // giving up and leaving the provider combo empty.
+  for (const QString& candidate : {model, snapshot.model}) {
+    if (candidate.isEmpty()) {
+      continue;
+    }
+    for (const ModelProvider& provider : snapshot.model_providers) {
+      for (const QString& entry : provider.models) {
+        if (entry.compare(candidate, Qt::CaseInsensitive) == 0) {
+          return provider.slug;
+        }
+      }
+    }
+  }
+  return QString();
+}
+
+void SettingsView::AppendModelMainRows() {
+  // /api/config normalizes a dict-form model section to its bare string so the
+  // legacy schema can edit it. Read the model from that string and recover the
+  // provider from the catalog, otherwise both combos render empty.
+  const QString model =
+      ValueAt(QStringLiteral("model")).toString(snapshot_.model);
+  const QString provider_slug = DefaultModelProvider(snapshot_, model);
+  auto* provider_row = new QWidget(form_);
+  auto* provider = new QComboBox(provider_row);
+  provider->setObjectName(QStringLiteral("setting_model_provider"));
+  provider->setEditable(true);
+  provider->setInsertPolicy(QComboBox::NoInsert);
+  for (const ModelProvider& entry : snapshot_.model_providers) {
+    provider->addItem(entry.slug, entry.slug);
+  }
+  if (!provider_slug.isEmpty() && provider->findData(provider_slug) < 0) {
+    provider->addItem(provider_slug, provider_slug);
+  }
+  provider->setCurrentText(provider_slug);
+
+  auto* model_row = new QWidget(form_);
+  auto* model_combo = new QComboBox(model_row);
+  model_combo->setObjectName(QStringLiteral("setting_model_default"));
+  model_combo->setEditable(true);
+  model_combo->setInsertPolicy(QComboBox::NoInsert);
+  const auto fill_models = [this, model_combo](const QString& slug,
+                                               const QString& selected) {
+    model_combo->blockSignals(true);
+    model_combo->clear();
+    for (const ModelProvider& entry : snapshot_.model_providers) {
+      if (entry.slug != slug) {
+        continue;
+      }
+      for (const QString& item : entry.models) {
+        model_combo->addItem(item, item);
+      }
+      break;
+    }
+    if (!selected.isEmpty() && model_combo->findData(selected) < 0) {
+      model_combo->addItem(selected, selected);
+    }
+    const int index = model_combo->findData(selected);
+    if (index >= 0) {
+      model_combo->setCurrentIndex(index);
+    } else if (model_combo->count() > 0) {
+      model_combo->setCurrentIndex(0);
+    } else {
+      model_combo->setCurrentText(selected);
+    }
+    model_combo->blockSignals(false);
+  };
+  fill_models(provider_slug, model);
+
+  QObject::connect(provider, &QComboBox::currentTextChanged, this,
+                   [this, model_combo, fill_models](const QString& text) {
+                     if (building_) {
+                       return;
+                     }
+                     QueueSave(QStringLiteral("model.provider"), text);
+                     // A known provider switch starts from that provider's
+                     // first model; typing a custom model afterwards still
+                     // overrides it.
+                     fill_models(text, QString());
+                     if (!model_combo->currentText().isEmpty()) {
+                       QueueSave(QStringLiteral("model.default"),
+                                 model_combo->currentText());
+                     }
+                   });
+  QObject::connect(model_combo, &QComboBox::currentTextChanged, this,
+                   [this](const QString& text) {
+                     if (!building_) {
+                       QueueSave(QStringLiteral("model.default"), text);
+                     }
+                   });
+
+  provider_row->setObjectName(QStringLiteral("setting_model_provider_row"));
+  ModelSettingRow(provider_row, form_layout_, QStringLiteral("Provider"),
+                  QStringLiteral("Provider used for the default chat model."),
+                  provider);
+  model_row->setObjectName(QStringLiteral("setting_model_default_row"));
+  ModelSettingRow(model_row, form_layout_, QStringLiteral("Default model"),
+                  QStringLiteral("Model selected when a chat starts."),
+                  model_combo);
+
+  auto* effort_row = new QWidget(form_);
+  auto* effort = new QComboBox(effort_row);
+  effort->setObjectName(QStringLiteral("setting_agent_reasoning_effort"));
+  for (const QString& option :
+       {QStringLiteral("minimal"), QStringLiteral("low"),
+        QStringLiteral("medium"), QStringLiteral("high"),
+        QStringLiteral("xhigh"), QStringLiteral("max"),
+        QStringLiteral("ultra")}) {
+    effort->addItem(option, option);
+  }
+  const QString current_effort =
+      ValueAt(QStringLiteral("agent.reasoning_effort")).toString();
+  if (!current_effort.isEmpty() && effort->findData(current_effort) < 0) {
+    effort->addItem(current_effort, current_effort);
+  }
+  effort->setCurrentIndex(effort->findData(current_effort));
+  QObject::connect(effort, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                   this, [this, effort](int index) {
+                     if (!building_ && index >= 0) {
+                       QueueSave(QStringLiteral("agent.reasoning_effort"),
+                                 effort->itemData(index).toString());
+                     }
+                   });
+  effort_row->setObjectName(
+      QStringLiteral("setting_agent_reasoning_effort_row"));
+  ModelSettingRow(effort_row, form_layout_, QStringLiteral("Reasoning effort"),
+                  QStringLiteral("How much internal reasoning the agent does "
+                                 "before answering."),
+                  effort);
+}
+
+void SettingsView::AppendAuxiliaryRows() {
+  auto* heading = new QLabel(QStringLiteral("Auxiliary models"), form_);
+  heading->setObjectName(QStringLiteral("settingTitle"));
+  form_layout_->addWidget(heading);
+  auto* intro = new QLabel(
+      QStringLiteral("Models used for background jobs such as compression, "
+                     "titles and memory. Saving one task leaves the other "
+                     "tasks untouched."),
+      form_);
+  intro->setObjectName(QStringLiteral("settingDescription"));
+  intro->setWordWrap(true);
+  form_layout_->addWidget(intro);
+
+  if (on_page_request &&
+      !snapshot_.pages.contains(QStringLiteral("modelaux"))) {
+    QTimer::singleShot(0, this, [this]() {
+      if (active_id_ == QStringLiteral("model") &&
+          subpage_by_section_.value(active_id_) ==
+              QStringLiteral("auxiliary") &&
+          on_page_request &&
+          !snapshot_.pages.contains(QStringLiteral("modelaux"))) {
+        on_page_request(QStringLiteral("modelaux"));
+      }
+    });
+  }
+  const PageState state = snapshot_.pages.value(QStringLiteral("modelaux"));
+  if (!state.error.isEmpty()) {
+    auto* error = new QLabel(state.error, form_);
+    error->setObjectName(QStringLiteral("settingDescription"));
+    error->setWordWrap(true);
+    form_layout_->addWidget(error);
+  }
+  if (!state.loaded && (state.loading || on_page_request)) {
+    auto* loading =
+        new QLabel(QStringLiteral("Loading auxiliary models…"), form_);
+    loading->setObjectName(QStringLiteral("settingDescription"));
+    form_layout_->addWidget(loading);
+    return;
+  }
+  const QJsonObject root =
+      state.data.value(QStringLiteral("auxiliary")).toObject();
+  // The route returns {"tasks": [...], "main": {...}}; FetchPage stores that
+  // response under the "auxiliary" source key, so do not unwrap a second
+  // "auxiliary" object here.
+  const QJsonArray tasks = root.value(QStringLiteral("tasks")).toArray();
+  const QString profile_query =
+      snapshot_.name.isEmpty()
+          ? QString()
+          : QStringLiteral("?profile=%1")
+                .arg(QString::fromLatin1(
+                    QUrl::toPercentEncoding(snapshot_.name)));
+  if (tasks.isEmpty()) {
+    auto* empty =
+        new QLabel(QStringLiteral("No auxiliary tasks were reported."), form_);
+    empty->setObjectName(QStringLiteral("settingDescription"));
+    form_layout_->addWidget(empty);
+    return;
+  }
+
+  for (const QJsonValue& value : tasks) {
+    const QJsonObject task = value.toObject();
+    const QString task_id = task.value(QStringLiteral("task")).toString();
+    QString label = task.value(QStringLiteral("label")).toString();
+    if (label.isEmpty() || label == task_id) {
+      label = AuxiliaryTaskLabel(task_id);
+    }
+    const QString hint = task.value(QStringLiteral("hint")).toString();
+    auto* card = new QWidget(form_);
+    card->setObjectName(QStringLiteral("auxiliaryRow_") + task_id);
+    auto* card_layout = new QVBoxLayout(card);
+    card_layout->setContentsMargins(0, 6, 0, 6);
+    auto* title = new QLabel(label, card);
+    title->setObjectName(QStringLiteral("settingTitle"));
+    card_layout->addWidget(title);
+    if (!hint.isEmpty()) {
+      auto* detail = new QLabel(hint, card);
+      detail->setObjectName(QStringLiteral("settingDescription"));
+      detail->setWordWrap(true);
+      card_layout->addWidget(detail);
+    }
+    auto* controls = new QHBoxLayout();
+    auto* provider = new QComboBox(card);
+    provider->setObjectName(QStringLiteral("auxiliaryProvider_") + task_id);
+    for (const ModelProvider& entry : snapshot_.model_providers) {
+      provider->addItem(entry.slug, entry.slug);
+    }
+    const QString current_provider =
+        task.value(QStringLiteral("provider"))
+            .toString(root.value(QStringLiteral("main"))
+                          .toObject()
+                          .value(QStringLiteral("provider"))
+                          .toString());
+    if (!current_provider.isEmpty() &&
+        provider->findData(current_provider) < 0) {
+      provider->addItem(current_provider, current_provider);
+    }
+    provider->setCurrentIndex(provider->findData(current_provider));
+    controls->addWidget(provider);
+    auto* model = new QComboBox(card);
+    model->setObjectName(QStringLiteral("auxiliaryModel_") + task_id);
+    const auto fill = [this, model](const QString& slug,
+                                    const QString& selected) {
+      model->clear();
+      for (const ModelProvider& entry : snapshot_.model_providers) {
+        if (entry.slug != slug) {
+          continue;
+        }
+        for (const QString& item : entry.models) {
+          model->addItem(item, item);
+        }
+        break;
+      }
+      if (!selected.isEmpty() && model->findData(selected) < 0) {
+        model->addItem(selected, selected);
+      }
+      model->setCurrentIndex(model->findData(selected));
+      if (model->currentIndex() < 0 && model->count() > 0) {
+        model->setCurrentIndex(0);
+      }
+    };
+    const QString current_model =
+        task.value(QStringLiteral("model"))
+            .toString(root.value(QStringLiteral("main"))
+                          .toObject()
+                          .value(QStringLiteral("model"))
+                          .toString());
+    fill(current_provider, current_model);
+    QObject::connect(provider, &QComboBox::currentTextChanged, this,
+                     [model, fill, provider](const QString&) {
+                       fill(provider->currentData().toString(),
+                            model->currentText());
+                     });
+    controls->addWidget(model);
+    auto* save = new QPushButton(QStringLiteral("Save"), card);
+    save->setObjectName(QStringLiteral("auxiliarySave_") + task_id);
+    controls->addWidget(save);
+    controls->addStretch(1);
+    card_layout->addLayout(controls);
+    form_layout_->addWidget(card);
+    QObject::connect(save, &QPushButton::clicked, this,
+                     [this, task_id, provider, model, profile_query]() {
+                       if (on_page_action) {
+                         on_page_action(
+                             QStringLiteral("modelaux"), QStringLiteral("POST"),
+                             QStringLiteral("/api/model/set") + profile_query,
+                             QJsonObject{{QStringLiteral("scope"),
+                                          QStringLiteral("auxiliary")},
+                                         {QStringLiteral("task"), task_id},
+                                         {QStringLiteral("provider"),
+                                          provider->currentData().toString()},
+                                         {QStringLiteral("model"),
+                                          model->currentData().toString()}});
+                       }
+                     });
+  }
+}
+
+void SettingsView::AppendFallbackRows(const QJsonValue& value) {
+  auto* heading = new QLabel(QStringLiteral("Fallback models"), form_);
+  heading->setObjectName(QStringLiteral("settingTitle"));
+  form_layout_->addWidget(heading);
+  auto* intro = new QLabel(
+      QStringLiteral("Tried in order when the default model fails. Each row "
+                     "keeps any extra backend fields, such as a custom base "
+                     "URL. Leave reasoning blank to inherit the main effort."),
+      form_);
+  intro->setObjectName(QStringLiteral("settingDescription"));
+  intro->setWordWrap(true);
+  form_layout_->addWidget(intro);
+
+  const QJsonArray previous = value.toArray();
+  auto* legacy = new QLineEdit(form_);
+  legacy->setObjectName(QStringLiteral("setting_fallback_providers"));
+  legacy->setText(FormatFallbackChain(previous));
+  legacy->hide();
+  QObject::connect(legacy, &QLineEdit::editingFinished, this,
+                   [this, legacy, previous]() {
+                     QueueSave(QStringLiteral("fallback_providers"),
+                               ParseFallbackChain(legacy->text(), previous));
+                   });
+
+  struct Row {
+    QWidget* card = nullptr;
+    QComboBox* provider = nullptr;
+    QComboBox* model = nullptr;
+    QComboBox* effort = nullptr;
+    QJsonObject original;
+  };
+  auto rows = std::make_shared<std::vector<Row>>();
+  const auto chain = [rows]() {
+    QJsonArray result;
+    for (const Row& row : *rows) {
+      QJsonObject entry = row.original;
+      entry.insert(QStringLiteral("provider"),
+                   row.provider->currentText().trimmed());
+      entry.insert(QStringLiteral("model"), row.model->currentText().trimmed());
+      const QString effort = row.effort->currentData().toString();
+      if (effort.isEmpty()) {
+        entry.remove(QStringLiteral("reasoning_effort"));
+      } else {
+        entry.insert(QStringLiteral("reasoning_effort"), effort);
+      }
+      result.append(entry);
+    }
+    return result;
+  };
+  const auto save = [this, chain, legacy]() {
+    if (building_) {
+      return;
+    }
+    const QJsonArray next = chain();
+    legacy->setText(FormatFallbackChain(next));
+    QueueSave(QStringLiteral("fallback_providers"), next);
+  };
+  const auto fill_models = [this](QComboBox* model, const QString& slug,
+                                  const QString& selected) {
+    model->blockSignals(true);
+    model->clear();
+    for (const ModelProvider& entry : snapshot_.model_providers) {
+      if (entry.slug != slug) {
+        continue;
+      }
+      for (const QString& item : entry.models) {
+        model->addItem(item, item);
+      }
+      break;
+    }
+    if (!selected.isEmpty() && model->findData(selected) < 0) {
+      model->addItem(selected, selected);
+    }
+    model->setCurrentText(selected);
+    model->blockSignals(false);
+  };
+
+  for (int index = 0; index < previous.size(); ++index) {
+    const QJsonObject entry = previous.at(index).toObject();
+    Row row;
+    row.original = entry;
+    row.card = new QWidget(form_);
+    row.card->setObjectName(QStringLiteral("fallbackRow_%1").arg(index));
+    auto* layout = new QHBoxLayout(row.card);
+    layout->setContentsMargins(0, 2, 0, 2);
+    layout->setSpacing(6);
+    row.provider = new QComboBox(row.card);
+    row.provider->setObjectName(
+        QStringLiteral("fallbackProvider_%1").arg(index));
+    row.provider->setEditable(true);
+    row.provider->setInsertPolicy(QComboBox::NoInsert);
+    for (const ModelProvider& provider : snapshot_.model_providers) {
+      row.provider->addItem(provider.slug, provider.slug);
+    }
+    row.provider->setCurrentText(
+        entry.value(QStringLiteral("provider")).toString());
+    layout->addWidget(row.provider);
+
+    row.model = new QComboBox(row.card);
+    row.model->setObjectName(QStringLiteral("fallbackModel_%1").arg(index));
+    row.model->setEditable(true);
+    row.model->setInsertPolicy(QComboBox::NoInsert);
+    fill_models(row.model, row.provider->currentText(),
+                entry.value(QStringLiteral("model")).toString());
+    layout->addWidget(row.model);
+
+    row.effort = new QComboBox(row.card);
+    row.effort->setObjectName(QStringLiteral("fallbackEffort_%1").arg(index));
+    row.effort->addItem(QStringLiteral("inherit"), QString());
+    for (const QString& option :
+         {QStringLiteral("minimal"), QStringLiteral("low"),
+          QStringLiteral("medium"), QStringLiteral("high"),
+          QStringLiteral("xhigh"), QStringLiteral("max"),
+          QStringLiteral("ultra")}) {
+      row.effort->addItem(option, option);
+    }
+    const QString effort =
+        entry.value(QStringLiteral("reasoning_effort")).toString();
+    const int effort_index = row.effort->findData(effort);
+    row.effort->setCurrentIndex(effort_index >= 0 ? effort_index : 0);
+    layout->addWidget(row.effort);
+
+    auto* remove = new QPushButton(QStringLiteral("Remove"), row.card);
+    remove->setObjectName(QStringLiteral("fallbackRemove_%1").arg(index));
+    layout->addWidget(remove);
+    form_layout_->addWidget(row.card);
+    rows->push_back(row);
+
+    QObject::connect(row.provider, &QComboBox::currentTextChanged, this,
+                     [row, fill_models, save](const QString& text) {
+                       fill_models(row.model, text, row.model->currentText());
+                       save();
+                     });
+    QObject::connect(row.model, &QComboBox::currentTextChanged, this,
+                     [save](const QString&) { save(); });
+    QObject::connect(row.effort,
+                     QOverload<int>::of(&QComboBox::currentIndexChanged), this,
+                     [save](int) { save(); });
+    QObject::connect(remove, &QPushButton::clicked, this,
+                     [this, chain, index]() {
+                       QJsonArray next = chain();
+                       next.removeAt(index);
+                       QueueSave(QStringLiteral("fallback_providers"), next);
+                       QTimer::singleShot(0, this, [this]() {
+                         if (active_id_ == QStringLiteral("model") &&
+                             subpage_by_section_.value(active_id_) ==
+                                 QStringLiteral("fallbacks")) {
+                           RebuildForm();
+                         }
+                       });
+                     });
+  }
+
+  auto* add = new QPushButton(QStringLiteral("Add fallback"), form_);
+  add->setObjectName(QStringLiteral("fallbackAdd"));
+  QObject::connect(add, &QPushButton::clicked, this, [this, chain]() {
+    QJsonArray next = chain();
+    QJsonObject entry{
+        {QStringLiteral("provider"),
+         DefaultModelProvider(snapshot_, snapshot_.model)},
+        {QStringLiteral("model"),
+         ValueAt(QStringLiteral("model")).toString(snapshot_.model)}};
+    next.append(entry);
+    QueueSave(QStringLiteral("fallback_providers"), next);
+    QTimer::singleShot(0, this, [this]() {
+      if (active_id_ == QStringLiteral("model") &&
+          subpage_by_section_.value(active_id_) ==
+              QStringLiteral("fallbacks")) {
+        RebuildForm();
+      }
+    });
+  });
+  form_layout_->addWidget(add);
+}
+
+void SettingsView::AppendMoaRows() {
+  auto* heading = new QLabel(QStringLiteral("Mixture of Agents"), form_);
+  heading->setObjectName(QStringLiteral("settingTitle"));
+  form_layout_->addWidget(heading);
+  auto* intro = new QLabel(
+      QStringLiteral("MoA presets combine several reference models and an "
+                     "aggregator. Configure presets with `hermes moa`; this "
+                     "page shows the presets the gateway currently serves."),
+      form_);
+  intro->setObjectName(QStringLiteral("settingDescription"));
+  intro->setWordWrap(true);
+  form_layout_->addWidget(intro);
+
+  if (on_page_request &&
+      !snapshot_.pages.contains(QStringLiteral("modelmoa"))) {
+    QTimer::singleShot(0, this, [this]() {
+      if (active_id_ == QStringLiteral("model") &&
+          subpage_by_section_.value(active_id_) == QStringLiteral("moa") &&
+          on_page_request &&
+          !snapshot_.pages.contains(QStringLiteral("modelmoa"))) {
+        on_page_request(QStringLiteral("modelmoa"));
+      }
+    });
+  }
+  const PageState state = snapshot_.pages.value(QStringLiteral("modelmoa"));
+  if (!state.error.isEmpty()) {
+    auto* error = new QLabel(state.error, form_);
+    error->setObjectName(QStringLiteral("settingDescription"));
+    error->setWordWrap(true);
+    form_layout_->addWidget(error);
+  }
+  if (!state.loaded && (state.loading || on_page_request)) {
+    auto* loading = new QLabel(QStringLiteral("Loading MoA presets…"), form_);
+    loading->setObjectName(QStringLiteral("settingDescription"));
+    form_layout_->addWidget(loading);
+    return;
+  }
+  const QJsonObject root = state.data.value(QStringLiteral("moa")).toObject();
+  const QString default_preset =
+      root.value(QStringLiteral("default_preset")).toString();
+  const QString active_preset =
+      root.value(QStringLiteral("active_preset")).toString();
+  const QJsonObject presets = root.value(QStringLiteral("presets")).toObject();
+  auto* summary = new QLabel(
+      QStringLiteral("Default: %1 · Active: %2")
+          .arg(default_preset.isEmpty() ? QStringLiteral("none")
+                                        : default_preset,
+               active_preset.isEmpty() ? QStringLiteral("default preset")
+                                       : active_preset),
+      form_);
+  summary->setObjectName(QStringLiteral("settingDescription"));
+  form_layout_->addWidget(summary);
+  if (presets.isEmpty()) {
+    auto* empty =
+        new QLabel(QStringLiteral("No MoA presets configured."), form_);
+    empty->setObjectName(QStringLiteral("settingDescription"));
+    form_layout_->addWidget(empty);
+    return;
+  }
+  for (auto it = presets.begin(); it != presets.end(); ++it) {
+    const QJsonObject preset = it.value().toObject();
+    auto* card = new QWidget(form_);
+    card->setObjectName(QStringLiteral("moaPreset_") + it.key());
+    auto* layout = new QVBoxLayout(card);
+    layout->setContentsMargins(0, 6, 0, 6);
+    auto* title = new QLabel(QStringLiteral("Preset: %1").arg(it.key()), card);
+    title->setObjectName(QStringLiteral("settingTitle"));
+    layout->addWidget(title);
+    const QJsonArray references =
+        preset.value(QStringLiteral("reference_models")).toArray();
+    QStringList reference_labels;
+    for (const QJsonValue& reference : references) {
+      const QJsonObject slot = reference.toObject();
+      reference_labels.append(QStringLiteral("%1/%2").arg(
+          slot.value(QStringLiteral("provider")).toString(),
+          slot.value(QStringLiteral("model")).toString()));
+    }
+    const QJsonObject aggregator =
+        preset.value(QStringLiteral("aggregator")).toObject();
+    auto* detail = new QLabel(
+        QStringLiteral("References: %1\nAggregator: %2/%3")
+            .arg(reference_labels.isEmpty()
+                     ? QStringLiteral("none")
+                     : reference_labels.join(QStringLiteral(", ")),
+                 aggregator.value(QStringLiteral("provider")).toString(),
+                 aggregator.value(QStringLiteral("model")).toString()),
+        card);
+    detail->setObjectName(QStringLiteral("settingDescription"));
+    detail->setWordWrap(true);
+    layout->addWidget(detail);
+    form_layout_->addWidget(card);
+  }
 }
 
 QJsonValue SettingsView::ValueAt(const QString& key) const {

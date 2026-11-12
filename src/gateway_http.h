@@ -27,7 +27,7 @@ class GatewayHttp {
 
   // GET/PUT cover the config and session read/write paths.
   bool GetJson(const QString& path, QJsonDocument* document, QString* error,
-               bool authenticate = true);
+               bool authenticate = true, int timeout_ms = 0);
   bool PutJson(const QString& path, const QJsonObject& body,
                QJsonDocument* document, QString* error,
                bool authenticate = true);
@@ -61,7 +61,8 @@ class GatewayHttp {
   // Returns false and fills *error for a non-2xx status or a transport error.
   bool RequestJson(const QString& method, const QString& path,
                    const QJsonObject& body, QJsonDocument* document,
-                   QString* error, bool authenticate = true);
+                   QString* error, bool authenticate = true,
+                   int timeout_ms = 0);
 
   // Aborts the in-flight request. Called from the worker's Shutdown while the
   // request's nested event loop may still be running.
@@ -79,7 +80,7 @@ class GatewayHttp {
   Result Perform(const QByteArray& method, const QUrl& url,
                  const QString& ticket, const QByteArray& body,
                  const QByteArray& content_type = QByteArray(),
-                 bool parse_json = true);
+                 bool parse_json = true, int timeout_ms = 0);
 
   // Mints a native-http ticket. A gateway restart replaces the endpoint's
   // instance id while keeping its API origin, so retry once after discovering

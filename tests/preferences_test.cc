@@ -39,6 +39,7 @@
 #include <QTextBrowser>
 #include <QTextDocument>
 #include <QTextEdit>
+#include <QToolButton>
 #include <QTreeView>
 #include <QWebSocket>
 #include <QWebSocketServer>
@@ -329,33 +330,43 @@ void PreferencesTest::composerExpandsStatusLineWhileRunning() {
   hermes::ui::Composer composer(theme);
   QCOMPARE(composer.height(), 116);
   QSignalSpy heights(&composer, &hermes::ui::Composer::HeightChanged);
+  // Work status lives in the status bar now, so running must not grow the
+  // composer or churn layout while the transcript streams.
   composer.SetRunning(true);
-  QCOMPARE(composer.height(), 134);
-  QCOMPARE(heights.count(), 1);
-  QCOMPARE(heights.takeFirst().at(0).toInt(), 134);
+  QCOMPARE(composer.height(), 116);
+  QVERIFY(heights.isEmpty());
   composer.SetRunning(false);
   QCOMPARE(composer.height(), 116);
-  QCOMPARE(heights.count(), 1);
-  QCOMPARE(heights.takeFirst().at(0).toInt(), 116);
-  // Idempotent calls must not churn the layout.
-  composer.SetRunning(false);
   QVERIFY(heights.isEmpty());
 }
 
 void PreferencesTest::composerQueuedStatusOpensReview() {
   hermes::ui::Theme theme = hermes::ui::Theme::Light();
-  hermes::ui::Composer composer(theme);
-  composer.resize(600, 134);
-  composer.show();
-  composer.SetRunning(true);
-  composer.SetQueuedPrompts(2);
-  QSignalSpy review(&composer, &hermes::ui::Composer::QueuedReviewRequested);
-  QTest::mouseClick(&composer, Qt::LeftButton, Qt::NoModifier,
-                    QPoint(40, composer.height() - 10));
+  hermes::ui::StatusBar bar(theme);
+  bar.resize(900, 26);
+  bar.show();
+  QCOMPARE(hermes::ui::FormatWorkElapsed(0), QStringLiteral("0s"));
+  QCOMPARE(hermes::ui::FormatWorkElapsed(7000), QStringLiteral("7s"));
+  QCOMPARE(hermes::ui::FormatWorkElapsed(123000), QStringLiteral("2m 03s"));
+  QCOMPARE(hermes::ui::FormatWorkElapsed(3723000),
+           QStringLiteral("1h 02m 03s"));
+  bar.SetWorkState(true, QDateTime::currentMSecsSinceEpoch() - 123000, 2);
+  QCOMPARE(bar.WorkText(), QStringLiteral("Working · 2m 03s · 2 queued"));
+  QSignalSpy review(&bar, &hermes::ui::StatusBar::QueuedReviewRequested);
+  QTest::mouseClick(&bar, Qt::LeftButton, Qt::NoModifier,
+                    QPoint(bar.width() / 2, bar.height() / 2));
   QCOMPARE(review.count(), 1);
-  // A click on the action row must not open the queue list.
-  QTest::mouseClick(&composer, Qt::LeftButton, Qt::NoModifier, QPoint(40, 70));
+  // Once idle the same click must not reopen the queue list.
+  bar.SetWorkState(false, 0);
+  QVERIFY(bar.WorkText().isEmpty());
+  QTest::mouseClick(&bar, Qt::LeftButton, Qt::NoModifier,
+                    QPoint(bar.width() / 2, bar.height() / 2));
   QCOMPARE(review.count(), 1);
+  // Activity text (voice) takes precedence over the work timer.
+  bar.SetActivity(QStringLiteral("Listening…"));
+  bar.SetWorkState(true, QDateTime::currentMSecsSinceEpoch(), 0);
+  QCOMPARE(bar.CenterTextForTest(), QStringLiteral("Listening…"));
+  bar.SetActivity(QString());
 }
 
 void PreferencesTest::selectedTurnRunningFallsBackToStreaming() {
@@ -2035,6 +2046,18 @@ void PreferencesTest::modelVisibilityFiltersPickerAndPersists() {
   QVERIFY(!m2->isChecked());
 
   m2->setChecked(true);
+  // Refresh hands the work to the shell and keeps the dialog from saving a
+  // stale catalog while the provider cache is being rebuilt.
+  bool refreshed = false;
+  composer.on_refresh_models = [&refreshed]() { refreshed = true; };
+  auto* refresh =
+      dialog->findChild<QPushButton*>(QStringLiteral("modelVisibilityRefresh"));
+  QVERIFY(refresh != nullptr);
+  refresh->click();
+  QVERIFY(refreshed);
+  QVERIFY(!refresh->isEnabled());
+  QCOMPARE(refresh->text(), QStringLiteral("Refreshing…"));
+
   auto* save =
       dialog->findChild<QPushButton*>(QStringLiteral("modelVisibilitySave"));
   QVERIFY(save != nullptr);
@@ -2121,6 +2144,24 @@ void PreferencesTest::modelVisibilityProviderToggleSelectsGroup() {
   QVERIFY(m2 != nullptr);
   QVERIFY(m3 != nullptr);
 
+  // Only the composer's current provider starts expanded; the second
+  // provider's models stay behind its chevron.
+  auto* body1 =
+      dialog->findChild<QWidget*>(QStringLiteral("modelVisibilityModels_p1"));
+  auto* body2 =
+      dialog->findChild<QWidget*>(QStringLiteral("modelVisibilityModels_p2"));
+  auto* expand2 = dialog->findChild<QToolButton*>(
+      QStringLiteral("modelVisibilityExpand_p2"));
+  QVERIFY(body1 != nullptr);
+  QVERIFY(body2 != nullptr);
+  QVERIFY(expand2 != nullptr);
+  QVERIFY(body1->isVisible());
+  QVERIFY(!body2->isVisible());
+  expand2->click();
+  QVERIFY(body2->isVisible());
+  expand2->click();
+  QVERIFY(!body2->isVisible());
+
   QCOMPARE(p1->checkState(), Qt::PartiallyChecked);
   QCOMPARE(p2->checkState(), Qt::Unchecked);
 
@@ -2162,6 +2203,18 @@ void PreferencesTest::modelVisibilityProviderToggleSelectsGroup() {
   all->click();
   QCOMPARE(p1->checkState(), Qt::Checked);
   QVERIFY(m2->isChecked());
+
+  // Refresh hands the work to the shell and keeps the dialog from saving a
+  // stale catalog while the provider cache is being rebuilt.
+  bool refreshed = false;
+  composer.on_refresh_models = [&refreshed]() { refreshed = true; };
+  auto* refresh =
+      dialog->findChild<QPushButton*>(QStringLiteral("modelVisibilityRefresh"));
+  QVERIFY(refresh != nullptr);
+  refresh->click();
+  QVERIFY(refreshed);
+  QVERIFY(!refresh->isEnabled());
+  QCOMPARE(refresh->text(), QStringLiteral("Refreshing…"));
 
   auto* save =
       dialog->findChild<QPushButton*>(QStringLiteral("modelVisibilitySave"));

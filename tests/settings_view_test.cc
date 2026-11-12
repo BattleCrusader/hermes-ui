@@ -102,6 +102,8 @@ class SettingsViewTest : public QObject {
   void fontScaleScalesThemeFonts();
   void delegationEditsModelFallbacksAndProfileRoutes();
   void modelSectionEditsOrderedFallbackChain();
+  void modelSectionEditsProviderModelAndReasoning();
+  void modelAuxiliaryAndMoaPagesRender();
   void voiceFieldsFollowSelectedProviders();
   void memorySectionShowsLayersAndProviderConfig();
   void settingsSubpagesDeepLinkAndSearchFields();
@@ -4492,6 +4494,182 @@ void SettingsViewTest::delegationEditsModelFallbacksAndProfileRoutes() {
   QCOMPARE(actions, 3);
   QCOMPARE(body.value(QStringLiteral("default")).toString(),
            QStringLiteral("ceo"));
+}
+
+void SettingsViewTest::modelSectionEditsProviderModelAndReasoning() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::SettingsView view(theme);
+  QJsonObject saved;
+  view.on_save = [&saved](const QJsonObject& patch) { saved = patch; };
+  view.show();
+  auto snapshot = Snapshot();
+  // `/api/config` normalizes a dict-form model section to the legacy bare
+  // string; the editor must recover the provider from the catalog.
+  snapshot.provider.clear();
+  snapshot.model = QStringLiteral("m1");
+  snapshot.config.insert(QStringLiteral("model"), QStringLiteral("m1"));
+  snapshot.config.insert(QStringLiteral("agent"),
+                         QJsonObject{{QStringLiteral("reasoning_effort"),
+                                      QStringLiteral("medium")}});
+  hermes::ui::ModelProvider first;
+  first.name = QStringLiteral("Provider One");
+  first.slug = QStringLiteral("p1");
+  first.models = {QStringLiteral("m1"), QStringLiteral("m2")};
+  hermes::ui::ModelProvider second;
+  second.name = QStringLiteral("Provider Two");
+  second.slug = QStringLiteral("p2");
+  second.models = {QStringLiteral("m3"), QStringLiteral("m4")};
+  snapshot.model_providers = {first, second};
+  view.SetSnapshot(snapshot);
+
+  auto* nav = view.findChild<QListWidget*>(QStringLiteral("settingsNav"));
+  QVERIFY(nav != nullptr);
+  for (int i = 0; i < nav->count(); ++i) {
+    if (nav->item(i)->data(Qt::UserRole).toString() ==
+        QStringLiteral("model")) {
+      nav->setCurrentRow(i);
+      break;
+    }
+  }
+  auto* provider =
+      view.findChild<QComboBox*>(QStringLiteral("setting_model_provider"));
+  auto* model =
+      view.findChild<QComboBox*>(QStringLiteral("setting_model_default"));
+  auto* effort = view.findChild<QComboBox*>(
+      QStringLiteral("setting_agent_reasoning_effort"));
+  QVERIFY(provider != nullptr);
+  QVERIFY(model != nullptr);
+  QVERIFY(effort != nullptr);
+  QCOMPARE(provider->currentText(), QStringLiteral("p1"));
+  QCOMPARE(model->currentText(), QStringLiteral("m1"));
+  QCOMPARE(effort->currentData().toString(), QStringLiteral("medium"));
+
+  provider->setCurrentIndex(provider->findData(QStringLiteral("p2")));
+  QTest::qWait(800);
+  QCOMPARE(saved.value(QStringLiteral("model"))
+               .toObject()
+               .value(QStringLiteral("provider"))
+               .toString(),
+           QStringLiteral("p2"));
+  QCOMPARE(model->currentText(), QStringLiteral("m3"));
+  model->setCurrentText(QStringLiteral("m4"));
+  QTest::qWait(800);
+  QCOMPARE(saved.value(QStringLiteral("model"))
+               .toObject()
+               .value(QStringLiteral("default"))
+               .toString(),
+           QStringLiteral("m4"));
+  effort->setCurrentIndex(effort->findData(QStringLiteral("high")));
+  QTest::qWait(800);
+  QCOMPARE(saved.value(QStringLiteral("agent"))
+               .toObject()
+               .value(QStringLiteral("reasoning_effort"))
+               .toString(),
+           QStringLiteral("high"));
+}
+
+void SettingsViewTest::modelAuxiliaryAndMoaPagesRender() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::SettingsView view(theme);
+  view.show();
+  auto snapshot = Snapshot();
+  snapshot.name = QStringLiteral("ceo");
+  hermes::ui::ModelProvider first;
+  first.name = QStringLiteral("Provider One");
+  first.slug = QStringLiteral("p1");
+  first.models = {QStringLiteral("m1"), QStringLiteral("m2")};
+  hermes::ui::ModelProvider second;
+  second.name = QStringLiteral("Provider Two");
+  second.slug = QStringLiteral("p2");
+  second.models = {QStringLiteral("m3")};
+  snapshot.model_providers = {first, second};
+  hermes::ui::PageState auxiliary;
+  auxiliary.loaded = true;
+  auxiliary.data.insert(
+      QStringLiteral("auxiliary"),
+      QJsonObject{
+          {QStringLiteral("main"),
+           QJsonObject{{QStringLiteral("provider"), QStringLiteral("p1")},
+                       {QStringLiteral("model"), QStringLiteral("m1")}}},
+          {QStringLiteral("tasks"),
+           QJsonArray{QJsonObject{
+               {QStringLiteral("task"), QStringLiteral("title_generation")},
+               {QStringLiteral("provider"), QStringLiteral("p1")},
+               {QStringLiteral("model"), QStringLiteral("m1")}}}}});
+  snapshot.pages.insert(QStringLiteral("modelaux"), auxiliary);
+  hermes::ui::PageState moa;
+  moa.loaded = true;
+  moa.data.insert(
+      QStringLiteral("moa"),
+      QJsonObject{
+          {QStringLiteral("default_preset"), QStringLiteral("default")},
+          {QStringLiteral("active_preset"), QStringLiteral("coding")},
+          {QStringLiteral("presets"),
+           QJsonObject{
+               {QStringLiteral("coding"),
+                QJsonObject{
+                    {QStringLiteral("reference_models"),
+                     QJsonArray{QJsonObject{
+                         {QStringLiteral("provider"), QStringLiteral("p1")},
+                         {QStringLiteral("model"), QStringLiteral("m1")}}}},
+                    {QStringLiteral("aggregator"),
+                     QJsonObject{
+                         {QStringLiteral("provider"), QStringLiteral("p2")},
+                         {QStringLiteral("model"),
+                          QStringLiteral("m3")}}}}}}}});
+  snapshot.pages.insert(QStringLiteral("modelmoa"), moa);
+  view.SetSnapshot(snapshot);
+
+  QString action_page;
+  QString action_method;
+  QString action_path;
+  QJsonObject action_body;
+  view.on_page_action = [&](const QString& page, const QString& method,
+                            const QString& path, const QJsonObject& body) {
+    action_page = page;
+    action_method = method;
+    action_path = path;
+    action_body = body;
+  };
+
+  view.OpenPage(QStringLiteral("model"));
+  auto* auxiliary_tab = view.findChild<QPushButton*>(
+      QStringLiteral("settingsSubpage_model_auxiliary"));
+  QVERIFY(auxiliary_tab != nullptr);
+  auxiliary_tab->click();
+  auto* card =
+      view.findChild<QWidget*>(QStringLiteral("auxiliaryRow_title_generation"));
+  QVERIFY(card != nullptr);
+  auto* provider = view.findChild<QComboBox*>(
+      QStringLiteral("auxiliaryProvider_title_generation"));
+  auto* model = view.findChild<QComboBox*>(
+      QStringLiteral("auxiliaryModel_title_generation"));
+  auto* save = view.findChild<QPushButton*>(
+      QStringLiteral("auxiliarySave_title_generation"));
+  QVERIFY(provider != nullptr);
+  QVERIFY(model != nullptr);
+  QVERIFY(save != nullptr);
+  provider->setCurrentIndex(provider->findData(QStringLiteral("p2")));
+  model->setCurrentIndex(model->findData(QStringLiteral("m3")));
+  save->click();
+  QCOMPARE(action_page, QStringLiteral("modelaux"));
+  QCOMPARE(action_method, QStringLiteral("POST"));
+  QCOMPARE(action_path, QStringLiteral("/api/model/set?profile=ceo"));
+  QCOMPARE(action_body.value(QStringLiteral("scope")).toString(),
+           QStringLiteral("auxiliary"));
+  QCOMPARE(action_body.value(QStringLiteral("task")).toString(),
+           QStringLiteral("title_generation"));
+  QCOMPARE(action_body.value(QStringLiteral("provider")).toString(),
+           QStringLiteral("p2"));
+  QCOMPARE(action_body.value(QStringLiteral("model")).toString(),
+           QStringLiteral("m3"));
+
+  auto* moa_tab =
+      view.findChild<QPushButton*>(QStringLiteral("settingsSubpage_model_moa"));
+  QVERIFY(moa_tab != nullptr);
+  moa_tab->click();
+  QVERIFY(view.findChild<QWidget*>(QStringLiteral("moaPreset_coding")) !=
+          nullptr);
 }
 
 void SettingsViewTest::modelSectionEditsOrderedFallbackChain() {

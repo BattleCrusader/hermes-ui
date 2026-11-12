@@ -7,7 +7,6 @@
 #include <QCheckBox>
 #include <QClipboard>
 #include <QCursor>
-#include <QDateTime>
 #include <QDialog>
 #include <QDir>
 #include <QDragEnterEvent>
@@ -32,6 +31,7 @@
 #include <QTextCursor>
 #include <QTextEdit>
 #include <QTimer>
+#include <QToolButton>
 #include <QUrl>
 #include <QUuid>
 #include <QVBoxLayout>
@@ -50,7 +50,6 @@ namespace {
 constexpr int kSendSize = 26;
 constexpr int kEditorHeight = 40;
 constexpr int kComposerHeight = 116;
-constexpr int kStatusLineHeight = 18;
 
 QString CssColor(const QColor& color) {
   return QStringLiteral("rgba(%1,%2,%3,%4)")
@@ -97,12 +96,6 @@ Composer::Composer(const Theme& theme, QWidget* parent)
   reasoning_button_->setText(reasoning_);
   UpdateChipStyles();
   slash_commands_ = SlashCommandCatalog();
-  activity_timer_ = new QTimer(this);
-  activity_timer_->setInterval(140);
-  connect(activity_timer_, &QTimer::timeout, this, [this]() {
-    ++activity_tick_;
-    update();
-  });
 
   // Completion popup: a tool window so it can float above the composer card
   // without stealing focus from the editor (typing keeps filtering it).
@@ -147,6 +140,11 @@ void Composer::SetModelCatalog(const std::vector<ModelProvider>& providers,
   if (!model.isEmpty()) {
     SetModelLabel(model);
   }
+  if (model_refresh_pending_ && model_visibility_dialog_) {
+    model_refresh_pending_ = false;
+    model_refresh_completed_ = true;
+    model_visibility_dialog_->reject();
+  }
   update();
 }
 
@@ -159,7 +157,7 @@ QDialog* Composer::BuildModelVisibilityDialog() {
   auto* dialog = new QDialog(this);
   dialog->setObjectName(QStringLiteral("modelVisibilityDialog"));
   dialog->setWindowTitle(QStringLiteral("Visible models"));
-  dialog->setMinimumWidth(380);
+  dialog->setMinimumWidth(520);
   // A QScrollArea viewport paints QPalette::Base, which defaults to the light
   // platform palette even when QDialog is dark. Set both the palette and the
   // stylesheet so a dark theme cannot produce light checkbox text on a white
@@ -179,9 +177,11 @@ QDialog* Composer::BuildModelVisibilityDialog() {
           "QWidget#modelVisibilityContent { background: %1; }"
           "QLabel { color: %2; }"
           "QLabel#modelVisibilityHint { color: %3; }"
-          "QCheckBox { color: %2; spacing: 8px; }"
-          "QCheckBox::indicator { width: 16px; height: 16px; "
-          "border: 1px solid %5; border-radius: 4px; background: %4; }"
+          "QCheckBox { color: %2; spacing: 10px; min-height: 22px; }"
+          "QCheckBox::indicator { width: 18px; height: 18px; "
+          "border: 1px solid %5; border-radius: 5px; background: %4; }"
+          "QToolButton { color: %3; background: transparent; border: none; "
+          "padding: 0; }"
           "QCheckBox::indicator:hover { border-color: %7; }"
           "QCheckBox::indicator:checked { background: %7; border-color: %7; "
           "image: url(:/check.svg); }"
@@ -209,7 +209,7 @@ QDialog* Composer::BuildModelVisibilityDialog() {
   scroll->setObjectName(QStringLiteral("modelVisibilityScroll"));
   scroll->setWidgetResizable(true);
   scroll->setFrameShape(QFrame::NoFrame);
-  scroll->setMaximumHeight(360);
+  scroll->setMaximumHeight(480);
   QPalette scroll_palette = scroll->palette();
   scroll_palette.setColor(QPalette::Window, theme_.surface);
   scroll_palette.setColor(QPalette::Base, theme_.surface);
@@ -225,8 +225,8 @@ QDialog* Composer::BuildModelVisibilityDialog() {
   content_palette.setColor(QPalette::WindowText, theme_.foreground);
   content->setPalette(content_palette);
   auto* form = new QVBoxLayout(content);
-  form->setContentsMargins(0, 0, 0, 0);
-  form->setSpacing(4);
+  form->setContentsMargins(12, 8, 12, 8);
+  form->setSpacing(6);
   QHash<QString, QCheckBox*> boxes;
   struct ProviderGroup {
     QCheckBox* header = nullptr;
@@ -257,7 +257,19 @@ QDialog* Composer::BuildModelVisibilityDialog() {
     first_provider = false;
     const QString provider_name =
         provider.name.isEmpty() ? provider.slug : provider.name;
-    auto* provider_box = new QCheckBox(provider_name, content);
+    auto* header = new QWidget(content);
+    auto* header_row = new QHBoxLayout(header);
+    header_row->setContentsMargins(0, 0, 0, 0);
+    header_row->setSpacing(4);
+    auto* expand = new QToolButton(header);
+    expand->setObjectName(
+        QStringLiteral("modelVisibilityExpand_%1").arg(provider.slug));
+    expand->setAccessibleName(
+        QStringLiteral("Show or hide %1 models").arg(provider_name));
+    expand->setFixedSize(18, 18);
+    expand->setAutoRaise(true);
+    header_row->addWidget(expand);
+    auto* provider_box = new QCheckBox(provider_name, header);
     provider_box->setObjectName(
         QStringLiteral("modelVisibilityProvider_%1").arg(provider.slug));
     provider_box->setFont(theme_.UiFont(12, QFont::DemiBold));
@@ -266,20 +278,38 @@ QDialog* Composer::BuildModelVisibilityDialog() {
         QStringLiteral("Select or clear all %1 models").arg(provider_name));
     provider_box->setAccessibleName(
         QStringLiteral("All %1 models").arg(provider_name));
-    form->addWidget(provider_box);
+    header_row->addWidget(provider_box);
+    header_row->addStretch(1);
+    form->addWidget(header);
+
+    auto* body = new QWidget(content);
+    body->setObjectName(
+        QStringLiteral("modelVisibilityModels_%1").arg(provider.slug));
+    auto* body_layout = new QVBoxLayout(body);
+    body_layout->setContentsMargins(28, 2, 0, 2);
+    body_layout->setSpacing(4);
+    const bool expanded = provider.slug == provider_;
+    body->setVisible(expanded);
+    expand->setText(expanded ? QStringLiteral("▾") : QStringLiteral("▸"));
+    QObject::connect(expand, &QToolButton::clicked, dialog, [body, expand]() {
+      const bool show = !body->isVisible();
+      body->setVisible(show);
+      expand->setText(show ? QStringLiteral("▾") : QStringLiteral("▸"));
+    });
 
     ProviderGroup group;
     group.header = provider_box;
     for (const QString& model : provider.models) {
       const QString key = ModelVisibilityKey(provider.slug, model);
-      auto* box = new QCheckBox(model, content);
+      auto* box = new QCheckBox(model, body);
       box->setObjectName(
           QStringLiteral("modelVisibility_%1_%2").arg(provider.slug, model));
       box->setChecked(!hidden_models_.contains(key));
       boxes.insert(key, box);
       group.boxes.push_back(box);
-      form->addWidget(box);
+      body_layout->addWidget(box);
     }
+    form->addWidget(body);
     sync_provider(group);
     QObject::connect(
         provider_box, &QCheckBox::clicked, dialog, [group, sync_provider]() {
@@ -305,6 +335,9 @@ QDialog* Composer::BuildModelVisibilityDialog() {
   auto* show_all = new QPushButton(QStringLiteral("Show all"), dialog);
   show_all->setObjectName(QStringLiteral("modelVisibilityAll"));
   actions->addWidget(show_all);
+  auto* refresh = new QPushButton(QStringLiteral("Refresh models"), dialog);
+  refresh->setObjectName(QStringLiteral("modelVisibilityRefresh"));
+  actions->addWidget(refresh);
   actions->addStretch(1);
   auto* cancel = new QPushButton(QStringLiteral("Cancel"), dialog);
   cancel->setObjectName(QStringLiteral("modelVisibilityCancel"));
@@ -324,6 +357,16 @@ QDialog* Composer::BuildModelVisibilityDialog() {
                        sync_provider(group);
                      }
                    });
+  QObject::connect(refresh, &QPushButton::clicked, dialog, [this, refresh]() {
+    if (!on_refresh_models) {
+      return;
+    }
+    model_refresh_pending_ = true;
+    model_refresh_completed_ = false;
+    refresh->setEnabled(false);
+    refresh->setText(QStringLiteral("Refreshing…"));
+    on_refresh_models();
+  });
   QObject::connect(cancel, &QPushButton::clicked, dialog, &QDialog::reject);
   QObject::connect(
       save, &QPushButton::clicked, dialog, [this, dialog, boxes]() {
@@ -802,30 +845,11 @@ void Composer::SetSlashCommands(std::vector<SlashCommand> commands) {
 }
 
 void Composer::SetRunning(bool running, qint64 started_ms) {
+  Q_UNUSED(started_ms);
   if (running_ == running) {
-    if (running && started_ms > 0 && started_ms != running_since_ms_) {
-      running_since_ms_ = started_ms;
-      update();
-    }
     return;
   }
   running_ = running;
-  if (running) {
-    running_since_ms_ =
-        started_ms > 0 ? started_ms : QDateTime::currentMSecsSinceEpoch();
-    activity_tick_ = 0;
-    if (activity_timer_ != nullptr) {
-      activity_timer_->start();
-    }
-    setFixedHeight(kComposerHeight + kStatusLineHeight);
-    emit HeightChanged(kComposerHeight + kStatusLineHeight);
-  } else {
-    if (activity_timer_ != nullptr) {
-      activity_timer_->stop();
-    }
-    setFixedHeight(kComposerHeight);
-    emit HeightChanged(kComposerHeight);
-  }
   update();
 }
 
@@ -853,15 +877,13 @@ QRectF Composer::CardRect() const {
 }
 
 QRectF Composer::SendRect() const {
-  const qreal action_bottom =
-      CardRect().bottom() - 10 - (running_ ? kStatusLineHeight : 0);
+  const qreal action_bottom = CardRect().bottom() - 10;
   return QRectF(CardRect().right() - 14 - kSendSize, action_bottom - kSendSize,
                 kSendSize, kSendSize);
 }
 
 QRectF Composer::AttachRect() const {
-  const qreal action_bottom =
-      CardRect().bottom() - 10 - (running_ ? kStatusLineHeight : 0);
+  const qreal action_bottom = CardRect().bottom() - 10;
   return QRectF(CardRect().left() + 14, action_bottom - kSendSize, 18,
                 kSendSize);
 }
@@ -963,8 +985,7 @@ void Composer::RemoveAttachment(int index) {
 }
 
 QRectF Composer::ModelChipRect() const {
-  const qreal action_bottom =
-      CardRect().bottom() - 10 - (running_ ? kStatusLineHeight : 0);
+  const qreal action_bottom = CardRect().bottom() - 10;
   return QRectF(VoiceRect().right() + 8, action_bottom - kSendSize + 3, 156,
                 20);
 }
@@ -1047,18 +1068,6 @@ void Composer::paintEvent(QPaintEvent* event) {
               0xEAB4, theme_.text_tertiary, 9);
 
   const QRectF send = SendRect();
-  const QString voice_text = VoiceStatusText();
-  if (!voice_text.isEmpty()) {
-    const QRectF reasoning = ReasoningChipRect();
-    painter.setFont(theme_.UiFont(10, QFont::Normal));
-    painter.setPen(theme_.accent);
-    painter.drawText(
-        QRectF(reasoning.right() + 10, reasoning.top(),
-               std::max<qreal>(0, send.left() - reasoning.right() - 26),
-               reasoning.height()),
-        Qt::AlignVCenter | Qt::AlignLeft, voice_text);
-  }
-
   const bool enabled = running_ || !Text().trimmed().isEmpty();
   QColor send_fill = running_ ? theme_.danger : theme_.accent;
   if (!enabled) {
@@ -1079,47 +1088,11 @@ void Composer::paintEvent(QPaintEvent* event) {
                 enabled ? QColor("#FFFFFF") : theme_.text_tertiary, 12);
   }
 
-  if (running_) {
-    // Live work indicator on its own line under the action row: three dots
-    // marching plus elapsed time, so it never competes with the chips or the
-    // "enter to send" hint for horizontal space.
-    const qint64 elapsed =
-        (QDateTime::currentMSecsSinceEpoch() - running_since_ms_) / 1000;
-    const QString label = QStringLiteral("generating %1s").arg(elapsed);
-    const QRectF status(card.left() + 16, card.bottom() - kStatusLineHeight,
-                        card.width() - 32, kStatusLineHeight);
-    for (int i = 0; i < 3; ++i) {
-      const bool lit = (activity_tick_ + i) % 3 == 0;
-      const qreal radius = lit ? 2.6 : 1.6;
-      const QPointF center(status.left() + 4 + i * 7, status.center().y());
-      painter.setPen(Qt::NoPen);
-      painter.setBrush(lit ? theme_.accent
-                           : Mix(theme_.accent, theme_.surface, 0.55));
-      painter.drawEllipse(center, radius, radius);
-    }
-    painter.setFont(theme_.UiFont(10, QFont::DemiBold));
-    painter.setPen(theme_.accent);
-    const qreal label_width =
-        QFontMetricsF(painter.font()).horizontalAdvance(label);
-    painter.drawText(QRectF(status.left() + 28, status.top(), label_width + 2,
-                            status.height()),
-                     Qt::AlignVCenter | Qt::AlignLeft, label);
-    if (queued_prompts_ > 0) {
-      painter.setFont(theme_.UiFont(10, QFont::Normal));
-      painter.setPen(theme_.text_tertiary);
-      painter.drawText(
-          QRectF(status.left() + 36 + label_width, status.top(),
-                 status.width() - label_width - 40, status.height()),
-          Qt::AlignVCenter | Qt::AlignLeft,
-          QStringLiteral("%1 queued").arg(queued_prompts_));
-    }
-  } else {
-    painter.setFont(theme_.UiFont(10, QFont::Normal));
-    painter.setPen(theme_.text_tertiary);
-    painter.drawText(QRectF(send.left() - 120, send.top(), 108, send.height()),
-                     Qt::AlignVCenter | Qt::AlignRight,
-                     QStringLiteral("enter to send"));
-  }
+  painter.setFont(theme_.UiFont(10, QFont::Normal));
+  painter.setPen(theme_.text_tertiary);
+  painter.drawText(QRectF(send.left() - 120, send.top(), 108, send.height()),
+                   Qt::AlignVCenter | Qt::AlignRight,
+                   QStringLiteral("enter to send"));
 }
 
 void Composer::resizeEvent(QResizeEvent* event) {
@@ -1344,16 +1317,6 @@ void Composer::mousePressEvent(QMouseEvent* event) {
         event->accept();
         return;
       }
-    }
-  }
-  if (event->button() == Qt::LeftButton && running_ && queued_prompts_ > 0) {
-    const QRectF card = CardRect();
-    const QRectF status(card.left() + 16, card.bottom() - kStatusLineHeight,
-                        card.width() - 32, kStatusLineHeight);
-    if (status.contains(event->position())) {
-      emit QueuedReviewRequested();
-      event->accept();
-      return;
     }
   }
   if (event->button() == Qt::LeftButton &&
