@@ -90,6 +90,26 @@ bool ParseProjectsTree(const QJsonObject& payload, ProjectsState* state,
   return true;
 }
 
+std::vector<ProjectNode> ProjectListNodes(
+    const std::vector<ProjectInfo>& projects) {
+  std::vector<ProjectNode> nodes;
+  nodes.reserve(projects.size());
+  for (const ProjectInfo& project : projects) {
+    if (project.archived) {
+      continue;
+    }
+    ProjectNode node;
+    node.id = project.id;
+    node.label = project.name;
+    node.path = project.primary_path;
+    node.color = project.color;
+    node.icon = project.icon;
+    node.repo_count = static_cast<int>(project.folders.size());
+    nodes.push_back(std::move(node));
+  }
+  return nodes;
+}
+
 void ParseProjectInfo(const QJsonObject& row, ProjectInfo* project) {
   if (project == nullptr) {
     return;

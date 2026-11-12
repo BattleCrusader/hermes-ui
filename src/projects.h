@@ -84,6 +84,11 @@ bool ParseProjectsList(const QJsonObject& payload, ProjectsState* state,
                        QString* error = nullptr);
 bool ParseProjectsTree(const QJsonObject& payload, ProjectsState* state,
                        QString* error = nullptr);
+// Quick sidebar rows built from `projects.list` while the authoritative
+// `projects.tree` (session counts, auto projects, Home bucket) is still
+// loading. Archived projects are omitted; the tree replaces these rows.
+std::vector<ProjectNode> ProjectListNodes(
+    const std::vector<ProjectInfo>& projects);
 void ParseProjectInfo(const QJsonObject& row, ProjectInfo* project);
 void ParseProjectNode(const QJsonObject& row, ProjectNode* node);
 

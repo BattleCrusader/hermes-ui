@@ -3403,6 +3403,10 @@ void MainWindow::ActivateProfile(int index) {
   QElapsedTimer timer;
   timer.start();
   supervisor_.Activate(index);
+  // Start the project list/tree before the heavier snapshot rebind below. The
+  // list reply paints project rows immediately; the tree then fills counts and
+  // session membership without the sidebar showing an empty project section.
+  RefreshProjects(true);
   SetNativePref(QStringLiteral("native.active_profile"),
                 supervisor_.ProfileName(index));
   const auto snapshot = supervisor_.ActiveSnapshot();
@@ -3454,7 +3458,6 @@ void MainWindow::ActivateProfile(int index) {
   last_active_ = -1;
   UpdateSidebarChips();
   UpdateStatus();
-  RefreshProjects(true);
 
   if (snapshot) {
     qInfo("switch profile=%s total_ms=%.3f", qUtf8Printable(snapshot->label),
@@ -3829,7 +3832,9 @@ void MainWindow::RefreshProjects(bool force) {
   }
   const qint64 now = QDateTime::currentMSecsSinceEpoch();
   if (!force) {
-    const qint64 interval = project_state_.loaded ? 15000 : 1200;
+    // Startup requests can race the profile socket. Retry quickly until the
+    // first successful list/tree; steady-state refreshes stay at 15 s.
+    const qint64 interval = project_state_.loaded ? 15000 : 500;
     if (now - last_project_fetch_ms_ < interval) {
       return;
     }
@@ -3866,11 +3871,18 @@ void MainWindow::RefreshProjects(bool force) {
           }
         }
         project_state_.loading = project_list_pending_ || project_tree_pending_;
-        if (!project_state_.loading) {
-          project_state_.loaded = true;
-        }
+        // A request issued before the profile socket connects fails with
+        // "Gateway is not connected". Keep the short retry interval until a
+        // fetch actually succeeds; marking the failed attempt loaded would
+        // leave the project section empty for the 15 s steady-state interval.
+        project_state_.loaded =
+            !project_state_.loading && project_state_.error.isEmpty();
         ApplyProjectState();
-        if (!project_state_.error.isEmpty()) {
+        // The first fetch can beat the profile socket. That race is retried
+        // below; do not flash a scary "Projects unavailable" status for it.
+        if (!project_state_.error.isEmpty() &&
+            !project_state_.error.contains(QStringLiteral("not connected"),
+                                           Qt::CaseInsensitive)) {
           status_bar_->ShowTransient(QStringLiteral("Projects unavailable: %1")
                                          .arg(project_state_.error));
         }
@@ -3900,9 +3912,8 @@ void MainWindow::RefreshProjects(bool force) {
           }
         }
         project_state_.loading = project_list_pending_ || project_tree_pending_;
-        if (!project_state_.loading) {
-          project_state_.loaded = true;
-        }
+        project_state_.loaded =
+            !project_state_.loading && project_state_.error.isEmpty();
         ApplyProjectState();
       });
 }
@@ -3911,21 +3922,29 @@ void MainWindow::ApplyProjectState() {
   if (sidebar_ == nullptr) {
     return;
   }
+  // `projects.list` normally answers well before the expensive tree scan.
+  // Paint those explicit rows immediately so startup shows projects next to
+  // the session list instead of waiting for counts and auto-discovery. The
+  // authoritative tree replaces them as soon as it lands.
+  const bool list_only = project_state_.tree.empty();
+  const std::vector<ProjectNode> rows =
+      list_only ? ProjectListNodes(project_state_.projects)
+                : project_state_.tree;
   // A dismissed auto project is a local layout preference, not a backend
   // delete: keep the full tree in `project_state_` for cache/refresh parity and
   // hide only the rows the user removed.
   if (project_scope_ != AllProjectsId()) {
     const auto scoped = std::find_if(
-        project_state_.tree.begin(), project_state_.tree.end(),
+        rows.begin(), rows.end(),
         [this](const ProjectNode& node) { return node.id == project_scope_; });
-    if (scoped == project_state_.tree.end() ||
+    if (scoped == rows.end() ||
         (scoped->is_auto &&
          dismissed_auto_project_ids_.contains(project_scope_))) {
       project_scope_ = AllProjectsId();
     }
   }
   const std::vector<ProjectNode> visible =
-      FilterVisibleProjects(project_state_.tree, dismissed_auto_project_ids_);
+      FilterVisibleProjects(rows, dismissed_auto_project_ids_);
   sidebar_->SetProjects(visible, project_scope_, project_state_.active_id,
                         project_state_.available);
   SyncArtifactsRoot();

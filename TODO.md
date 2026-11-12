@@ -38,6 +38,30 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-13 (sixty-seventh pass)
+
+**Startup now shows projects immediately, and project session counts match the sidebar.**
+
+- [x] **Project rows no longer wait for the full tree.** `projects.list` is
+  painted as explicit project rows while the expensive `projects.tree` scan
+  (500 sessions, git probes, auto discovery) is still running. The
+  authoritative tree replaces those rows when it lands.
+- [x] **The 15 s startup stall is gone.** The first project RPC can beat the
+  profile socket and return `Gateway is not connected`. A failed fetch no
+  longer marks the project state loaded, so retries use 500 ms until the first
+  success instead of jumping to the 15 s steady-state interval. The expected
+  connection-race error no longer flashes “Projects unavailable”.
+- [x] **Project requests start before the snapshot rebind** on profile
+  activation, and the list/tree callbacks share one success definition.
+- [x] **Session fetch matches the tree’s source window.** `/api/sessions` is
+  paged at the API maximum of 100 up to 500 rows, excludes
+  `acp,cron,kanban,oneshot,subagent,tool`, dedupes pinned back-fills, and keeps
+  partial pages on later-page failures. A fresh ceo run loaded 62 sessions and
+  all 15 SSC auto-project ids, fixing the “15 sessions but none listed” row.
+- [x] `ProjectListNodes` has a unit test for quick rows and archived filtering.
+- [x] Fresh-profile screenshots show project rows by ~2 s instead of after the
+  15 s refresh interval. Full native suite: **9/9 passed** in 28.49 s.
+
 ## Status update — 2026-11-12 (sixty-sixth pass)
 
 **Live sub-agents are visible and steerable from the right rail.**

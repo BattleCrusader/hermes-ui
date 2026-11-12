@@ -2066,6 +2066,7 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
   using hermes::ui::ParseProjectsTree;
   using hermes::ui::ProjectEntryAction;
   using hermes::ui::ProjectGitRepositories;
+  using hermes::ui::ProjectListNodes;
   using hermes::ui::ProjectsState;
   using hermes::ui::ProjectWorkingDirectory;
   using hermes::ui::ResolveProjectEntry;
@@ -2095,6 +2096,14 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
   QCOMPARE(state.projects[0].name, QStringLiteral("Alpha"));
   QCOMPARE(state.projects[0].primary_path, QStringLiteral("/code/alpha"));
   QVERIFY(state.projects[1].archived);
+  const std::vector<hermes::ui::ProjectNode> quick_rows =
+      ProjectListNodes(state.projects);
+  QCOMPARE(static_cast<int>(quick_rows.size()), 1);
+  QCOMPARE(quick_rows[0].id, QStringLiteral("p1"));
+  QCOMPARE(quick_rows[0].label, QStringLiteral("Alpha"));
+  QCOMPARE(quick_rows[0].path, QStringLiteral("/code/alpha"));
+  QVERIFY(!quick_rows[0].is_auto);
+  QVERIFY(!quick_rows[0].is_no_project);
 
   const QJsonObject tree{
       {QStringLiteral("active_id"), QStringLiteral("p2")},
