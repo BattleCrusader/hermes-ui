@@ -81,6 +81,11 @@ class GatewayHttp {
                  const QByteArray& content_type = QByteArray(),
                  bool parse_json = true);
 
+  // Mints a native-http ticket. A gateway restart replaces the endpoint's
+  // instance id while keeping its API origin, so retry once after discovering
+  // the replacement instead of failing every request until the app restarts.
+  bool MintTicket(QString* ticket, QString* error);
+
   QString home_;
   QString profile_name_;
   GatewayEndpoint endpoint_;

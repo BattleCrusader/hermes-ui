@@ -38,6 +38,29 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-13 (seventy-first pass)
+
+**Gateway restarts no longer leave the native UI on a stale instance ticket.**
+
+- [x] **Root cause.** `PermissionError: stale runtime instance` comes from the
+  gateway control socket rejecting a ticket minted for the previous gateway
+  instance. A restart succeeds, but `ProfileWorker`, `GatewayHttp` and
+  `GatewaySocket` kept the old `instance_id`, so the settings page refetch and
+  every later request failed until the whole app was restarted.
+- [x] **Endpoint rediscovery on refusal.** `GatewayHttp::MintTicket()` detects
+  the stale-instance error, reruns `DiscoverEndpoint()`, and retries the ticket
+  once. JSON, multipart upload and file download all use the same path, and
+  each recomputes its URL after discovery in case the API origin moved.
+- [x] **WebSocket reconnect too.** `GatewaySocket::Connect()` performs the same
+  detect/rediscover/retry cycle before backing off, so the live event stream
+  reattaches to the new gateway instance instead of retrying the old ticket
+  forever.
+- [x] **Regression coverage.** `staleRuntimeErrorRequiresRediscovery` covers
+  the error classifier. `staleInstanceRediscoveryRetriesRequest` points a live
+  `GatewayHttp` at a deliberately stale instance id and verifies a normal
+  `/api/config` request still succeeds after rediscovery.
+- [x] Full native suite: **9/9 passed** in 33.47 s.
+
 ## Status update — 2026-11-13 (seventieth pass)
 
 **The Visible models dialog now themes its scrolling surface.**

@@ -163,6 +163,11 @@ bool DiscoverEndpoint(GatewayEndpoint* endpoint, QString* error) {
   return true;
 }
 
+bool IsStaleEndpointError(const QString& error) {
+  return error.contains(QStringLiteral("stale runtime instance")) ||
+         error.contains(QStringLiteral("Gateway bootstrap identity changed"));
+}
+
 bool RequestTicket(const QString& home, const QString& profile_name,
                    const GatewayEndpoint& endpoint, const QString& purpose,
                    QString* ticket, QString* error) {

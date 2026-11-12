@@ -38,7 +38,39 @@ class GatewayConfigTest : public QObject {
   void settingsPageEndpointsRespond();
   void settingsPagePayloadShapesMatchRenderers();
   void uiPreferencesPatchRoundTrips();
+  void staleRuntimeErrorRequiresRediscovery();
+  void staleInstanceRediscoveryRetriesRequest();
 };
+
+void GatewayConfigTest::staleRuntimeErrorRequiresRediscovery() {
+  QVERIFY(hermes::ui::IsStaleEndpointError(
+      QStringLiteral("PermissionError: stale runtime instance")));
+  QVERIFY(hermes::ui::IsStaleEndpointError(
+      QStringLiteral("Gateway bootstrap identity changed; retry launch")));
+  QVERIFY(!hermes::ui::IsStaleEndpointError(
+      QStringLiteral("gateway control socket not found")));
+  QVERIFY(!hermes::ui::IsStaleEndpointError(QString()));
+}
+
+void GatewayConfigTest::staleInstanceRediscoveryRetriesRequest() {
+  hermes::ui::GatewayEndpoint endpoint;
+  QString error;
+  if (!hermes::ui::DiscoverEndpoint(&endpoint, &error)) {
+    QSKIP("gateway not running");
+  }
+
+  // Simulate the state left behind by a gateway restart: same control socket,
+  // same API origin, old instance id. The request must rediscover the new
+  // endpoint and retry instead of surfacing the stale-runtime failure.
+  endpoint.instance_id = QStringLiteral("stale-instance-for-test");
+  hermes::ui::GatewayHttp http(hermes::ui::HermesHome(),
+                               QStringLiteral("default"), endpoint);
+  QJsonDocument config;
+  QVERIFY2(http.GetJson(QStringLiteral("/api/config?include_defaults=false"),
+                        &config, &error),
+           qUtf8Printable(error));
+  QVERIFY(config.isObject());
+}
 
 void GatewayConfigTest::putConfigRoundTrips() {
   hermes::ui::GatewayEndpoint endpoint;

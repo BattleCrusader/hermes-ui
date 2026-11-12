@@ -44,6 +44,36 @@ GatewayHttp::~GatewayHttp() {
   delete manager_;
 }
 
+bool GatewayHttp::MintTicket(QString* ticket, QString* error) {
+  QString ticket_error;
+  if (RequestTicket(home_, profile_name_, endpoint_,
+                    QStringLiteral("native-http"), ticket, &ticket_error)) {
+    return true;
+  }
+  if (!IsStaleEndpointError(ticket_error)) {
+    if (error != nullptr) {
+      *error = ticket_error;
+    }
+    return false;
+  }
+
+  QString discover_error;
+  if (!DiscoverEndpoint(&endpoint_, &discover_error)) {
+    if (error != nullptr) {
+      *error = ticket_error + QStringLiteral("; ") + discover_error;
+    }
+    return false;
+  }
+  if (!RequestTicket(home_, profile_name_, endpoint_,
+                     QStringLiteral("native-http"), ticket, &ticket_error)) {
+    if (error != nullptr) {
+      *error = ticket_error;
+    }
+    return false;
+  }
+  return true;
+}
+
 void GatewayHttp::Abort() {
   if (active_reply_ != nullptr) {
     active_reply_->abort();
@@ -195,19 +225,14 @@ bool GatewayHttp::PostMultipart(const QString& path, const QString& file_path,
   body += "\r\n--" + boundary + "--\r\n";
   const QByteArray content_type = "multipart/form-data; boundary=" + boundary;
 
-  const QUrl url = ScopedUrl(endpoint_, profile_name_, path);
   Result last;
   for (int attempt = 0; attempt < 2; ++attempt) {
     QString ticket;
-    QString ticket_error;
-    if (!RequestTicket(home_, profile_name_, endpoint_,
-                       QStringLiteral("native-http"), &ticket, &ticket_error)) {
-      if (error != nullptr) {
-        *error = ticket_error;
-      }
+    if (!MintTicket(&ticket, error)) {
       return false;
     }
-    last = Perform("POST", url, ticket, body, content_type);
+    last = Perform("POST", ScopedUrl(endpoint_, profile_name_, path), ticket,
+                   body, content_type);
     if (last.ok) {
       if (uploaded_path != nullptr) {
         *uploaded_path =
@@ -227,19 +252,14 @@ bool GatewayHttp::PostMultipart(const QString& path, const QString& file_path,
 
 bool GatewayHttp::DownloadFile(const QString& path, const QString& local_path,
                                QString* error) {
-  const QUrl url = ScopedUrl(endpoint_, profile_name_, path);
   Result last;
   for (int attempt = 0; attempt < 2; ++attempt) {
     QString ticket;
-    QString ticket_error;
-    if (!RequestTicket(home_, profile_name_, endpoint_,
-                       QStringLiteral("native-http"), &ticket, &ticket_error)) {
-      if (error != nullptr) {
-        *error = ticket_error;
-      }
+    if (!MintTicket(&ticket, error)) {
       return false;
     }
-    last = Perform("GET", url, ticket, QByteArray(), QByteArray(), false);
+    last = Perform("GET", ScopedUrl(endpoint_, profile_name_, path), ticket,
+                   QByteArray(), QByteArray(), false);
     if (last.ok) {
       QSaveFile file(local_path);
       if (!file.open(QIODevice::WriteOnly) || file.write(last.data) < 0 ||
@@ -264,7 +284,6 @@ bool GatewayHttp::DownloadFile(const QString& path, const QString& local_path,
 bool GatewayHttp::RequestJson(const QString& method, const QString& path,
                               const QJsonObject& body, QJsonDocument* document,
                               QString* error, bool authenticate) {
-  const QUrl url = ScopedUrl(endpoint_, profile_name_, path);
   const QByteArray payload =
       body.isEmpty() && method == QLatin1String("GET")
           ? QByteArray()
@@ -275,18 +294,11 @@ bool GatewayHttp::RequestJson(const QString& method, const QString& path,
   Result last;
   for (int attempt = 0; attempt < attempts; ++attempt) {
     QString ticket;
-    if (authenticate) {
-      QString ticket_error;
-      if (!RequestTicket(home_, profile_name_, endpoint_,
-                         QStringLiteral("native-http"), &ticket,
-                         &ticket_error)) {
-        if (error != nullptr) {
-          *error = ticket_error;
-        }
-        return false;
-      }
+    if (authenticate && !MintTicket(&ticket, error)) {
+      return false;
     }
-    last = Perform(verb, url, ticket, payload);
+    last = Perform(verb, ScopedUrl(endpoint_, profile_name_, path), ticket,
+                   payload);
     if (last.ok) {
       if (document != nullptr) {
         *document = last.document;

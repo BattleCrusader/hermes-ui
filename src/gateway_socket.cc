@@ -56,9 +56,16 @@ void GatewaySocket::Connect() {
   QString error;
   if (!RequestTicket(home_, profile_name_, endpoint_,
                      QStringLiteral("interactive"), &ticket, &error)) {
-    emit SocketError(error);
-    ScheduleReconnect();
-    return;
+    // A gateway restart leaves the same control socket and API origin but a
+    // new instance id. Discover it once before backing off, or every
+    // reconnect would keep presenting the old instance's ticket.
+    if (!IsStaleEndpointError(error) || !DiscoverEndpoint(&endpoint_, &error) ||
+        !RequestTicket(home_, profile_name_, endpoint_,
+                       QStringLiteral("interactive"), &ticket, &error)) {
+      emit SocketError(error);
+      ScheduleReconnect();
+      return;
+    }
   }
 
   QUrl url(endpoint_.api_origin);

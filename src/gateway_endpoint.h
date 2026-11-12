@@ -39,6 +39,12 @@ bool QueryControl(const QString& home, const QJsonObject& request,
 // Identifies the gateway serving *home*.
 bool DiscoverEndpoint(GatewayEndpoint* endpoint, QString* error);
 
+// Whether a ticket refusal means the endpoint names a gateway instance that
+// has since been replaced. A gateway restart keeps the same API origin and
+// control socket but mints a new instance id, so a client must discover the
+// endpoint again instead of retrying the old ticket forever.
+bool IsStaleEndpointError(const QString& error);
+
 // Mints a one-use ticket for *profile_name*. Purpose is "native-http" for REST
 // calls and "interactive" for the /api/ws dial.
 bool RequestTicket(const QString& home, const QString& profile_name,
