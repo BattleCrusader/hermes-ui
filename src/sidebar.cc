@@ -1297,6 +1297,7 @@ void Sidebar::ShowProjectMenu(const QPoint& global_position,
     copy_path = menu.addAction(QStringLiteral("Copy path"));
   }
   QAction* edit = nullptr;
+  QAction* save_as_project = nullptr;
   QAction* appearance = nullptr;
   QAction* add_folder = nullptr;
   QAction* remove_folder = nullptr;
@@ -1316,6 +1317,7 @@ void Sidebar::ShowProjectMenu(const QPoint& global_position,
   } else if (auto_project) {
     menu.addSeparator();
     if (has_path) {
+      save_as_project = menu.addAction(QStringLiteral("Save as project…"));
       appearance = menu.addAction(QStringLiteral("Appearance…"));
       menu.addSeparator();
     }
@@ -1344,6 +1346,8 @@ void Sidebar::ShowProjectMenu(const QPoint& global_position,
     emit_action(QStringLiteral("copy_path"));
   } else if (chosen == edit) {
     emit_action(QStringLiteral("edit"));
+  } else if (chosen == save_as_project) {
+    emit_action(QStringLiteral("save_as_project"));
   } else if (chosen == appearance) {
     emit_action(QStringLiteral("appearance"));
   } else if (chosen == add_folder) {

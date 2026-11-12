@@ -38,6 +38,24 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-13 (sixty-eighth pass)
+
+**Auto-discovered projects can now be saved and edited.**
+
+- [x] **Why “Edit details” was missing.** Auto rows are derived from a folder
+  and session history; they have no `projects` row, so there is nothing for
+  `projects.update` to address. The ceo profile’s `SSC` row is one of these
+  auto entries, even though the default profile has an explicit SSC project.
+- [x] **New “Save as project…” action** on auto rows with a filesystem path.
+  It opens the normal create dialog prefilled with the auto label and path, so
+  name, description, folders, primary folder, and “use after creating” can be
+  set in one step. The created explicit project replaces the auto row.
+- [x] Adoption keeps an active SSC scope pointed at the new explicit id, and
+  the status line says “Project saved” instead of “Project created”.
+- [x] `ProjectDialog::SetCreatePrefill` ignores edit-mode dialogs, so an
+  existing project cannot be silently retargeted. Unit coverage added.
+- [x] Full native suite: **9/9 passed** in 29.56 s.
+
 ## Status update — 2026-11-13 (sixty-seventh pass)
 
 **Startup now shows projects immediately, and project session counts match the sidebar.**

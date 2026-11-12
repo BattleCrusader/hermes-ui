@@ -160,7 +160,9 @@ class MainWindow : public QWidget {
   void ShowProjectAppearance(const QString& project_id);
   void DismissAutoProject(const QString& project_id);
   void RestoreHiddenProjects();
-  void CreateProject();
+  void CreateProject(const QString& initial_name = QString(),
+                     const QStringList& initial_folders = QStringList(),
+                     const QString& adopt_from = QString());
   void EditProject(const ProjectInfo& project);
   void DeleteProject(const ProjectInfo& project);
   void SetActiveProject(const QString& project_id);

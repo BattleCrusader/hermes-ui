@@ -4256,12 +4256,18 @@ void MainWindow::SetActiveProject(const QString& project_id) {
       });
 }
 
-void MainWindow::CreateProject() {
+void MainWindow::CreateProject(const QString& initial_name,
+                               const QStringList& initial_folders,
+                               const QString& adopt_from) {
   const int index = supervisor_.active_index();
   if (index < 0 || index >= supervisor_.profile_count()) {
     return;
   }
   ProjectDialog dialog(theme_, nullptr, this);
+  if (!adopt_from.isEmpty()) {
+    dialog.SetCreatePrefill(initial_name, initial_folders);
+    dialog.setWindowTitle(QStringLiteral("Save as project"));
+  }
   if (dialog.exec() != QDialog::Accepted) {
     return;
   }
@@ -4273,8 +4279,8 @@ void MainWindow::CreateProject() {
   params.insert(QStringLiteral("profile"), profile);
   supervisor_.RequestRpc(
       index, QStringLiteral("projects.create"), params,
-      [this, index, profile, use](const QJsonObject& result,
-                                  const QString& error) {
+      [this, index, profile, use, adopt_from](const QJsonObject& result,
+                                              const QString& error) {
         if (supervisor_.active_index() != index ||
             supervisor_.ProfileName(index) != profile) {
           return;
@@ -4287,10 +4293,13 @@ void MainWindow::CreateProject() {
         const QJsonObject project =
             result.value(QStringLiteral("project")).toObject();
         const QString id = project.value(QStringLiteral("id")).toString();
-        if (use && !id.isEmpty()) {
+        if (!id.isEmpty() &&
+            (use || (!adopt_from.isEmpty() && project_scope_ == adopt_from))) {
           project_scope_ = id;
         }
-        status_bar_->ShowTransient(QStringLiteral("Project created"));
+        status_bar_->ShowTransient(adopt_from.isEmpty()
+                                       ? QStringLiteral("Project created")
+                                       : QStringLiteral("Project saved"));
         RefreshProjects(true);
       });
 }
@@ -4518,6 +4527,17 @@ void MainWindow::HandleProjectAction(const QString& project_id,
   }
   if (action == QStringLiteral("dismiss_auto")) {
     DismissAutoProject(project_id);
+    return;
+  }
+  if (action == QStringLiteral("save_as_project")) {
+    const auto node = std::find_if(
+        project_state_.tree.begin(), project_state_.tree.end(),
+        [&project_id](const ProjectNode& row) { return row.id == project_id; });
+    if (node == project_state_.tree.end() || !node->is_auto ||
+        node->path.isEmpty()) {
+      return;
+    }
+    CreateProject(node->label, QStringList{node->path}, node->id);
     return;
   }
   const ProjectInfo* project = FindProject(project_id);

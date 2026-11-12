@@ -2574,6 +2574,14 @@ void PreferencesTest::projectDialogEditsCreateAndDisplayFields() {
   QCOMPARE(create.primary_path(), QStringLiteral("/code/shared"));
   QVERIFY(create.use_after_create());
 
+  hermes::ui::ProjectDialog adopt(theme, nullptr);
+  adopt.SetCreatePrefill(QStringLiteral("SSC"),
+                         QStringList{QStringLiteral("/code/ssc")});
+  QCOMPARE(adopt.name(), QStringLiteral("SSC"));
+  QCOMPARE(adopt.folders(), QStringList{QStringLiteral("/code/ssc")});
+  QCOMPARE(adopt.primary_path(), QStringLiteral("/code/ssc"));
+  QVERIFY(adopt.use_after_create());
+
   hermes::ui::ProjectInfo existing;
   existing.id = QStringLiteral("p1");
   existing.name = QStringLiteral("Alpha");
@@ -2587,6 +2595,10 @@ void PreferencesTest::projectDialogEditsCreateAndDisplayFields() {
   QCOMPARE(edit.description(), QStringLiteral("Existing"));
   QCOMPARE(edit.folders(), QStringList{QStringLiteral("/code/alpha")});
   QCOMPARE(edit.original_folders(), QStringList{QStringLiteral("/code/alpha")});
+  edit.SetCreatePrefill(QStringLiteral("Wrong"),
+                        QStringList{QStringLiteral("/tmp/wrong")});
+  QCOMPARE(edit.name(), QStringLiteral("Alpha"));
+  QCOMPARE(edit.folders(), QStringList{QStringLiteral("/code/alpha")});
   auto* edit_folders =
       edit.findChild<QPlainTextEdit*>(QStringLiteral("projectFolders"));
   auto* edit_primary =

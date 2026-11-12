@@ -167,6 +167,16 @@ bool ProjectDialog::use_after_create() const {
   return create_ && use_->isChecked();
 }
 
+void ProjectDialog::SetCreatePrefill(const QString& name,
+                                     const QStringList& folders) {
+  if (!create_) {
+    return;
+  }
+  name_->setText(name);
+  folders_->setPlainText(folders.join(QLatin1Char('\n')));
+  RefreshPrimaryChoices();
+}
+
 void ProjectDialog::accept() {
   if (name().isEmpty()) {
     status_->setText(QStringLiteral("A project needs a name."));

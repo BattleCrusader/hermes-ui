@@ -34,6 +34,10 @@ class ProjectDialog : public QDialog {
   QString original_primary_path() const { return original_primary_path_; }
   bool use_after_create() const;
 
+  // Create mode only. Auto-discovered rows have no durable project record, so
+  // adopting one starts from its label/path in the normal create dialog.
+  void SetCreatePrefill(const QString& name, const QStringList& folders);
+
   void accept() override;
 
  private:
