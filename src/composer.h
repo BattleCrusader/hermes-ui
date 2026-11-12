@@ -93,6 +93,9 @@ class Composer : public QWidget {
   std::function<void()> on_stop;
   std::function<void(const QString& provider, const QString& model)>
       on_model_selected;
+  // Drop a stale per-session model override and switch this chat back to the
+  // profile's configured model.default/model.provider.
+  std::function<void()> on_use_default_model;
   // Bust the gateway's provider model cache. The dialog closes and reopens
   // with the refreshed catalog so newly discovered models appear in place.
   std::function<void()> on_refresh_models;

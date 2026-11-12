@@ -85,6 +85,9 @@ class ProfileWorker : public QObject {
   // any broadcast arrives; keep it so the Capabilities page survives a rebuild.
   void RememberAccountOperation(const QJsonObject& result);
   void SetModel(const QString& provider, const QString& model);
+  // Recover from a stale per-session model override: switch this chat back to
+  // the profile's configured model.default/model.provider.
+  void UseDefaultModel();
   // Bust the gateway's 1h model-id cache and republish the provider catalog.
   void RefreshModelOptions();
   void SetReasoning(const QString& effort);
@@ -290,6 +293,11 @@ class ProfileWorker : public QObject {
   QString pinned_session_id_;
   QString pinned_provider_;
   QString pinned_model_;
+  // Root defaults from /api/model/options. The composer's "Use profile
+  // default" action and a Settings model save both target these, not whatever
+  // per-session override the current chat happens to carry.
+  QString profile_provider_;
+  QString profile_model_;
   bool settings_requested_ = false;
   // Bytes the spot editor was seeded with, so a save can detect an
   // out-of-band edit instead of clobbering it.

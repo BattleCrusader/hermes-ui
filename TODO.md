@@ -38,6 +38,39 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-13 (seventy-fourth pass)
+
+**Profile defaults can reclaim a stale chat, and Stop no longer queues behind
+REST.**
+
+- [x] **Stale per-session model recovery.** A chat can carry a model override
+  that differs from the configured `model.default` (the `poolside/laguna`
+  sessions are the observed case). The backend snapshots that override as the
+  session "primary", so a later fallback restore announces it as primary and
+  the configured DeepSeek model as the deactivated fallback. The composer's
+  model menu now has **Use profile default**, backed by
+  `ProfileWorker::UseDefaultModel()` and the `/api/model/options` root
+  defaults. Saving `model.provider` / `model.default` in Settings also moves
+  the open chat to the new values, so the save is authoritative.
+- [x] **Explicit session-scoped picks.** `ProfileWorker::SetModel` appends
+  `--session` to the model mutation, matching desktop's canonical picker
+  mutation. A composer or settings pick can no longer be interpreted as a
+  profile-default rewrite.
+- [x] **Instant Stop.** The profile worker's `Interrupt` was a queued slot on
+  the same thread as blocking REST calls, so a 20 s settings/model fetch could
+  delay `session.interrupt` by the same amount. `InterruptRelay` owns a second
+  `GatewaySocket` on its own `QThread`, started lazily for the active profile.
+  Stop sends `session.interrupt` there immediately; the newest request waits at
+  most 10 s for the connection to open, then expires so it cannot stop a later
+  turn.
+- [x] **Control sockets stay control-only.** `GatewaySocket` now accepts a
+  `server_requests` flag. The relay leaves it false, so the gateway never
+  routes an approval or clarify prompt to a connection that cannot answer it.
+- [x] Relay-only delivery: the worker `Interrupt` path remains only as a
+  fallback when no session/relay is available, avoiding the delayed worker
+  reading a newer `execution_generation_` and stopping the wrong turn.
+- [x] Full native suite: **9/9 passed** in 40.20 s.
+
 ## Status update — 2026-11-13 (seventy-third pass)
 
 **Work status moved to the footer; the model pages became real editors.**

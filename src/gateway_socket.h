@@ -22,8 +22,12 @@ class GatewaySocket : public QObject {
   Q_OBJECT
 
  public:
+  // `server_requests` advertises that this client can answer approval and
+  // clarify prompts. A control-only socket (the interrupt relay) must leave it
+  // false so the gateway never routes a prompt to a client that only sends
+  // session.interrupt.
   GatewaySocket(QString home, QString profile_name, GatewayEndpoint endpoint,
-                QObject* parent = nullptr);
+                QObject* parent = nullptr, bool server_requests = true);
   ~GatewaySocket() override;
 
   void Connect();
@@ -116,6 +120,7 @@ class GatewaySocket : public QObject {
   int next_id_ = 1;
   int reconnect_attempt_ = 0;
   bool shutting_down_ = false;
+  bool server_requests_ = true;
 };
 
 }  // namespace hermes::ui

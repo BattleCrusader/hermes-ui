@@ -24,11 +24,13 @@ constexpr int kPingIntervalMs = 20000;
 }  // namespace
 
 GatewaySocket::GatewaySocket(QString home, QString profile_name,
-                             GatewayEndpoint endpoint, QObject* parent)
+                             GatewayEndpoint endpoint, QObject* parent,
+                             bool server_requests)
     : QObject(parent),
       home_(std::move(home)),
       profile_name_(std::move(profile_name)),
-      endpoint_(std::move(endpoint)) {
+      endpoint_(std::move(endpoint)),
+      server_requests_(server_requests) {
   reconnect_timer_.setSingleShot(true);
   ping_timer_.setInterval(kPingIntervalMs);
   connect(&reconnect_timer_, &QTimer::timeout, this, [this]() { Connect(); });
@@ -103,11 +105,13 @@ void GatewaySocket::OnConnected() {
   }
   reconnect_attempt_ = 0;
   ping_timer_.start();
-  // Announce that this connection can answer approval/clarify server
-  // requests. Without it the gateway drops those frames and the agent waits
-  // out its approval timeout with no prompt on screen.
-  Request(QStringLiteral("client.capabilities"),
-          QJsonObject{{QStringLiteral("server_requests"), true}});
+  if (server_requests_) {
+    // Announce that this connection can answer approval/clarify server
+    // requests. Without it the gateway drops those frames and the agent waits
+    // out its approval timeout with no prompt on screen.
+    Request(QStringLiteral("client.capabilities"),
+            QJsonObject{{QStringLiteral("server_requests"), true}});
+  }
   emit Connected(socket_.subprotocol());
 }
 

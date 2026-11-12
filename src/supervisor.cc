@@ -16,6 +16,7 @@
 #include <utility>
 
 #include "src/gateway_http.h"
+#include "src/interrupt_relay.h"
 #include "src/profile_worker.h"
 #include "src/session_transfer.h"
 
@@ -77,6 +78,7 @@ void Supervisor::Start() {
   }
   if (!entries_.empty()) {
     entries_.front().worker->SetForeground(true);
+    StartRelay(&entries_.front());
   }
 }
 
@@ -160,6 +162,25 @@ void Supervisor::StartWorker(Entry* entry) {
       });
   entry->thread->start();
   QMetaObject::invokeMethod(entry->worker, "Start", Qt::QueuedConnection);
+}
+
+bool Supervisor::StartRelay(Entry* entry) {
+  if (entry == nullptr) {
+    return false;
+  }
+  if (entry->relay != nullptr && entry->relay_thread != nullptr &&
+      entry->relay_thread->isRunning()) {
+    return true;
+  }
+  if (!endpoint_.valid()) {
+    return false;
+  }
+  entry->relay_thread = new QThread();
+  entry->relay = new InterruptRelay(HermesHome(), entry->name, endpoint_);
+  entry->relay->moveToThread(entry->relay_thread);
+  entry->relay_thread->start();
+  QMetaObject::invokeMethod(entry->relay, "Start", Qt::QueuedConnection);
+  return true;
 }
 
 void Supervisor::RequestSkillHub(
@@ -350,6 +371,16 @@ void Supervisor::Stop() {
   }
   stopped_ = true;
   for (Entry& entry : entries_) {
+    if (entry.relay_thread != nullptr && entry.relay_thread->isRunning()) {
+      QMetaObject::invokeMethod(entry.relay, "Shutdown",
+                                Qt::BlockingQueuedConnection);
+      entry.relay_thread->quit();
+      entry.relay_thread->wait();
+    }
+    delete entry.relay;
+    entry.relay = nullptr;
+    delete entry.relay_thread;
+    entry.relay_thread = nullptr;
     if (entry.thread != nullptr && entry.thread->isRunning()) {
       QMetaObject::invokeMethod(entry.worker, "Shutdown",
                                 Qt::BlockingQueuedConnection);
@@ -435,6 +466,9 @@ void Supervisor::Activate(int index) {
       entry.worker->SetForeground(i == index);
     }
   }
+  // Prewarm only the active profile's relay. Seven idle control sockets would
+  // duplicate gateway connections for profiles the user is not looking at.
+  StartRelay(&entries_[static_cast<std::size_t>(index)]);
 }
 
 void Supervisor::ActivateByName(const QString& name) {
@@ -539,9 +573,30 @@ void Supervisor::Interrupt(int index) {
   if (index < 0 || index >= profile_count()) {
     return;
   }
+  Entry& entry = entries_[static_cast<std::size_t>(index)];
+  const std::shared_ptr<const ProfileSnapshot> snapshot =
+      entry.worker == nullptr ? nullptr : entry.worker->Snapshot();
+  const QString session_id =
+      snapshot == nullptr ? QString() : snapshot->selected_session_id;
+  if (!session_id.isEmpty() && StartRelay(&entry)) {
+    // Relay-only: the worker path would read execution_generation_ when its
+    // blocked event loop finally runs and could stop a later turn.
+    QMetaObject::invokeMethod(entry.relay, "Interrupt", Qt::QueuedConnection,
+                              Q_ARG(QString, session_id), Q_ARG(int, -1));
+    return;
+  }
+  if (entry.worker != nullptr) {
+    QMetaObject::invokeMethod(entry.worker, "Interrupt", Qt::QueuedConnection);
+  }
+}
+
+void Supervisor::UseDefaultModel(int index) {
+  if (index < 0 || index >= profile_count()) {
+    return;
+  }
   ProfileWorker* worker = entries_[static_cast<std::size_t>(index)].worker;
   if (worker != nullptr) {
-    QMetaObject::invokeMethod(worker, "Interrupt", Qt::QueuedConnection);
+    QMetaObject::invokeMethod(worker, "UseDefaultModel", Qt::QueuedConnection);
   }
 }
 

@@ -732,6 +732,12 @@ void Composer::ShowModelMenu() {
     none->setEnabled(false);
   }
   menu.addSeparator();
+  QAction* use_default = menu.addAction(QStringLiteral("Use profile default"));
+  connect(use_default, &QAction::triggered, this, [this]() {
+    if (on_use_default_model) {
+      on_use_default_model();
+    }
+  });
   QAction* visibility = menu.addAction(QStringLiteral("Visible models…"));
   connect(visibility, &QAction::triggered, this,
           [this]() { ShowModelVisibilityDialog(); });

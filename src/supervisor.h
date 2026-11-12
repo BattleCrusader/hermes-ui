@@ -19,6 +19,7 @@ class QThread;
 
 namespace hermes::ui {
 
+class InterruptRelay;
 class ProfileWorker;
 
 // Owns the warm profile workers and the active-profile pointer. Every worker
@@ -60,6 +61,9 @@ class Supervisor {
   // Capabilities can render account progress after a page rebuild.
   void RememberAccountOperation(int index, const QJsonObject& result);
   void SetModel(int index, const QString& provider, const QString& model);
+  // Clear a stale per-session model override by switching to the profile's
+  // configured model.default/model.provider.
+  void UseDefaultModel(int index);
   void RefreshModelOptions(int index);
   void SetReasoning(int index, const QString& effort);
   void FetchSettings(int index);
@@ -229,6 +233,10 @@ class Supervisor {
   struct Entry {
     ProfileWorker* worker = nullptr;
     QThread* thread = nullptr;
+    // Lazily created for the active profile. A second GatewaySocket on its
+    // own thread keeps session.interrupt out of the worker's REST queue.
+    InterruptRelay* relay = nullptr;
+    QThread* relay_thread = nullptr;
     QString name;
     QString label;
     QColor color;
@@ -238,6 +246,7 @@ class Supervisor {
   RequestScope CurrentRequestScope() const;
   void LoadProfiles();
   void StartWorker(Entry* entry);
+  bool StartRelay(Entry* entry);
   void RequestSkillHub(
       int index, SkillHubCallback done,
       const std::function<void(ProfileWorker*, quint64)>& send);

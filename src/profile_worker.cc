@@ -999,19 +999,26 @@ void ProfileWorker::FetchModelOptions(bool refresh) {
     }
   }
 
+  const QString root_provider =
+      root.value(QStringLiteral("provider")).toString();
+  const QString root_model = root.value(QStringLiteral("model")).toString();
   std::lock_guard<std::mutex> lock(mutex_);
   state_.model_providers = std::move(providers);
+  if (!root_provider.isEmpty()) {
+    profile_provider_ = root_provider;
+  }
+  if (!root_model.isEmpty()) {
+    profile_model_ = root_model;
+  }
   // Root defaults describe the profile's configured model, not necessarily
   // the model the user picked in this composer. Keep an explicit pick until
   // the session row or the backend confirms it.
   if (pinned_model_.isEmpty()) {
-    const QString provider = root.value(QStringLiteral("provider")).toString();
-    if (!provider.isEmpty()) {
-      state_.provider = provider;
+    if (!root_provider.isEmpty()) {
+      state_.provider = root_provider;
     }
-    const QString model = root.value(QStringLiteral("model")).toString();
-    if (!model.isEmpty()) {
-      state_.model = model;
+    if (!root_model.isEmpty()) {
+      state_.model = root_model;
     }
   }
   models_loaded_ = true;
@@ -1045,11 +1052,34 @@ void ProfileWorker::SetModel(const QString& provider, const QString& model) {
   if (session_id.isEmpty() || socket_ == nullptr || !socket_->IsConnected()) {
     return;
   }
-  socket_->SetConfig(session_id, QStringLiteral("model"),
-                     QStringLiteral("%1 --provider %2").arg(model, provider));
+  // `--session` is explicit even though an exploratory provider pick is
+  // already session-scoped by default. It keeps a composer pick from ever
+  // rewriting the profile's configured model.
+  socket_->SetConfig(
+      session_id, QStringLiteral("model"),
+      QStringLiteral("%1 --provider %2 --session").arg(model, provider));
   qInfo("model profile=%s provider=%s model=%s", qUtf8Printable(name_),
         qUtf8Printable(provider), qUtf8Printable(model));
   QTimer::singleShot(800, this, [this]() { FetchModelOptions(); });
+}
+
+void ProfileWorker::UseDefaultModel() {
+  QString provider;
+  QString model;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    provider = profile_provider_;
+    model = profile_model_;
+  }
+  if ((provider.isEmpty() || model.isEmpty()) && http_ != nullptr) {
+    FetchModelOptions();
+    std::lock_guard<std::mutex> lock(mutex_);
+    provider = profile_provider_;
+    model = profile_model_;
+  }
+  if (!provider.isEmpty() && !model.isEmpty()) {
+    SetModel(provider, model);
+  }
 }
 
 void ProfileWorker::SetReasoning(const QString& effort) {
@@ -1144,10 +1174,45 @@ void ProfileWorker::SaveConfig(const QJsonObject& patch) {
     return;
   }
 
+  QString changed_provider;
+  QString changed_model;
+  bool model_changed = false;
+  const QJsonValue model_patch = patch.value(QStringLiteral("model"));
+  if (model_patch.isObject()) {
+    const QJsonObject model_object = model_patch.toObject();
+    if (model_object.contains(QStringLiteral("default")) ||
+        model_object.contains(QStringLiteral("provider"))) {
+      model_changed = true;
+      changed_provider =
+          model_object.value(QStringLiteral("provider")).toString();
+      changed_model = model_object.value(QStringLiteral("default")).toString();
+    }
+  }
+
   {
     std::lock_guard<std::mutex> lock(mutex_);
     state_.config_saving = false;
+    if (model_changed) {
+      if (!changed_provider.isEmpty()) {
+        profile_provider_ = changed_provider;
+      } else {
+        changed_provider = profile_provider_;
+      }
+      if (!changed_model.isEmpty()) {
+        profile_model_ = changed_model;
+      } else {
+        changed_model = profile_model_;
+      }
+    }
     PublishLocked();
+  }
+  if (model_changed && !changed_provider.isEmpty() &&
+      !changed_model.isEmpty()) {
+    // Saving the profile default is an explicit answer to "which model should
+    // this profile use", so move the open chat off any stale per-session
+    // override. This is the path that prevents a later turn from restoring the
+    // old "primary" and announcing that the configured model was a fallback.
+    SetModel(changed_provider, changed_model);
   }
   FetchSettings();
 }
