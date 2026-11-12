@@ -38,6 +38,25 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-13 (seventy-second pass)
+
+**Router headers select or clear every model in one click.**
+
+- [x] **Provider-level checkbox.** Each router name in the Visible models
+  dialog is now a tri-state checkbox. A mixed router shows a dash, all-visible
+  shows a check, and all-hidden is empty.
+- [x] **Predictable group action.** Clicking a partial or empty header selects
+  every model under it; clicking a fully selected header clears the group.
+  Child toggles immediately re-derive the header state, and **Show all** resets
+  every header to checked.
+- [x] **Themed partial state.** Added `resources/dash.svg` and an
+  `indicator:indeterminate` rule so the mixed state stays legible on the dark
+  dialog surface instead of falling back to the platform indicator.
+- [x] **Regression coverage.**
+  `modelVisibilityProviderToggleSelectsGroup` covers mixed/empty/checked
+  headers, child-to-header updates, the second router, and **Show all**.
+- [x] Full native suite: **9/9 passed** in 33.63 s.
+
 ## Status update — 2026-11-13 (seventy-first pass)
 
 **Gateway restarts no longer leave the native UI on a stale instance ticket.**

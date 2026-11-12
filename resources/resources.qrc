@@ -9,6 +9,7 @@
   </qresource>
   <qresource prefix="/">
     <file alias="check.svg">check.svg</file>
+    <file alias="dash.svg">dash.svg</file>
     <file alias="arrow-up-light.svg">arrow-up-light.svg</file>
     <file alias="arrow-down-light.svg">arrow-down-light.svg</file>
     <file alias="arrow-up-dark.svg">arrow-up-dark.svg</file>

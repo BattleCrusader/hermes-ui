@@ -141,6 +141,7 @@ class PreferencesTest : public QObject {
   void rightRailShowsTodoTimelineAndFiltersPrompts();
   void sessionSearchBarFindsAndOpensSessions();
   void modelVisibilityFiltersPickerAndPersists();
+  void modelVisibilityProviderToggleSelectsGroup();
   void projectsParseListTreeAndMutators();
   void promptHistoryEditsQueuedAndSteeredEntries();
   void promptHistoryInjectsLocalAndServerQueues();
@@ -2079,6 +2080,95 @@ void PreferencesTest::modelVisibilityFiltersPickerAndPersists() {
   QVERIFY(dark_dialog->styleSheet().contains(dark.surface.name()));
   QVERIFY(dark_dialog->styleSheet().contains(dark.foreground.name()));
   dark_dialog->deleteLater();
+}
+
+void PreferencesTest::modelVisibilityProviderToggleSelectsGroup() {
+  hermes::ui::SetNativePref(QStringLiteral("native.model_visibility"),
+                            QString());
+  hermes::ui::Composer composer(hermes::ui::Theme::Light());
+  hermes::ui::ModelProvider first;
+  first.name = QStringLiteral("Provider One");
+  first.slug = QStringLiteral("p1");
+  first.models = {QStringLiteral("m1"), QStringLiteral("m2")};
+  hermes::ui::ModelProvider second;
+  second.name = QStringLiteral("Provider Two");
+  second.slug = QStringLiteral("p2");
+  second.models = {QStringLiteral("m3")};
+  composer.SetModelCatalog({first, second}, QStringLiteral("p1"),
+                           QStringLiteral("m1"));
+  const QSet<QString> hidden{hermes::ui::ModelVisibilityKey(
+                                 QStringLiteral("p1"), QStringLiteral("m2")),
+                             hermes::ui::ModelVisibilityKey(
+                                 QStringLiteral("p2"), QStringLiteral("m3"))};
+  composer.SetHiddenModels(hidden);
+
+  QDialog* dialog = composer.ShowModelVisibilityDialogForTest();
+  QVERIFY(dialog != nullptr);
+  dialog->show();
+  auto* p1 = dialog->findChild<QCheckBox*>(
+      QStringLiteral("modelVisibilityProvider_p1"));
+  auto* p2 = dialog->findChild<QCheckBox*>(
+      QStringLiteral("modelVisibilityProvider_p2"));
+  auto* m1 =
+      dialog->findChild<QCheckBox*>(QStringLiteral("modelVisibility_p1_m1"));
+  auto* m2 =
+      dialog->findChild<QCheckBox*>(QStringLiteral("modelVisibility_p1_m2"));
+  auto* m3 =
+      dialog->findChild<QCheckBox*>(QStringLiteral("modelVisibility_p2_m3"));
+  QVERIFY(p1 != nullptr);
+  QVERIFY(p2 != nullptr);
+  QVERIFY(m1 != nullptr);
+  QVERIFY(m2 != nullptr);
+  QVERIFY(m3 != nullptr);
+
+  QCOMPARE(p1->checkState(), Qt::PartiallyChecked);
+  QCOMPARE(p2->checkState(), Qt::Unchecked);
+
+  // A partial group selects every model on the first click.
+  p1->click();
+  QCOMPARE(p1->checkState(), Qt::Checked);
+  QVERIFY(m1->isChecked());
+  QVERIFY(m2->isChecked());
+
+  // A fully selected group clears every model on the next click.
+  p1->click();
+  QCOMPARE(p1->checkState(), Qt::Unchecked);
+  QVERIFY(!m1->isChecked());
+  QVERIFY(!m2->isChecked());
+
+  // A fully cleared group selects every model again.
+  p1->click();
+  QCOMPARE(p1->checkState(), Qt::Checked);
+  QVERIFY(m1->isChecked());
+  QVERIFY(m2->isChecked());
+
+  // A child toggle re-derives the provider's partial state.
+  m2->setChecked(false);
+  QCOMPARE(p1->checkState(), Qt::PartiallyChecked);
+  m2->setChecked(true);
+  QCOMPARE(p1->checkState(), Qt::Checked);
+
+  // Selecting the second provider's only model updates its header too.
+  p2->click();
+  QCOMPARE(p2->checkState(), Qt::Checked);
+  QVERIFY(m3->isChecked());
+
+  // Show all also restores every provider header to checked.
+  m2->setChecked(false);
+  QCOMPARE(p1->checkState(), Qt::PartiallyChecked);
+  auto* all =
+      dialog->findChild<QPushButton*>(QStringLiteral("modelVisibilityAll"));
+  QVERIFY(all != nullptr);
+  all->click();
+  QCOMPARE(p1->checkState(), Qt::Checked);
+  QVERIFY(m2->isChecked());
+
+  auto* save =
+      dialog->findChild<QPushButton*>(QStringLiteral("modelVisibilitySave"));
+  QVERIFY(save != nullptr);
+  QTest::mouseClick(save, Qt::LeftButton);
+  QVERIFY(composer.HiddenModels().isEmpty());
+  dialog->deleteLater();
 }
 
 void PreferencesTest::projectsParseListTreeAndMutators() {

@@ -185,6 +185,8 @@ QDialog* Composer::BuildModelVisibilityDialog() {
           "QCheckBox::indicator:hover { border-color: %7; }"
           "QCheckBox::indicator:checked { background: %7; border-color: %7; "
           "image: url(:/check.svg); }"
+          "QCheckBox::indicator:indeterminate { background: %7; "
+          "border-color: %7; image: url(:/dash.svg); }"
           "QPushButton { background: %4; color: %2; border: 1px solid %5; "
           "border-radius: 8px; padding: 6px 12px; }"
           "QPushButton:hover { background: %6; }"
@@ -226,14 +228,48 @@ QDialog* Composer::BuildModelVisibilityDialog() {
   form->setContentsMargins(0, 0, 0, 0);
   form->setSpacing(4);
   QHash<QString, QCheckBox*> boxes;
+  struct ProviderGroup {
+    QCheckBox* header = nullptr;
+    std::vector<QCheckBox*> boxes;
+  };
+  const auto sync_provider = [](const ProviderGroup& group) {
+    int checked = 0;
+    for (QCheckBox* box : group.boxes) {
+      if (box->isChecked()) {
+        ++checked;
+      }
+    }
+    const Qt::CheckState state =
+        checked == 0 ? Qt::Unchecked
+        : checked == static_cast<int>(group.boxes.size())
+            ? Qt::Checked
+            : Qt::PartiallyChecked;
+    if (group.header->checkState() != state) {
+      group.header->setCheckState(state);
+    }
+  };
+  std::vector<ProviderGroup> provider_groups;
+  bool first_provider = true;
   for (const ModelProvider& provider : providers_) {
-    auto* provider_label = new QLabel(
-        provider.name.isEmpty() ? provider.slug : provider.name, content);
-    QFont provider_font = theme_.UiFont(12, QFont::DemiBold);
-    provider_label->setFont(provider_font);
-    provider_label->setStyleSheet(QStringLiteral("color: %1; padding-top: 4px;")
-                                      .arg(theme_.foreground.name()));
-    form->addWidget(provider_label);
+    if (!first_provider) {
+      form->addSpacing(4);
+    }
+    first_provider = false;
+    const QString provider_name =
+        provider.name.isEmpty() ? provider.slug : provider.name;
+    auto* provider_box = new QCheckBox(provider_name, content);
+    provider_box->setObjectName(
+        QStringLiteral("modelVisibilityProvider_%1").arg(provider.slug));
+    provider_box->setFont(theme_.UiFont(12, QFont::DemiBold));
+    provider_box->setTristate(true);
+    provider_box->setToolTip(
+        QStringLiteral("Select or clear all %1 models").arg(provider_name));
+    provider_box->setAccessibleName(
+        QStringLiteral("All %1 models").arg(provider_name));
+    form->addWidget(provider_box);
+
+    ProviderGroup group;
+    group.header = provider_box;
     for (const QString& model : provider.models) {
       const QString key = ModelVisibilityKey(provider.slug, model);
       auto* box = new QCheckBox(model, content);
@@ -241,8 +277,25 @@ QDialog* Composer::BuildModelVisibilityDialog() {
           QStringLiteral("modelVisibility_%1_%2").arg(provider.slug, model));
       box->setChecked(!hidden_models_.contains(key));
       boxes.insert(key, box);
+      group.boxes.push_back(box);
       form->addWidget(box);
     }
+    sync_provider(group);
+    QObject::connect(
+        provider_box, &QCheckBox::clicked, dialog, [group, sync_provider]() {
+          const bool all_checked = std::all_of(
+              group.boxes.begin(), group.boxes.end(),
+              [](const QCheckBox* box) { return box->isChecked(); });
+          for (QCheckBox* box : group.boxes) {
+            box->setChecked(!all_checked);
+          }
+          sync_provider(group);
+        });
+    for (QCheckBox* box : group.boxes) {
+      QObject::connect(box, &QCheckBox::toggled, dialog,
+                       [group, sync_provider]() { sync_provider(group); });
+    }
+    provider_groups.push_back(std::move(group));
   }
   form->addStretch(1);
   scroll->setWidget(content);
@@ -262,11 +315,15 @@ QDialog* Composer::BuildModelVisibilityDialog() {
   actions->addWidget(save);
   root->addLayout(actions);
 
-  QObject::connect(show_all, &QPushButton::clicked, dialog, [boxes]() {
-    for (QCheckBox* box : boxes) {
-      box->setChecked(true);
-    }
-  });
+  QObject::connect(show_all, &QPushButton::clicked, dialog,
+                   [boxes, provider_groups, sync_provider]() {
+                     for (QCheckBox* box : boxes) {
+                       box->setChecked(true);
+                     }
+                     for (const ProviderGroup& group : provider_groups) {
+                       sync_provider(group);
+                     }
+                   });
   QObject::connect(cancel, &QPushButton::clicked, dialog, &QDialog::reject);
   QObject::connect(
       save, &QPushButton::clicked, dialog, [this, dialog, boxes]() {
