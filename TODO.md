@@ -38,6 +38,23 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-12 (sixty-third pass)
+
+**Make the right-rail file browser readable and resizable.**
+
+- [x] **Show the file columns.** The `Project` tree now displays the
+      `Name`/`Size`/`Type`/`Date Modified` header instead of hiding it, with
+      themed header cells and a 10 px DemiBold label font.
+- [x] **Every column is user-resizable.** All sections use
+      `QHeaderView::Interactive` with a 48 px minimum; the initial widths are
+      240/80/110/150 and the last section no longer stretches.
+- [x] **Long paths remain reachable.** The tree's horizontal scrollbar is
+      `ScrollBarAsNeeded` (previously forced off), so widening a column or
+      viewing more columns scrolls instead of silently clipping.
+- [x] **Tests:** the right-rail project test asserts the visible header,
+      interactive resize mode for every column, a changed Name width, and a
+      live horizontal scrollbar range. Full suite 8/8.
+
 ## Status update — 2026-11-12 (sixty-second pass)
 
 **Show every repository in a multi-folder project.**

@@ -547,14 +547,23 @@ RightRail::RightRail(const Theme& theme, QWidget* parent)
   project_tree_->setObjectName(QStringLiteral("rightRailProjectTree"));
   project_tree_->setModel(project_model_);
   project_tree_->setRootIndex(project_model_->index(QDir::homePath()));
-  project_tree_->setHeaderHidden(true);
+  project_tree_->setHeaderHidden(false);
   project_tree_->setAnimated(false);
   project_tree_->setUniformRowHeights(true);
   project_tree_->setTextElideMode(Qt::ElideMiddle);
-  project_tree_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  project_tree_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
   project_tree_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Expanding);
   project_tree_->setMinimumHeight(120);
   project_tree_->setFont(theme_.UiFont(11, QFont::Normal));
+  QHeaderView* project_header = project_tree_->header();
+  project_header->setStretchLastSection(false);
+  project_header->setMinimumSectionSize(48);
+  project_header->setSectionResizeMode(QHeaderView::Interactive);
+  project_header->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+  project_header->resizeSection(0, 240);  // Name
+  project_header->resizeSection(1, 80);   // Size
+  project_header->resizeSection(2, 110);  // Type
+  project_header->resizeSection(3, 150);  // Date Modified
   project_split->addWidget(project_tree_);
   project_preview_ = new QTextBrowser(project_split);
   project_preview_->setObjectName(QStringLiteral("rightRailProjectPreview"));
@@ -1167,6 +1176,10 @@ void RightRail::SetTheme(const Theme& theme) {
           "QTextBrowser#rightRailProjectPreview, "
           "QTreeView#rightRailProjectTree { background: %6; color: %4; "
           "border: 1px solid %2; border-radius: 5px; }"
+          "QTreeView#rightRailProjectTree QHeaderView::section { "
+          "background: %6; color: %3; border: 0; "
+          "border-right: 1px solid %2; border-bottom: 1px solid %2; "
+          "padding: 4px 6px; }"
           "QSplitter#rightRailProjectSplit::handle { background: %2; }"
           "QWidget#rightRailCollapsedBar { background: %1; "
           "border-left: 1px solid %2; }"
@@ -1218,6 +1231,9 @@ void RightRail::SetTheme(const Theme& theme) {
   }
   if (project_tree_ != nullptr) {
     project_tree_->setFont(theme_.UiFont(11, QFont::Normal));
+    if (project_tree_->header() != nullptr) {
+      project_tree_->header()->setFont(theme_.UiFont(10, QFont::DemiBold));
+    }
   }
   if (project_preview_ != nullptr) {
     project_preview_->setFont(theme_.UiFont(11, QFont::Normal));

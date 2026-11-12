@@ -13,6 +13,7 @@
 #include <QFileSystemModel>
 #include <QFontMetrics>
 #include <QGuiApplication>
+#include <QHeaderView>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -1093,6 +1094,21 @@ void PreferencesTest::rightRailProjectGitTerminalPanes() {
   QVERIFY(file_index.isValid());
   QTRY_VERIFY(tree->rootIndex().isValid());
   QTRY_VERIFY(model->rowCount(tree->rootIndex()) >= 1);
+  QVERIFY(!tree->isHeaderHidden());
+  QHeaderView* project_header = tree->header();
+  QVERIFY(project_header != nullptr);
+  QCOMPARE(tree->horizontalScrollBarPolicy(), Qt::ScrollBarAsNeeded);
+  QVERIFY(!project_header->stretchLastSection());
+  QVERIFY(project_header->count() >= 4);
+  for (int section = 0; section < project_header->count(); ++section) {
+    QCOMPARE(project_header->sectionResizeMode(section),
+             QHeaderView::Interactive);
+  }
+  QVERIFY(project_header->sectionSize(0) >= 200);
+  const int widened_name = project_header->sectionSize(0) + 60;
+  project_header->resizeSection(0, widened_name);
+  QCOMPARE(project_header->sectionSize(0), widened_name);
+  QTRY_VERIFY(tree->horizontalScrollBar()->maximum() > 0);
   QTRY_VERIFY(tree->visualRect(file_index).isValid());
   QTest::mouseClick(tree->viewport(), Qt::LeftButton, Qt::NoModifier,
                     tree->visualRect(file_index).center());
