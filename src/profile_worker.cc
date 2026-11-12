@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <map>
 #include <memory>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -32,7 +33,11 @@
 namespace hermes::ui {
 namespace {
 
-constexpr int kSessionFetchLimit = 60;
+// `/api/sessions` caps one page at 100. The sidebar mirrors the project tree's
+// source filter so project counts and nested rows agree; it walks pages up to
+// the same 500-session window instead of stopping at a stale first page.
+constexpr int kSessionFetchPageSize = 100;
+constexpr int kSessionFetchLimit = 500;
 constexpr int kMessageFetchLimit = 500;
 // The transcript is painted in full on every snapshot. Keep the window small
 // until the layout cache lands; the gateway still has the full history.
@@ -746,49 +751,83 @@ void ProfileWorker::FetchSessions() {
   if (shutting_down_ || http_ == nullptr) {
     return;
   }
-  QJsonDocument document;
-  QString error;
-  if (!http_->GetJson(QStringLiteral("/api/sessions?limit=%1&order=recent"
-                                     "&exclude_sources=cron")
-                          .arg(kSessionFetchLimit),
-                      &document, &error)) {
-    PublishError(error);
-    return;
-  }
 
-  const QJsonArray rows =
-      document.object().value(QStringLiteral("sessions")).toArray();
+  const auto parse_rows = [](const QJsonArray& rows) {
+    std::vector<SessionSummary> parsed;
+    parsed.reserve(static_cast<std::size_t>(rows.size()));
+    for (const QJsonValue& value : rows) {
+      const QJsonObject row = value.toObject();
+      SessionSummary session;
+      session.id = row.value(QStringLiteral("id")).toString();
+      session.title = SessionTitle(row);
+      session.preview = row.value(QStringLiteral("preview")).toString();
+      session.source = row.value(QStringLiteral("source")).toString();
+      session.model = row.value(QStringLiteral("model")).toString();
+      session.provider = row.value(QStringLiteral("provider")).toString();
+      session.reasoning_effort =
+          row.value(QStringLiteral("reasoning_effort")).toString();
+      session.started_at_secs = static_cast<qint64>(
+          row.value(QStringLiteral("started_at")).toDouble());
+      session.last_active_secs = static_cast<qint64>(
+          row.value(QStringLiteral("last_active")).toDouble());
+      session.message_count =
+          row.value(QStringLiteral("message_count")).toInt();
+      session.pinned = row.value(QStringLiteral("pinned")).toBool();
+      session.archived = row.value(QStringLiteral("archived")).toBool();
+      session.unread = row.value(QStringLiteral("unread")).toBool();
+      session.parent_session_id =
+          row.value(QStringLiteral("parent_session_id")).toString();
+      session.branched_from =
+          row.value(QStringLiteral("_branched_from")).toString();
+      session.reset_from = row.value(QStringLiteral("_reset_from")).toString();
+      session.continuation_kind =
+          row.value(QStringLiteral("continuation_kind")).toString();
+      session.revision = row.value(QStringLiteral("runtime_revision")).toInt();
+      if (!session.id.isEmpty()) {
+        parsed.push_back(std::move(session));
+      }
+    }
+    return parsed;
+  };
+
   std::vector<SessionSummary> sessions;
-  sessions.reserve(static_cast<std::size_t>(rows.size()));
-  for (const QJsonValue& value : rows) {
-    const QJsonObject row = value.toObject();
-    SessionSummary session;
-    session.id = row.value(QStringLiteral("id")).toString();
-    session.title = SessionTitle(row);
-    session.preview = row.value(QStringLiteral("preview")).toString();
-    session.source = row.value(QStringLiteral("source")).toString();
-    session.model = row.value(QStringLiteral("model")).toString();
-    session.provider = row.value(QStringLiteral("provider")).toString();
-    session.reasoning_effort =
-        row.value(QStringLiteral("reasoning_effort")).toString();
-    session.started_at_secs =
-        static_cast<qint64>(row.value(QStringLiteral("started_at")).toDouble());
-    session.last_active_secs = static_cast<qint64>(
-        row.value(QStringLiteral("last_active")).toDouble());
-    session.message_count = row.value(QStringLiteral("message_count")).toInt();
-    session.pinned = row.value(QStringLiteral("pinned")).toBool();
-    session.archived = row.value(QStringLiteral("archived")).toBool();
-    session.unread = row.value(QStringLiteral("unread")).toBool();
-    session.parent_session_id =
-        row.value(QStringLiteral("parent_session_id")).toString();
-    session.branched_from =
-        row.value(QStringLiteral("_branched_from")).toString();
-    session.reset_from = row.value(QStringLiteral("_reset_from")).toString();
-    session.continuation_kind =
-        row.value(QStringLiteral("continuation_kind")).toString();
-    session.revision = row.value(QStringLiteral("runtime_revision")).toInt();
-    if (!session.id.isEmpty()) {
-      sessions.push_back(std::move(session));
+  // Pinned rows are back-filled outside the page window, so pages can repeat
+  // ids; dedupe while keeping the first (most relevant) occurrence.
+  std::set<QString> seen_ids;
+  int total = 0;
+  for (int offset = 0; offset < kSessionFetchLimit;
+       offset += kSessionFetchPageSize) {
+    QJsonDocument document;
+    QString error;
+    if (!http_->GetJson(
+            QStringLiteral(
+                "/api/sessions?limit=%1&offset=%2&order=recent"
+                "&exclude_sources=acp,cron,kanban,oneshot,subagent,tool")
+                .arg(kSessionFetchPageSize)
+                .arg(offset),
+            &document, &error)) {
+      if (offset == 0) {
+        PublishError(error);
+        return;
+      }
+      qWarning("profile %s: session page %d: %s", qUtf8Printable(name_), offset,
+               qUtf8Printable(error));
+      break;
+    }
+
+    const QJsonObject page = document.object();
+    if (offset == 0) {
+      total = page.value(QStringLiteral("total")).toInt();
+    }
+    const QJsonArray rows = page.value(QStringLiteral("sessions")).toArray();
+    for (SessionSummary& session : parse_rows(rows)) {
+      if (seen_ids.insert(session.id).second) {
+        sessions.push_back(std::move(session));
+      }
+    }
+    if (rows.isEmpty() || rows.size() < kSessionFetchPageSize ||
+        (total > 0 && static_cast<int>(sessions.size()) >= total)) {
+      break;
     }
   }
 
