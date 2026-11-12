@@ -62,6 +62,7 @@ add_executable(hermes_ui MACOSX_BUNDLE
   src/gateway_endpoint.cc
   src/gateway_http.cc
   src/gateway_socket.cc
+  src/interrupt_relay.cc
   src/background_task.cc
   src/qr_code.cc
   src/artifacts.cc

@@ -424,11 +424,15 @@ void MainWindow::BuildUi() {
   composer_->setMaximumWidth(780);
   composer_->setMinimumWidth(460);
   composer_->on_stop = [this]() {
+    status_bar_->ShowTransient(QStringLiteral("Stopping…"), 2000);
     supervisor_.Interrupt(supervisor_.active_index());
   };
   composer_->on_model_selected = [this](const QString& provider,
                                         const QString& model) {
     supervisor_.SetModel(supervisor_.active_index(), provider, model);
+  };
+  composer_->on_use_default_model = [this]() {
+    supervisor_.UseDefaultModel(supervisor_.active_index());
   };
   composer_->on_refresh_models = [this]() {
     supervisor_.RefreshModelOptions(supervisor_.active_index());
@@ -2523,11 +2527,15 @@ void MainWindow::ShowDetachedChat() {
   composer->SetHiddenModels(
       ParseHiddenModels(NativePref(QStringLiteral("native.model_visibility"))));
   composer->on_stop = [this]() {
+    status_bar_->ShowTransient(QStringLiteral("Stopping…"), 2000);
     supervisor_.Interrupt(supervisor_.active_index());
   };
   composer->on_model_selected = [this](const QString& provider,
                                        const QString& model) {
     supervisor_.SetModel(supervisor_.active_index(), provider, model);
+  };
+  composer->on_use_default_model = [this]() {
+    supervisor_.UseDefaultModel(supervisor_.active_index());
   };
   composer->on_refresh_models = [this]() {
     supervisor_.RefreshModelOptions(supervisor_.active_index());
