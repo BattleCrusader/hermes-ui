@@ -5,6 +5,7 @@
 
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 
 namespace hermes::ui {
 
@@ -18,6 +19,9 @@ struct GatewayEndpoint {
       profile_id;  // Default home path; named profiles append /profiles/<n>.
   QString code_sha;
   int runtime_protocol = 0;
+  // Profile homes this gateway serves. The REST status roster can list every
+  // profile on disk; only these can mint a ticket.
+  QStringList served_profiles;
 
   bool valid() const { return !api_origin.isEmpty() && !instance_id.isEmpty(); }
 };

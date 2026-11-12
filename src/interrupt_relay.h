@@ -55,6 +55,7 @@ class InterruptRelay : public QObject {
   GatewayEndpoint endpoint_;
   GatewaySocket* socket_ = nullptr;
   std::optional<PendingInterrupt> pending_;
+  bool error_logged_ = false;
 };
 
 }  // namespace hermes::ui

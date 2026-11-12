@@ -61,6 +61,7 @@ void InterruptRelay::Interrupt(const QString& session_id,
 
 void InterruptRelay::OnConnected(const QString& subprotocol) {
   Q_UNUSED(subprotocol);
+  error_logged_ = false;
   if (!pending_.has_value()) {
     return;
   }
@@ -76,8 +77,12 @@ void InterruptRelay::OnConnected(const QString& subprotocol) {
 
 void InterruptRelay::OnSocketError(const QString& message) {
   // GatewaySocket retries on its own. The pending interrupt stays queued until
-  // it either connects or expires. One line per failure; the backoff repeats
-  // the same message, so do not turn this into a warning stream.
+  // it either connects or expires. Log only the first failure in a backoff
+  // run; a rejected profile otherwise repeats the same line forever.
+  if (error_logged_) {
+    return;
+  }
+  error_logged_ = true;
   qInfo("interrupt relay profile=%s: %s", qUtf8Printable(profile_name_),
         qUtf8Printable(message));
 }
