@@ -18,56 +18,56 @@ namespace hermes::ui {
 // Synchronous-looking JSON client for a profile worker. The manager and the
 // nested event loop live on the worker thread, never the UI thread.
 class GatewayHttp {
-public:
+ public:
   GatewayHttp(QString home, QString profile_name, GatewayEndpoint endpoint);
   ~GatewayHttp();
 
-  GatewayHttp(const GatewayHttp &) = delete;
-  GatewayHttp &operator=(const GatewayHttp &) = delete;
+  GatewayHttp(const GatewayHttp&) = delete;
+  GatewayHttp& operator=(const GatewayHttp&) = delete;
 
   // GET/PUT cover the config and session read/write paths.
-  bool GetJson(const QString &path, QJsonDocument *document, QString *error,
+  bool GetJson(const QString& path, QJsonDocument* document, QString* error,
                bool authenticate = true);
-  bool PutJson(const QString &path, const QJsonObject &body,
-               QJsonDocument *document, QString *error,
+  bool PutJson(const QString& path, const QJsonObject& body,
+               QJsonDocument* document, QString* error,
                bool authenticate = true);
 
   // Every other REST verb the desktop uses. `body` is optional for DELETE,
   // which some gateway routes read as a JSON body (DELETE /api/env).
-  bool PostJson(const QString &path, const QJsonObject &body,
-                QJsonDocument *document, QString *error,
+  bool PostJson(const QString& path, const QJsonObject& body,
+                QJsonDocument* document, QString* error,
                 bool authenticate = true);
-  bool PatchJson(const QString &path, const QJsonObject &body,
-                 QJsonDocument *document, QString *error,
+  bool PatchJson(const QString& path, const QJsonObject& body,
+                 QJsonDocument* document, QString* error,
                  bool authenticate = true);
-  bool DeleteJson(const QString &path, const QJsonObject &body,
-                  QJsonDocument *document, QString *error,
+  bool DeleteJson(const QString& path, const QJsonObject& body,
+                  QJsonDocument* document, QString* error,
                   bool authenticate = true);
 
   // Multipart upload for the chat attachment routes. `uploaded_path` receives
   // the gateway-visible file path the prompt should reference.
-  bool PostFile(const QString &path, const QString &file_path,
-                QString *uploaded_path, QString *error);
+  bool PostFile(const QString& path, const QString& file_path,
+                QString* uploaded_path, QString* error);
   // Multipart upload with extra non-file form fields (the managed-file
   // upload-stream route needs a target `path`).
-  bool PostMultipart(const QString &path, const QString &file_path,
-                     const QJsonObject &fields, QString *uploaded_path,
-                     QString *error);
+  bool PostMultipart(const QString& path, const QString& file_path,
+                     const QJsonObject& fields, QString* uploaded_path,
+                     QString* error);
   // Streams a workspace file to `local_path`, replacing it atomically.
-  bool DownloadFile(const QString &path, const QString &local_path,
-                    QString *error);
+  bool DownloadFile(const QString& path, const QString& local_path,
+                    QString* error);
 
   // Generic escape hatch: `method` is an HTTP verb ("PUT", "PATCH", ...).
   // Returns false and fills *error for a non-2xx status or a transport error.
-  bool RequestJson(const QString &method, const QString &path,
-                   const QJsonObject &body, QJsonDocument *document,
-                   QString *error, bool authenticate = true);
+  bool RequestJson(const QString& method, const QString& path,
+                   const QJsonObject& body, QJsonDocument* document,
+                   QString* error, bool authenticate = true);
 
   // Aborts the in-flight request. Called from the worker's Shutdown while the
   // request's nested event loop may still be running.
   void Abort();
 
-private:
+ private:
   struct Result {
     bool ok = false;
     int status = 0;
@@ -76,18 +76,18 @@ private:
     QByteArray data;
   };
 
-  Result Perform(const QByteArray &method, const QUrl &url,
-                 const QString &ticket, const QByteArray &body,
-                 const QByteArray &content_type = QByteArray(),
+  Result Perform(const QByteArray& method, const QUrl& url,
+                 const QString& ticket, const QByteArray& body,
+                 const QByteArray& content_type = QByteArray(),
                  bool parse_json = true);
 
   QString home_;
   QString profile_name_;
   GatewayEndpoint endpoint_;
-  QNetworkAccessManager *manager_ = nullptr;
-  QNetworkReply *active_reply_ = nullptr;
+  QNetworkAccessManager* manager_ = nullptr;
+  QNetworkReply* active_reply_ = nullptr;
 };
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_GATEWAY_HTTP_H_
+#endif  // HERMES_UI_GATEWAY_HTTP_H_

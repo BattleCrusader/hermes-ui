@@ -349,7 +349,7 @@ void GatewayProtocolTest::pendingAdmissionsParseAndBuildQueueActions() {
 }
 
 void GatewayProtocolTest::
-    pendingPromptTrackerAnnouncesOnlyProcessedQueueRows() {
+    pendingPromptTrackerAnnouncesOnlyProcessedQueueRows() {  // NOLINT(whitespace/indent_namespace,whitespace/line_length)
   auto row = [](const QString& id, const QString& text, const QString& status,
                 bool steering = false) {
     PendingAdmission admission;

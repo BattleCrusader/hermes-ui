@@ -6,7 +6,7 @@
 
 namespace hermes::ui {
 
-bool ReplayCursor::ObserveEpoch(const QString &epoch) {
+bool ReplayCursor::ObserveEpoch(const QString& epoch) {
   if (epoch.isEmpty() || epoch == epoch_) {
     return false;
   }
@@ -18,7 +18,7 @@ bool ReplayCursor::ObserveEpoch(const QString &epoch) {
 
 QString ReplayCursor::Epoch() const { return epoch_; }
 
-bool ReplayCursor::AcceptEvent(const QString &session_id, int seq) {
+bool ReplayCursor::AcceptEvent(const QString& session_id, int seq) {
   if (session_id.isEmpty() || seq <= 0) {
     return true;
   }
@@ -30,18 +30,18 @@ bool ReplayCursor::AcceptEvent(const QString &session_id, int seq) {
   return true;
 }
 
-int ReplayCursor::LastSeq(const QString &session_id) const {
+int ReplayCursor::LastSeq(const QString& session_id) const {
   return last_seq_.value(session_id, 0);
 }
 
-void ReplayCursor::SetLastSeq(const QString &session_id, int seq) {
+void ReplayCursor::SetLastSeq(const QString& session_id, int seq) {
   if (session_id.isEmpty() || seq < 0) {
     return;
   }
   last_seq_.insert(session_id, std::max(last_seq_.value(session_id, 0), seq));
 }
 
-void ReplayCursor::ForgetSession(const QString &session_id) {
+void ReplayCursor::ForgetSession(const QString& session_id) {
   last_seq_.remove(session_id);
 }
 
@@ -49,7 +49,7 @@ QStringList ReplayCursor::Sessions() const {
   QStringList sessions = last_seq_.keys();
   std::sort(sessions.begin(), sessions.end());
   QStringList with_watermark;
-  for (const QString &session : sessions) {
+  for (const QString& session : sessions) {
     if (last_seq_.value(session, 0) > 0) {
       with_watermark.push_back(session);
     }
@@ -62,4 +62,4 @@ void ReplayCursor::Reset() {
   last_seq_.clear();
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

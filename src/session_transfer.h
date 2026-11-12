@@ -13,9 +13,9 @@ namespace hermes::ui {
 // `{"sessions": [...]}` payload, one exported session object with `id`, or a
 // bare array of session objects. Returns false with a human-readable error for
 // malformed or empty input.
-bool ParseSessionImport(const QByteArray &bytes, QJsonArray *sessions,
-                        QString *error);
+bool ParseSessionImport(const QByteArray& bytes, QJsonArray* sessions,
+                        QString* error);
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_SESSION_TRANSFER_H_
+#endif  // HERMES_UI_SESSION_TRANSFER_H_

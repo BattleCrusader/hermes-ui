@@ -23,7 +23,7 @@ struct DecodeResult {
   QString error;
 };
 
-QString CanonicalStateName(const QString &state) {
+QString CanonicalStateName(const QString& state) {
   const QString s = state.toLower();
   if (s == QStringLiteral("run")) {
     return QStringLiteral("running");
@@ -37,9 +37,9 @@ QString CanonicalStateName(const QString &state) {
   return s.isEmpty() ? QStringLiteral("idle") : s;
 }
 
-} // namespace
+}  // namespace
 
-PetOverlay::PetOverlay(const Theme &theme, QWidget *parent)
+PetOverlay::PetOverlay(const Theme& theme, QWidget* parent)
     : QWidget(parent,
               Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint),
       theme_(theme) {
@@ -56,14 +56,14 @@ PetOverlay::PetOverlay(const Theme &theme, QWidget *parent)
 
 PetOverlay::~PetOverlay() = default;
 
-void PetOverlay::SetTheme(const Theme &theme) {
+void PetOverlay::SetTheme(const Theme& theme) {
   theme_ = theme;
   update();
 }
 
-void PetOverlay::SetSpritePayload(const QJsonObject &payload) {
+void PetOverlay::SetSpritePayload(const QJsonObject& payload) {
   const quint64 token = ++decode_token_;
-  auto *watcher = new QFutureWatcher<DecodeResult>(this);
+  auto* watcher = new QFutureWatcher<DecodeResult>(this);
   connect(watcher, &QFutureWatcher<DecodeResult>::finished, this,
           [this, watcher, token]() {
             const DecodeResult result = watcher->result();
@@ -86,7 +86,7 @@ void PetOverlay::SetSpritePayload(const QJsonObject &payload) {
   }));
 }
 
-void PetOverlay::SetSprite(const PetSpriteInfo &sprite) {
+void PetOverlay::SetSprite(const PetSpriteInfo& sprite) {
   sprite_ = sprite;
   timer_->stop();
   frame_ = 0;
@@ -99,7 +99,7 @@ void PetOverlay::SetSprite(const PetSpriteInfo &sprite) {
   update();
 }
 
-void PetOverlay::SetState(const QString &state) {
+void PetOverlay::SetState(const QString& state) {
   const QString canonical = CanonicalStateName(state);
   if (canonical == state_) {
     return;
@@ -117,7 +117,7 @@ void PetOverlay::SetState(const QString &state) {
   }
 }
 
-void PetOverlay::SetStatus(const QString &status) {
+void PetOverlay::SetStatus(const QString& status) {
   if (status == status_) {
     return;
   }
@@ -132,8 +132,7 @@ QString PetOverlay::Revision() const { return sprite_.revision; }
 
 QSize PetOverlay::PreferredSize() const { return sprite_.WindowSize(); }
 
-void PetOverlay::SetSubmitHandler(
-    std::function<void(const QString &)> handler) {
+void PetOverlay::SetSubmitHandler(std::function<void(const QString&)> handler) {
   submit_handler_ = std::move(handler);
 }
 
@@ -188,7 +187,7 @@ void PetOverlay::AdvanceFrame() {
   update(SpriteRect());
 }
 
-void PetOverlay::paintEvent(QPaintEvent *) {
+void PetOverlay::paintEvent(QPaintEvent*) {
   QPainter painter(this);
   painter.setCompositionMode(QPainter::CompositionMode_Source);
   painter.fillRect(rect(), Qt::transparent);
@@ -223,7 +222,7 @@ void PetOverlay::paintEvent(QPaintEvent *) {
   }
 }
 
-void PetOverlay::mousePressEvent(QMouseEvent *event) {
+void PetOverlay::mousePressEvent(QMouseEvent* event) {
   if (event->button() == Qt::LeftButton) {
     dragging_ = true;
     drag_offset_ =
@@ -234,7 +233,7 @@ void PetOverlay::mousePressEvent(QMouseEvent *event) {
   QWidget::mousePressEvent(event);
 }
 
-void PetOverlay::mouseMoveEvent(QMouseEvent *event) {
+void PetOverlay::mouseMoveEvent(QMouseEvent* event) {
   if (dragging_ && (event->buttons() & Qt::LeftButton)) {
     move(event->globalPosition().toPoint() - drag_offset_);
     event->accept();
@@ -243,7 +242,7 @@ void PetOverlay::mouseMoveEvent(QMouseEvent *event) {
   QWidget::mouseMoveEvent(event);
 }
 
-void PetOverlay::mouseReleaseEvent(QMouseEvent *event) {
+void PetOverlay::mouseReleaseEvent(QMouseEvent* event) {
   if (event->button() == Qt::LeftButton) {
     dragging_ = false;
     event->accept();
@@ -252,7 +251,7 @@ void PetOverlay::mouseReleaseEvent(QMouseEvent *event) {
   QWidget::mouseReleaseEvent(event);
 }
 
-void PetOverlay::mouseDoubleClickEvent(QMouseEvent *event) {
+void PetOverlay::mouseDoubleClickEvent(QMouseEvent* event) {
   if (event->button() == Qt::LeftButton && quick_entry_handler_) {
     quick_entry_handler_();
     event->accept();
@@ -261,11 +260,11 @@ void PetOverlay::mouseDoubleClickEvent(QMouseEvent *event) {
   QWidget::mouseDoubleClickEvent(event);
 }
 
-void PetOverlay::contextMenuEvent(QContextMenuEvent *event) {
+void PetOverlay::contextMenuEvent(QContextMenuEvent* event) {
   QMenu menu(this);
-  QAction *quick = menu.addAction(QStringLiteral("Quick entry…"));
-  QAction *hide_action = menu.addAction(QStringLiteral("Hide pet"));
-  QAction *chosen = menu.exec(event->globalPos());
+  QAction* quick = menu.addAction(QStringLiteral("Quick entry…"));
+  QAction* hide_action = menu.addAction(QStringLiteral("Hide pet"));
+  QAction* chosen = menu.exec(event->globalPos());
   if (chosen == quick && quick_entry_handler_) {
     quick_entry_handler_();
   } else if (chosen == hide_action) {
@@ -277,7 +276,7 @@ void PetOverlay::contextMenuEvent(QContextMenuEvent *event) {
   }
 }
 
-void PetOverlay::moveEvent(QMoveEvent *event) {
+void PetOverlay::moveEvent(QMoveEvent* event) {
   QWidget::moveEvent(event);
   SetNativePref(QStringLiteral("pet.overlay_x"),
                 QString::number(event->pos().x()));
@@ -285,4 +284,4 @@ void PetOverlay::moveEvent(QMoveEvent *event) {
                 QString::number(event->pos().y()));
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

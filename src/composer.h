@@ -30,21 +30,21 @@ namespace hermes::ui {
 class Composer : public QWidget {
   Q_OBJECT
 
-public:
-  explicit Composer(const Theme &theme, QWidget *parent = nullptr);
+ public:
+  explicit Composer(const Theme& theme, QWidget* parent = nullptr);
   ~Composer() override;
 
-  void SetTheme(const Theme &theme);
-  void SetText(const QString &text);
-  void SetModelLabel(const QString &model);
-  void SetModelCatalog(const std::vector<ModelProvider> &providers,
-                       const QString &provider, const QString &model);
+  void SetTheme(const Theme& theme);
+  void SetText(const QString& text);
+  void SetModelLabel(const QString& model);
+  void SetModelCatalog(const std::vector<ModelProvider>& providers,
+                       const QString& provider, const QString& model);
   // Local model-picker visibility. Empty means every catalog model is shown.
-  void SetHiddenModels(const QSet<QString> &hidden);
+  void SetHiddenModels(const QSet<QString>& hidden);
   QSet<QString> HiddenModels() const { return hidden_models_; }
   // Native test seam: the dialog is returned without entering a modal loop.
-  QDialog *ShowModelVisibilityDialogForTest();
-  void SetReasoning(const QString &effort);
+  QDialog* ShowModelVisibilityDialogForTest();
+  void SetReasoning(const QString& effort);
   // Context-window meter painted beside the model/reasoning chips. Zero max
   // (no session.usage tick yet) keeps it hidden.
   void SetUsage(qint64 context_used, qint64 context_max);
@@ -52,8 +52,8 @@ public:
   // Live push-to-talk status from the gateway. While recording the partial
   // transcript replaces the token meter; `status` covers transcribing/no
   // speech without pretending a capture is still live.
-  void SetVoiceState(bool recording, const QString &partial,
-                     const QString &status);
+  void SetVoiceState(bool recording, const QString& partial,
+                     const QString& status);
   QString VoiceStatusText() const;
   // Number of transcript replies pinned into the next prompt. The gateway has
   // no pin RPC; the shell composes the context prefix on submit.
@@ -65,22 +65,22 @@ public:
   void SetSlashCommands(std::vector<SlashCommand> commands);
   // Per-session user prompt ring, newest first. ArrowUp/ArrowDown browse it
   // only when the caret is at the start/end, so multiline editing still works.
-  void SetHistory(const QStringList &history);
+  void SetHistory(const QStringList& history);
   // `@` completion. The shell supplies a gateway-backed directory lister and
   // the profile home that relative mentions resolve against. Listing is async
   // so typing a mention never blocks the UI on a gateway round-trip.
   using PathListCallback =
-      std::function<void(const QJsonArray &, const QString &)>;
-  void
-  SetPathLister(std::function<void(const QString &, PathListCallback)> lister);
-  void SetMentionRoot(const QString &root);
+      std::function<void(const QJsonArray&, const QString&)>;
+  void SetPathLister(
+      std::function<void(const QString&, PathListCallback)> lister);
+  void SetMentionRoot(const QString& root);
   bool MentionMenuVisible() const;
   QStringList MentionMenuEntries() const;
   void Clear();
   // Inserts a reference to a staged upload so the next prompt names the file.
-  void AddAttachment(const QString &name, const QString &path);
+  void AddAttachment(const QString& name, const QString& path);
   // Native test seam for the overflow drawer (clicking the painted +N chip).
-  QMenu *ShowAttachmentDrawerForTest();
+  QMenu* ShowAttachmentDrawerForTest();
   QStringList AttachmentPaths() const;
   std::vector<ClickTarget> ClickTargets() const;
   // Slash-command completion popup state (also used by the click audit).
@@ -90,21 +90,21 @@ public:
   void FocusEditor();
 
   std::function<void()> on_stop;
-  std::function<void(const QString &provider, const QString &model)>
+  std::function<void(const QString& provider, const QString& model)>
       on_model_selected;
-  std::function<void(const QString &effort)> on_reasoning_selected;
+  std::function<void(const QString& effort)> on_reasoning_selected;
 
   // Bare `@dir/file` tokens become typed `@file:`/`@folder:` directives, which
   // is the shape the gateway understands (mirrors desktop pathifyRefs).
-  static QString PromotePathRefs(const QString &text);
+  static QString PromotePathRefs(const QString& text);
 
-signals:
+ signals:
   void AttachRequested();
   void VoiceToggleRequested();
-  void Submitted(const QString &text);
+  void Submitted(const QString& text);
   // Files dropped onto the card; the shell stages them through the worker so
   // they get the same 0600 copy as the attach picker.
-  void FilesDropped(const QStringList &paths);
+  void FilesDropped(const QStringList& paths);
   // The composer grows one status line while a turn runs; the shell resizes
   // its host so the line is not clipped.
   void HeightChanged(int height);
@@ -113,20 +113,20 @@ signals:
   void QueuedReviewRequested();
   // Enter while a turn is running steers it. Ctrl+Enter queues the draft for
   // the next turn instead of interrupting the current one.
-  void SteerRequested(const QString &text);
-  void QueueRequested(const QString &text);
+  void SteerRequested(const QString& text);
+  void QueueRequested(const QString& text);
 
-protected:
-  void paintEvent(QPaintEvent *event) override;
-  void resizeEvent(QResizeEvent *event) override;
-  void mousePressEvent(QMouseEvent *event) override;
-  void mouseMoveEvent(QMouseEvent *event) override;
-  void leaveEvent(QEvent *event) override;
-  void dragEnterEvent(QDragEnterEvent *event) override;
-  void dropEvent(QDropEvent *event) override;
-  bool eventFilter(QObject *watched, QEvent *event) override;
+ protected:
+  void paintEvent(QPaintEvent* event) override;
+  void resizeEvent(QResizeEvent* event) override;
+  void mousePressEvent(QMouseEvent* event) override;
+  void mouseMoveEvent(QMouseEvent* event) override;
+  void leaveEvent(QEvent* event) override;
+  void dragEnterEvent(QDragEnterEvent* event) override;
+  void dropEvent(QDropEvent* event) override;
+  bool eventFilter(QObject* watched, QEvent* event) override;
 
-private:
+ private:
   QRectF CardRect() const;
   QRectF SendRect() const;
   QRectF AttachRect() const;
@@ -141,10 +141,10 @@ private:
   void UpdateMentionMenu();
   void AcceptMention();
   void HideMentionMenu();
-  QString MentionDisplayPath(const QString &absolute) const;
-  QListWidget *slash_menu_ = nullptr;
-  QListWidget *mention_menu_ = nullptr;
-  std::function<void(const QString &, PathListCallback)> path_lister_;
+  QString MentionDisplayPath(const QString& absolute) const;
+  QListWidget* slash_menu_ = nullptr;
+  QListWidget* mention_menu_ = nullptr;
+  std::function<void(const QString&, PathListCallback)> path_lister_;
   QSet<QString> path_pending_;
   int mention_generation_ = 0;
   QString mention_root_;
@@ -158,20 +158,20 @@ private:
   void UpdateChipStyles();
   void ShowModelMenu();
   void ShowReasoningMenu();
-  QDialog *BuildModelVisibilityDialog();
+  QDialog* BuildModelVisibilityDialog();
   void ShowModelVisibilityDialog();
   void Submit();
   QString SubmissionText() const;
   int VisibleAttachmentCount() const;
   QRectF AttachmentDrawerRect() const;
   void ShowAttachmentDrawer();
-  QPixmap AttachmentThumbnail(const QString &path);
+  QPixmap AttachmentThumbnail(const QString& path);
   void UpdateEditorStyle();
 
   Theme theme_;
-  QTextEdit *editor_ = nullptr;
-  QPushButton *model_button_ = nullptr;
-  QPushButton *reasoning_button_ = nullptr;
+  QTextEdit* editor_ = nullptr;
+  QPushButton* model_button_ = nullptr;
+  QPushButton* reasoning_button_ = nullptr;
   QString model_label_ = QStringLiteral("model");
   QString provider_;
   QString reasoning_ = QStringLiteral("medium");
@@ -192,11 +192,11 @@ private:
   QString history_draft_;
   bool send_hovered_ = false;
   bool editor_focused_ = false;
-  QTimer *activity_timer_ = nullptr;
+  QTimer* activity_timer_ = nullptr;
   qint64 running_since_ms_ = 0;
   int activity_tick_ = 0;
 };
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_COMPOSER_H_
+#endif  // HERMES_UI_COMPOSER_H_

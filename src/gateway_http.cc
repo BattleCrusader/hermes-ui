@@ -20,8 +20,8 @@ namespace {
 
 constexpr int kRequestTimeoutMs = 20000;
 
-QUrl ScopedUrl(const GatewayEndpoint &endpoint, const QString &profile_name,
-               const QString &path) {
+QUrl ScopedUrl(const GatewayEndpoint& endpoint, const QString& profile_name,
+               const QString& path) {
   QUrl url(endpoint.api_origin + path);
   QUrlQuery query(url);
   query.addQueryItem(QStringLiteral("profile"), profile_name);
@@ -29,11 +29,12 @@ QUrl ScopedUrl(const GatewayEndpoint &endpoint, const QString &profile_name,
   return url;
 }
 
-} // namespace
+}  // namespace
 
 GatewayHttp::GatewayHttp(QString home, QString profile_name,
                          GatewayEndpoint endpoint)
-    : home_(std::move(home)), profile_name_(std::move(profile_name)),
+    : home_(std::move(home)),
+      profile_name_(std::move(profile_name)),
       endpoint_(std::move(endpoint)) {
   manager_ = new QNetworkAccessManager();
 }
@@ -49,10 +50,10 @@ void GatewayHttp::Abort() {
   }
 }
 
-GatewayHttp::Result GatewayHttp::Perform(const QByteArray &method,
-                                         const QUrl &url, const QString &ticket,
-                                         const QByteArray &body,
-                                         const QByteArray &content_type,
+GatewayHttp::Result GatewayHttp::Perform(const QByteArray& method,
+                                         const QUrl& url, const QString& ticket,
+                                         const QByteArray& body,
+                                         const QByteArray& content_type,
                                          bool parse_json) {
   Result result;
   QNetworkRequest request(url);
@@ -66,7 +67,7 @@ GatewayHttp::Result GatewayHttp::Perform(const QByteArray &method,
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
   }
 
-  QNetworkReply *reply = nullptr;
+  QNetworkReply* reply = nullptr;
   if (method == "GET") {
     reply = manager_->get(request);
   } else if (method == "PUT") {
@@ -146,14 +147,14 @@ GatewayHttp::Result GatewayHttp::Perform(const QByteArray &method,
   return result;
 }
 
-bool GatewayHttp::PostFile(const QString &path, const QString &file_path,
-                           QString *uploaded_path, QString *error) {
+bool GatewayHttp::PostFile(const QString& path, const QString& file_path,
+                           QString* uploaded_path, QString* error) {
   return PostMultipart(path, file_path, QJsonObject(), uploaded_path, error);
 }
 
-bool GatewayHttp::PostMultipart(const QString &path, const QString &file_path,
-                                const QJsonObject &fields,
-                                QString *uploaded_path, QString *error) {
+bool GatewayHttp::PostMultipart(const QString& path, const QString& file_path,
+                                const QJsonObject& fields,
+                                QString* uploaded_path, QString* error) {
   constexpr qint64 kMaxUploadBytes = 64LL * 1024 * 1024;
   QFile file(file_path);
   if (!file.open(QIODevice::ReadOnly)) {
@@ -224,8 +225,8 @@ bool GatewayHttp::PostMultipart(const QString &path, const QString &file_path,
   return false;
 }
 
-bool GatewayHttp::DownloadFile(const QString &path, const QString &local_path,
-                               QString *error) {
+bool GatewayHttp::DownloadFile(const QString& path, const QString& local_path,
+                               QString* error) {
   const QUrl url = ScopedUrl(endpoint_, profile_name_, path);
   Result last;
   for (int attempt = 0; attempt < 2; ++attempt) {
@@ -260,9 +261,9 @@ bool GatewayHttp::DownloadFile(const QString &path, const QString &local_path,
   return false;
 }
 
-bool GatewayHttp::RequestJson(const QString &method, const QString &path,
-                              const QJsonObject &body, QJsonDocument *document,
-                              QString *error, bool authenticate) {
+bool GatewayHttp::RequestJson(const QString& method, const QString& path,
+                              const QJsonObject& body, QJsonDocument* document,
+                              QString* error, bool authenticate) {
   const QUrl url = ScopedUrl(endpoint_, profile_name_, path);
   const QByteArray payload =
       body.isEmpty() && method == QLatin1String("GET")
@@ -305,38 +306,38 @@ bool GatewayHttp::RequestJson(const QString &method, const QString &path,
   return false;
 }
 
-bool GatewayHttp::GetJson(const QString &path, QJsonDocument *document,
-                          QString *error, bool authenticate) {
+bool GatewayHttp::GetJson(const QString& path, QJsonDocument* document,
+                          QString* error, bool authenticate) {
   return RequestJson(QStringLiteral("GET"), path, QJsonObject(), document,
                      error, authenticate);
 }
 
-bool GatewayHttp::PutJson(const QString &path, const QJsonObject &body,
-                          QJsonDocument *document, QString *error,
+bool GatewayHttp::PutJson(const QString& path, const QJsonObject& body,
+                          QJsonDocument* document, QString* error,
                           bool authenticate) {
   return RequestJson(QStringLiteral("PUT"), path, body, document, error,
                      authenticate);
 }
 
-bool GatewayHttp::PostJson(const QString &path, const QJsonObject &body,
-                           QJsonDocument *document, QString *error,
+bool GatewayHttp::PostJson(const QString& path, const QJsonObject& body,
+                           QJsonDocument* document, QString* error,
                            bool authenticate) {
   return RequestJson(QStringLiteral("POST"), path, body, document, error,
                      authenticate);
 }
 
-bool GatewayHttp::PatchJson(const QString &path, const QJsonObject &body,
-                            QJsonDocument *document, QString *error,
+bool GatewayHttp::PatchJson(const QString& path, const QJsonObject& body,
+                            QJsonDocument* document, QString* error,
                             bool authenticate) {
   return RequestJson(QStringLiteral("PATCH"), path, body, document, error,
                      authenticate);
 }
 
-bool GatewayHttp::DeleteJson(const QString &path, const QJsonObject &body,
-                             QJsonDocument *document, QString *error,
+bool GatewayHttp::DeleteJson(const QString& path, const QJsonObject& body,
+                             QJsonDocument* document, QString* error,
                              bool authenticate) {
   return RequestJson(QStringLiteral("DELETE"), path, body, document, error,
                      authenticate);
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

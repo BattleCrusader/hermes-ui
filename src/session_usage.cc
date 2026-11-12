@@ -7,14 +7,14 @@
 namespace hermes::ui {
 namespace {
 
-bool Has(const QJsonObject &nested, const QJsonObject &payload,
-         const char *key) {
+bool Has(const QJsonObject& nested, const QJsonObject& payload,
+         const char* key) {
   return nested.contains(QLatin1String(key)) ||
          payload.contains(QLatin1String(key));
 }
 
-double Read(const QJsonObject &nested, const QJsonObject &payload,
-            const char *key, const char *fallback = nullptr) {
+double Read(const QJsonObject& nested, const QJsonObject& payload,
+            const char* key, const char* fallback = nullptr) {
   if (nested.contains(QLatin1String(key))) {
     return nested.value(QLatin1String(key)).toDouble();
   }
@@ -30,10 +30,10 @@ double Read(const QJsonObject &nested, const QJsonObject &payload,
   return 0.0;
 }
 
-} // namespace
+}  // namespace
 
-SessionUsage MergeSessionUsage(const SessionUsage &usage,
-                               const QJsonObject &payload) {
+SessionUsage MergeSessionUsage(const SessionUsage& usage,
+                               const QJsonObject& payload) {
   SessionUsage merged = usage;
   const QJsonObject nested = payload.value(QStringLiteral("usage")).toObject();
 
@@ -101,4 +101,4 @@ SessionUsage MergeSessionUsage(const SessionUsage &usage,
   return merged;
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

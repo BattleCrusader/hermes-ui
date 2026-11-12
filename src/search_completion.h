@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <QStringListModel>
 #include <functional>
+#include <utility>
 
 namespace hermes::ui {
 

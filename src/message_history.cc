@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <cmath>
 #include <utility>
+#include <vector>
 
 namespace hermes::ui {
 namespace {

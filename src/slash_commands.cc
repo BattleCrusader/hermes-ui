@@ -7,7 +7,7 @@
 namespace hermes::ui {
 namespace {
 
-const std::vector<SlashCommand> &Catalog() {
+const std::vector<SlashCommand>& Catalog() {
   static const std::vector<SlashCommand> catalog = {
       {QStringLiteral("/new"),
        {QStringLiteral("/reset"), QStringLiteral("/clear")},
@@ -73,22 +73,21 @@ const std::vector<SlashCommand> &Catalog() {
   return catalog;
 }
 
-} // namespace
+}  // namespace
 
-const std::vector<SlashCommand> &SlashCommandCatalog() { return Catalog(); }
+const std::vector<SlashCommand>& SlashCommandCatalog() { return Catalog(); }
 
-std::vector<const SlashCommand *> MatchSlashCommands(const QString &prefix) {
+std::vector<const SlashCommand*> MatchSlashCommands(const QString& prefix) {
   return MatchSlashCommands(Catalog(), prefix);
 }
 
-std::vector<const SlashCommand *>
-MatchSlashCommands(const std::vector<SlashCommand> &catalog,
-                   const QString &prefix) {
+std::vector<const SlashCommand*> MatchSlashCommands(
+    const std::vector<SlashCommand>& catalog, const QString& prefix) {
   const QString needle = prefix.trimmed().toLower();
-  std::vector<const SlashCommand *> matches;
-  for (const SlashCommand &command : catalog) {
+  std::vector<const SlashCommand*> matches;
+  for (const SlashCommand& command : catalog) {
     bool hit = needle.isEmpty() || command.name.toLower().startsWith(needle);
-    for (const QString &alias : command.aliases) {
+    for (const QString& alias : command.aliases) {
       hit = hit || (needle.isEmpty() || alias.toLower().startsWith(needle));
     }
     if (hit) {
@@ -98,13 +97,13 @@ MatchSlashCommands(const std::vector<SlashCommand> &catalog,
   return matches;
 }
 
-const SlashCommand *FindSlashCommand(const QString &name) {
+const SlashCommand* FindSlashCommand(const QString& name) {
   const QString needle = name.trimmed().toLower();
-  for (const SlashCommand &command : Catalog()) {
+  for (const SlashCommand& command : Catalog()) {
     if (command.name.toLower() == needle) {
       return &command;
     }
-    for (const QString &alias : command.aliases) {
+    for (const QString& alias : command.aliases) {
       if (alias.toLower() == needle) {
         return &command;
       }
@@ -113,4 +112,4 @@ const SlashCommand *FindSlashCommand(const QString &name) {
   return nullptr;
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

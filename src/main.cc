@@ -32,7 +32,7 @@ void LoadBundledFonts() {
       QStringLiteral(":/fonts/JetBrainsMono-Bold.ttf"),
       QStringLiteral(":/fonts/codicon.ttf"),
   };
-  for (const QString &path : fonts) {
+  for (const QString& path : fonts) {
     const int id = QFontDatabase::addApplicationFont(path);
     if (id < 0) {
       qWarning("failed to load font %s", qUtf8Printable(path));
@@ -80,7 +80,7 @@ int RunGatewayProbe() {
   const QJsonArray rows =
       sessions.object().value(QStringLiteral("sessions")).toArray();
   qInfo("sessions=%lld", static_cast<qint64>(rows.size()));
-  for (const QJsonValue &value : rows) {
+  for (const QJsonValue& value : rows) {
     const QJsonObject row = value.toObject();
     qInfo("  session %.12s messages=%d",
           qUtf8Printable(row.value(QStringLiteral("id")).toString()),
@@ -89,29 +89,29 @@ int RunGatewayProbe() {
   return 0;
 }
 
-int RunWebSocketProbe(QApplication *app) {
+int RunWebSocketProbe(QApplication* app) {
   hermes::ui::GatewayEndpoint endpoint;
   QString error;
   if (!hermes::ui::DiscoverEndpoint(&endpoint, &error)) {
     qCritical("endpoint: %s", qUtf8Printable(error));
     return 1;
   }
-  auto *socket = new hermes::ui::GatewaySocket(
+  auto* socket = new hermes::ui::GatewaySocket(
       hermes::ui::HermesHome(), QStringLiteral("default"), endpoint, app);
   QObject::connect(socket, &hermes::ui::GatewaySocket::Connected,
-                   [](const QString &protocol) {
+                   [](const QString& protocol) {
                      qInfo("ws connected protocol=%s",
                            qUtf8Printable(protocol));
                    });
   QObject::connect(socket, &hermes::ui::GatewaySocket::EventReceived,
-                   [](const QString &type, const QString &session_id,
-                      const QJsonObject &payload) {
+                   [](const QString& type, const QString& session_id,
+                      const QJsonObject& payload) {
                      qInfo("event type=%s session=%.8s payload_keys=%lld",
                            qUtf8Printable(type), qUtf8Printable(session_id),
                            static_cast<qint64>(payload.size()));
                    });
   QObject::connect(socket, &hermes::ui::GatewaySocket::SocketError,
-                   [](const QString &message) {
+                   [](const QString& message) {
                      qWarning("ws: %s", qUtf8Printable(message));
                    });
   socket->Connect();
@@ -119,9 +119,9 @@ int RunWebSocketProbe(QApplication *app) {
   return app->exec();
 }
 
-} // namespace
+}  // namespace
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
   QApplication app(argc, argv);
   QApplication::setApplicationName(QStringLiteral("HermesUI"));
   QApplication::setApplicationDisplayName(QStringLiteral("Hermes"));
@@ -354,12 +354,12 @@ int main(int argc, char *argv[]) {
     const QString name = parser.value(click_object_option);
     // Widgets appear only after the gateway answers, so poll for the target
     // instead of firing at a fixed moment.
-    auto *finder = new QTimer(&window);
+    auto* finder = new QTimer(&window);
     finder->setInterval(150);
     QObject::connect(
         finder, &QTimer::timeout, &window, [&window, name, &app, finder]() {
           static int attempts = 0;
-          QWidget *target = window.findChild<QWidget *>(name);
+          QWidget* target = window.findChild<QWidget*>(name);
           if (target == nullptr) {
             if (++attempts > 60) {
               qWarning("click-object: no widget named %s",
@@ -372,7 +372,7 @@ int main(int argc, char *argv[]) {
           finder->stop();
           qInfo("click-object: clicking %s (%s)", qUtf8Printable(name),
                 target->metaObject()->className());
-          if (auto *button = qobject_cast<QAbstractButton *>(target)) {
+          if (auto* button = qobject_cast<QAbstractButton*>(target)) {
             button->click();
           } else {
             const QPointF center(target->width() / 2.0, target->height() / 2.0);
@@ -420,7 +420,7 @@ int main(int argc, char *argv[]) {
     const QString shot =
         parser.value(screenshot_option) + QStringLiteral(".menu");
     QTimer::singleShot(1400, &window, [shot]() {
-      for (QWidget *widget : QApplication::topLevelWidgets()) {
+      for (QWidget* widget : QApplication::topLevelWidgets()) {
         if (widget->objectName() != QStringLiteral("slashMenu")) {
           continue;
         }
@@ -438,7 +438,7 @@ int main(int argc, char *argv[]) {
   if (parser.isSet(key_audit_option)) {
     const QStringList rows = window.ShortcutAudit();
     bool duplicate = false;
-    for (const QString &row : rows) {
+    for (const QString& row : rows) {
       if (row.startsWith(QStringLiteral("DUPLICATE"))) {
         duplicate = true;
       }
@@ -478,7 +478,7 @@ int main(int argc, char *argv[]) {
   if (parser.isSet(ui_inventory_option)) {
     QTimer::singleShot(1800, &app, [&window]() {
       QJsonArray widgets;
-      for (QWidget *widget : window.findChildren<QWidget *>()) {
+      for (QWidget* widget : window.findChildren<QWidget*>()) {
         const QString object = widget->objectName();
         const QString accessible = widget->accessibleName();
         if (object.isEmpty() && accessible.isEmpty()) {
@@ -518,8 +518,8 @@ int main(int argc, char *argv[]) {
           if (!screenshot_path.isEmpty()) {
             QTimer::singleShot(200, &window,
                                [&window, &app, screenshot_path]() {
-                                 QWidget *target = &window;
-                                 if (auto *dialog = window.findChild<QDialog *>(
+                                 QWidget* target = &window;
+                                 if (auto* dialog = window.findChild<QDialog*>(
                                          QStringLiteral("preferences"));
                                      dialog != nullptr && dialog->isVisible()) {
                                    target = dialog;
@@ -534,9 +534,9 @@ int main(int argc, char *argv[]) {
   } else if (!screenshot_path.isEmpty()) {
     QTimer::singleShot(
         screenshot_delay_ms, &window, [&window, &app, screenshot_path]() {
-          QWidget *target = &window;
-          if (auto *dialog =
-                  window.findChild<QDialog *>(QStringLiteral("preferences"));
+          QWidget* target = &window;
+          if (auto* dialog =
+                  window.findChild<QDialog*>(QStringLiteral("preferences"));
               dialog != nullptr && dialog->isVisible()) {
             target = dialog;
           }

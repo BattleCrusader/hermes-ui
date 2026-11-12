@@ -6,8 +6,8 @@
 
 namespace hermes::ui {
 
-bool DecodeAudioDataUrl(const QString &data_url, QByteArray *bytes,
-                        QString *mime_type, QString *error) {
+bool DecodeAudioDataUrl(const QString& data_url, QByteArray* bytes,
+                        QString* mime_type, QString* error) {
   const QString payload = data_url.trimmed();
   if (!payload.startsWith(QStringLiteral("data:"))) {
     if (error != nullptr) {
@@ -54,7 +54,7 @@ bool DecodeAudioDataUrl(const QString &data_url, QByteArray *bytes,
   return true;
 }
 
-QString AudioFileSuffixForMime(const QString &mime_type) {
+QString AudioFileSuffixForMime(const QString& mime_type) {
   const QString mime = mime_type.trimmed().toLower();
   if (mime == QStringLiteral("audio/wav") ||
       mime == QStringLiteral("audio/x-wav") ||
@@ -76,7 +76,7 @@ QString AudioFileSuffixForMime(const QString &mime_type) {
   return QStringLiteral(".mp3");
 }
 
-QString AudioMimeForFilePath(const QString &path) {
+QString AudioMimeForFilePath(const QString& path) {
   const QString suffix = QFileInfo(path).suffix().toLower();
   if (suffix == QStringLiteral("wav")) {
     return QStringLiteral("audio/wav");
@@ -100,7 +100,7 @@ QString AudioMimeForFilePath(const QString &path) {
   return QString();
 }
 
-QString EncodeAudioDataUrl(const QByteArray &bytes, const QString &mime_type) {
+QString EncodeAudioDataUrl(const QByteArray& bytes, const QString& mime_type) {
   if (bytes.isEmpty() || mime_type.trimmed().isEmpty()) {
     return QString();
   }
@@ -108,4 +108,4 @@ QString EncodeAudioDataUrl(const QByteArray &bytes, const QString &mime_type) {
       .arg(mime_type.trimmed(), QString::fromLatin1(bytes.toBase64()));
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

@@ -19,28 +19,28 @@ namespace hermes::ui {
 class QuickEntryDialog : public QDialog {
   Q_OBJECT
 
-public:
-  explicit QuickEntryDialog(QWidget *parent = nullptr);
+ public:
+  explicit QuickEntryDialog(QWidget* parent = nullptr);
 
-  void SetSubmitHandler(std::function<void(const QString &)> handler);
-  void SetSessionLabel(const QString &label);
+  void SetSubmitHandler(std::function<void(const QString&)> handler);
+  void SetSessionLabel(const QString& label);
   void FocusEditor();
   QString Text() const;
-  void SetText(const QString &text);
+  void SetText(const QString& text);
 
-protected:
-  bool eventFilter(QObject *watched, QEvent *event) override;
+ protected:
+  bool eventFilter(QObject* watched, QEvent* event) override;
 
-private:
+ private:
   void Submit();
 
-  QPlainTextEdit *text_ = nullptr;
-  QLabel *session_label_ = nullptr;
-  QLabel *hint_ = nullptr;
-  QPushButton *submit_ = nullptr;
-  std::function<void(const QString &)> submit_handler_;
+  QPlainTextEdit* text_ = nullptr;
+  QLabel* session_label_ = nullptr;
+  QLabel* hint_ = nullptr;
+  QPushButton* submit_ = nullptr;
+  std::function<void(const QString&)> submit_handler_;
 };
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_SRC_QUICK_ENTRY_H_
+#endif  // HERMES_UI_SRC_QUICK_ENTRY_H_

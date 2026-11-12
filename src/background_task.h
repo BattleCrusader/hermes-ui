@@ -22,14 +22,14 @@ struct BackgroundResult {
   bool ok() const { return error.isEmpty(); }
 };
 
-using BackgroundDone = std::function<void(const BackgroundResult &)>;
+using BackgroundDone = std::function<void(const BackgroundResult&)>;
 
 // Runs `work` on the global thread pool, then invokes `done` on the thread that
 // owns `context`. The watcher is parented to `context`, so a window close drops
 // the completion instead of calling into a destroyed page.
-void RunBackground(QObject *context, std::function<BackgroundResult()> work,
+void RunBackground(QObject* context, std::function<BackgroundResult()> work,
                    BackgroundDone done);
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_BACKGROUND_TASK_H_
+#endif  // HERMES_UI_BACKGROUND_TASK_H_

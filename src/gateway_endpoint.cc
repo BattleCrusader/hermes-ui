@@ -15,8 +15,8 @@ namespace {
 
 constexpr int kControlTimeoutMs = 3000;
 
-bool ReadControlReply(QLocalSocket *socket, QJsonObject *result,
-                      QString *error) {
+bool ReadControlReply(QLocalSocket* socket, QJsonObject* result,
+                      QString* error) {
   QByteArray buffer;
   QElapsedTimer timer;
   timer.start();
@@ -52,7 +52,7 @@ bool ReadControlReply(QLocalSocket *socket, QJsonObject *result,
   return true;
 }
 
-} // namespace
+}  // namespace
 
 QString HermesHome() {
   const QString override = qEnvironmentVariable("HERMES_HOME");
@@ -62,7 +62,7 @@ QString HermesHome() {
   return QDir::cleanPath(QDir::homePath() + QStringLiteral("/.hermes"));
 }
 
-QString ProfileHome(const QString &profile_name) {
+QString ProfileHome(const QString& profile_name) {
   const QString home = HermesHome();
   if (profile_name.isEmpty() || profile_name == QStringLiteral("default")) {
     return home;
@@ -70,7 +70,7 @@ QString ProfileHome(const QString &profile_name) {
   return QDir::cleanPath(home + QStringLiteral("/profiles/") + profile_name);
 }
 
-QString ControlSocketPath(const QString &home, QString *error) {
+QString ControlSocketPath(const QString& home, QString* error) {
   const QString direct = QDir(home).filePath(QStringLiteral("gateway.sock"));
   if (QFile::exists(direct)) {
     return direct;
@@ -95,8 +95,8 @@ QString ControlSocketPath(const QString &home, QString *error) {
   return path;
 }
 
-bool QueryControl(const QString &home, const QJsonObject &request,
-                  QJsonObject *result, QString *error) {
+bool QueryControl(const QString& home, const QJsonObject& request,
+                  QJsonObject* result, QString* error) {
   QString path_error;
   const QString path = ControlSocketPath(home, &path_error);
   if (path.isEmpty()) {
@@ -131,7 +131,7 @@ bool QueryControl(const QString &home, const QJsonObject &request,
   return ok;
 }
 
-bool DiscoverEndpoint(GatewayEndpoint *endpoint, QString *error) {
+bool DiscoverEndpoint(GatewayEndpoint* endpoint, QString* error) {
   QJsonObject request;
   request.insert(QStringLiteral("protocol"), 1);
   request.insert(QStringLiteral("verb"), QStringLiteral("identify"));
@@ -163,9 +163,9 @@ bool DiscoverEndpoint(GatewayEndpoint *endpoint, QString *error) {
   return true;
 }
 
-bool RequestTicket(const QString &home, const QString &profile_name,
-                   const GatewayEndpoint &endpoint, const QString &purpose,
-                   QString *ticket, QString *error) {
+bool RequestTicket(const QString& home, const QString& profile_name,
+                   const GatewayEndpoint& endpoint, const QString& purpose,
+                   QString* ticket, QString* error) {
   QJsonObject params;
   params.insert(QStringLiteral("profile_id"), ProfileHome(profile_name));
   params.insert(QStringLiteral("instance_id"), endpoint.instance_id);
@@ -191,4 +191,4 @@ bool RequestTicket(const QString &home, const QString &profile_name,
   return true;
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

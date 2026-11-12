@@ -10,9 +10,9 @@
 namespace hermes::ui {
 namespace {
 
-QString Joined(const QStringList &parts) {
+QString Joined(const QStringList& parts) {
   QStringList non_empty;
-  for (const QString &part : parts) {
+  for (const QString& part : parts) {
     if (!part.trimmed().isEmpty()) {
       non_empty.push_back(part);
     }
@@ -20,7 +20,7 @@ QString Joined(const QStringList &parts) {
   return non_empty.join(QStringLiteral(" · "));
 }
 
-QString StatusLine(const QString &label, const QJsonObject &snapshot) {
+QString StatusLine(const QString& label, const QJsonObject& snapshot) {
   const QString status = snapshot.value(QStringLiteral("status")).toString();
   if (status.trimmed().isEmpty()) {
     return QString();
@@ -38,9 +38,9 @@ QString IntervalText(double seconds) {
   return QStringLiteral("%1s").arg(static_cast<int>(seconds));
 }
 
-} // namespace
+}  // namespace
 
-QString GatewayNoticeKey(const QJsonObject &payload) {
+QString GatewayNoticeKey(const QJsonObject& payload) {
   QString key = payload.value(QStringLiteral("key")).toString().trimmed();
   if (key.isEmpty()) {
     key = payload.value(QStringLiteral("id")).toString().trimmed();
@@ -48,7 +48,7 @@ QString GatewayNoticeKey(const QJsonObject &payload) {
   return key;
 }
 
-QString GatewayNoticeTitle(const QString &level) {
+QString GatewayNoticeTitle(const QString& level) {
   if (level == QStringLiteral("error")) {
     return QStringLiteral("Error");
   }
@@ -61,7 +61,7 @@ QString GatewayNoticeTitle(const QString &level) {
   return QStringLiteral("Notice");
 }
 
-QString GatewayNoticeLine(const GatewayNotice &notice) {
+QString GatewayNoticeLine(const GatewayNotice& notice) {
   const QString text = notice.text.trimmed();
   if (text.isEmpty()) {
     return notice.detail.trimmed();
@@ -69,8 +69,8 @@ QString GatewayNoticeLine(const GatewayNotice &notice) {
   return text;
 }
 
-void UpsertGatewayNotice(std::vector<GatewayNotice> *notices,
-                         const QJsonObject &payload, quint64 serial) {
+void UpsertGatewayNotice(std::vector<GatewayNotice>* notices,
+                         const QJsonObject& payload, quint64 serial) {
   if (notices == nullptr) {
     return;
   }
@@ -86,7 +86,7 @@ void UpsertGatewayNotice(std::vector<GatewayNotice> *notices,
     return;
   }
   if (!notice.key.isEmpty()) {
-    for (GatewayNotice &existing : *notices) {
+    for (GatewayNotice& existing : *notices) {
       if (existing.key == notice.key) {
         existing = std::move(notice);
         return;
@@ -104,21 +104,21 @@ void UpsertGatewayNotice(std::vector<GatewayNotice> *notices,
   }
 }
 
-bool ClearGatewayNotice(std::vector<GatewayNotice> *notices,
-                        const QString &key) {
+bool ClearGatewayNotice(std::vector<GatewayNotice>* notices,
+                        const QString& key) {
   if (notices == nullptr || key.isEmpty()) {
     return false;
   }
   const auto before = notices->size();
   notices->erase(std::remove_if(notices->begin(), notices->end(),
-                                [&key](const GatewayNotice &notice) {
+                                [&key](const GatewayNotice& notice) {
                                   return notice.key == key;
                                 }),
                  notices->end());
   return notices->size() != before;
 }
 
-QString SessionControlSummary(const QJsonObject &control) {
+QString SessionControlSummary(const QJsonObject& control) {
   const QJsonObject snapshot =
       control.value(QStringLiteral("control")).toObject().isEmpty()
           ? control
@@ -158,7 +158,7 @@ QString SessionControlSummary(const QJsonObject &control) {
   return Joined(parts);
 }
 
-QString MoaReferenceText(const QJsonObject &payload) {
+QString MoaReferenceText(const QJsonObject& payload) {
   QString label = payload.value(QStringLiteral("label")).toString().trimmed();
   if (label.isEmpty()) {
     label = QStringLiteral("reference");
@@ -179,7 +179,7 @@ QString MoaReferenceText(const QJsonObject &payload) {
   return header + QLatin1Char('\n') + body + QStringLiteral("\n\n");
 }
 
-QString MoaProgressText(const QJsonObject &payload) {
+QString MoaProgressText(const QJsonObject& payload) {
   if (!payload.value(QStringLiteral("refs_done")).isDouble() ||
       !payload.value(QStringLiteral("refs_total")).isDouble()) {
     return QString();
@@ -196,7 +196,7 @@ QString MoaProgressText(const QJsonObject &payload) {
   return QStringLiteral("◇ MoA refs %1 — %2\n").arg(counts, label);
 }
 
-QString MoaPhaseText(const QJsonObject &payload) {
+QString MoaPhaseText(const QJsonObject& payload) {
   if (payload.value(QStringLiteral("phase")).toString() ==
       QStringLiteral("aggregator")) {
     return QStringLiteral("◇ MoA aggregating…\n");
@@ -204,7 +204,7 @@ QString MoaPhaseText(const QJsonObject &payload) {
   return QString();
 }
 
-QString ReviewSummaryText(const QJsonObject &payload) {
+QString ReviewSummaryText(const QJsonObject& payload) {
   QString text = payload.value(QStringLiteral("text")).toString().trimmed();
   // The Python side prefixes the line with a 💾 glyph. The transcript row has
   // its own marker, so carrying the emoji would double it.
@@ -214,11 +214,11 @@ QString ReviewSummaryText(const QJsonObject &payload) {
   return text.trimmed();
 }
 
-QString AgentPrintText(const QJsonObject &payload) {
+QString AgentPrintText(const QJsonObject& payload) {
   return payload.value(QStringLiteral("text")).toString().trimmed();
 }
 
-QString ToolGeneratingText(const QJsonObject &payload) {
+QString ToolGeneratingText(const QJsonObject& payload) {
   const QString name =
       payload.value(QStringLiteral("name")).toString().trimmed();
   if (name.isEmpty()) {
@@ -227,7 +227,7 @@ QString ToolGeneratingText(const QJsonObject &payload) {
   return QStringLiteral("Preparing %1…").arg(name);
 }
 
-QString ToolProgressText(const QJsonObject &payload) {
+QString ToolProgressText(const QJsonObject& payload) {
   const QString message =
       payload.value(QStringLiteral("message")).toString().trimmed();
   const QString name =
@@ -254,9 +254,9 @@ QString ToolProgressText(const QJsonObject &payload) {
   return parts.join(QStringLiteral(" · "));
 }
 
-std::vector<ChatReaction> ParseChatReactions(const QJsonArray &reactions) {
+std::vector<ChatReaction> ParseChatReactions(const QJsonArray& reactions) {
   std::vector<ChatReaction> parsed;
-  for (const QJsonValue &value : reactions) {
+  for (const QJsonValue& value : reactions) {
     const QJsonObject row = value.toObject();
     ChatReaction reaction;
     reaction.emoji = row.value(QStringLiteral("emoji")).toString();
@@ -268,10 +268,10 @@ std::vector<ChatReaction> ParseChatReactions(const QJsonArray &reactions) {
   return parsed;
 }
 
-QString ReactionSummary(const QJsonArray &reactions) {
+QString ReactionSummary(const QJsonArray& reactions) {
   QStringList labels;
   std::vector<int> counts;
-  for (const ChatReaction &reaction : ParseChatReactions(reactions)) {
+  for (const ChatReaction& reaction : ParseChatReactions(reactions)) {
     const auto it = std::find(labels.begin(), labels.end(), reaction.emoji);
     if (it == labels.end()) {
       labels.push_back(reaction.emoji);
@@ -289,4 +289,4 @@ QString ReactionSummary(const QJsonArray &reactions) {
   return parts.join(QStringLiteral(" · "));
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

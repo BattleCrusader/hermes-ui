@@ -21,32 +21,32 @@ namespace hermes::ui {
 class PreferencesDialog : public QDialog {
   Q_OBJECT
 
-public:
-  explicit PreferencesDialog(const Theme &theme, QWidget *parent = nullptr);
+ public:
+  explicit PreferencesDialog(const Theme& theme, QWidget* parent = nullptr);
 
-  void SetTheme(const Theme &theme);
-  void SetSnapshot(const ProfileSnapshot &snapshot);
+  void SetTheme(const Theme& theme);
+  void SetSnapshot(const ProfileSnapshot& snapshot);
 
-  std::function<void(const QString &provider, const QString &model,
-                     const QString &reasoning)>
+  std::function<void(const QString& provider, const QString& model,
+                     const QString& reasoning)>
       on_apply;
   std::function<void(ThemeMode mode)> on_theme;
 
-private:
-  void RebuildProviders(const QString &provider, const QString &model);
-  void RebuildModels(const QString &model);
+ private:
+  void RebuildProviders(const QString& provider, const QString& model);
+  void RebuildModels(const QString& model);
   void Apply();
   void Style();
 
   Theme theme_;
   ProfileSnapshot snapshot_;
-  QComboBox *theme_combo_ = nullptr;
-  QComboBox *provider_ = nullptr;
-  QComboBox *model_ = nullptr;
-  QComboBox *reasoning_ = nullptr;
-  QLabel *gateway_ = nullptr;
+  QComboBox* theme_combo_ = nullptr;
+  QComboBox* provider_ = nullptr;
+  QComboBox* model_ = nullptr;
+  QComboBox* reasoning_ = nullptr;
+  QLabel* gateway_ = nullptr;
 };
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_PREFERENCES_DIALOG_H_
+#endif  // HERMES_UI_PREFERENCES_DIALOG_H_

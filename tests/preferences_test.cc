@@ -42,6 +42,7 @@
 #include <QWebSocket>
 #include <QWebSocketServer>
 #include <QtTest>
+#include <utility>
 #include <vector>
 
 #include "src/artifacts.h"

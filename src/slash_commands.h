@@ -19,18 +19,17 @@ struct SlashCommand {
   bool takes_args = false;
 };
 
-const std::vector<SlashCommand> &SlashCommandCatalog();
+const std::vector<SlashCommand>& SlashCommandCatalog();
 
 // Prefix match on the command name and every alias, case-insensitive. An empty
 // prefix returns the whole catalog (the menu opens on "/").
-std::vector<const SlashCommand *> MatchSlashCommands(const QString &prefix);
-std::vector<const SlashCommand *>
-MatchSlashCommands(const std::vector<SlashCommand> &catalog,
-                   const QString &prefix);
+std::vector<const SlashCommand*> MatchSlashCommands(const QString& prefix);
+std::vector<const SlashCommand*> MatchSlashCommands(
+    const std::vector<SlashCommand>& catalog, const QString& prefix);
 
 // Resolves "/new", "/reset" or "/clear" (without arguments) to the catalog row.
-const SlashCommand *FindSlashCommand(const QString &name);
+const SlashCommand* FindSlashCommand(const QString& name);
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_SLASH_COMMANDS_H_
+#endif  // HERMES_UI_SLASH_COMMANDS_H_

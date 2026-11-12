@@ -9,7 +9,7 @@ namespace {
 
 // QSS accepts rgba(r,g,b,a) but not QColor::name() when the token carries
 // alpha (stroke/hover/selected are translucent by design).
-QString Css(const QColor &color) {
+QString Css(const QColor& color) {
   return QStringLiteral("rgba(%1,%2,%3,%4)")
       .arg(color.red())
       .arg(color.green())
@@ -17,9 +17,9 @@ QString Css(const QColor &color) {
       .arg(color.alpha());
 }
 
-} // namespace
+}  // namespace
 
-QString GlobalStyleSheet(const Theme &theme) {
+QString GlobalStyleSheet(const Theme& theme) {
   const QString fg = Css(theme.foreground);
   const QString secondary = Css(theme.text_secondary);
   const QString tertiary = Css(theme.text_tertiary);
@@ -143,7 +143,7 @@ QString GlobalStyleSheet(const Theme &theme) {
       .arg(arrow_down);
 }
 
-void ApplyGlobalTheme(const Theme &theme) {
+void ApplyGlobalTheme(const Theme& theme) {
   if (qApp == nullptr) {
     return;
   }
@@ -151,4 +151,4 @@ void ApplyGlobalTheme(const Theme &theme) {
   qApp->setStyleSheet(GlobalStyleSheet(theme));
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

@@ -34,18 +34,18 @@ struct PetSpriteInfo {
   bool HasSheet() const;
   QSize DrawSize() const;
   QSize WindowSize() const;
-  QString RowNameForState(const QString &state) const;
-  int RowForState(const QString &state) const;
+  QString RowNameForState(const QString& state) const;
+  int RowForState(const QString& state) const;
   int FrameCountForRow(int row) const;
-  int FrameCountForState(const QString &state) const;
+  int FrameCountForState(const QString& state) const;
 };
 
 // Decodes the spritesheet and geometry. This does base64 + image decode and is
 // safe to call from a worker. Returns false only for an enabled pet whose
 // payload is malformed; disabled pets return true with `enabled == false`.
-bool DecodePetSprite(const QJsonObject &payload, PetSpriteInfo *info,
-                     QString *error);
+bool DecodePetSprite(const QJsonObject& payload, PetSpriteInfo* info,
+                     QString* error);
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_SRC_PET_SPRITE_H_
+#endif  // HERMES_UI_SRC_PET_SPRITE_H_

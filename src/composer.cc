@@ -52,9 +52,9 @@ constexpr int kEditorHeight = 40;
 constexpr int kComposerHeight = 116;
 constexpr int kStatusLineHeight = 18;
 
-} // namespace
+}  // namespace
 
-Composer::Composer(const Theme &theme, QWidget *parent)
+Composer::Composer(const Theme& theme, QWidget* parent)
     : QWidget(parent), theme_(theme) {
   setObjectName(QStringLiteral("composer"));
   setFixedHeight(kComposerHeight);
@@ -108,7 +108,7 @@ Composer::Composer(const Theme &theme, QWidget *parent)
   slash_menu_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   slash_menu_->setMouseTracking(true);
   connect(slash_menu_, &QListWidget::itemClicked, this,
-          [this](QListWidgetItem *) { AcceptSlashCommand(); });
+          [this](QListWidgetItem*) { AcceptSlashCommand(); });
   mention_menu_ = new QListWidget(nullptr);
   mention_menu_->setWindowFlags(Qt::Tool | Qt::FramelessWindowHint |
                                 Qt::NoDropShadowWindowHint);
@@ -118,7 +118,7 @@ Composer::Composer(const Theme &theme, QWidget *parent)
   mention_menu_->setUniformItemSizes(true);
   mention_menu_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   connect(mention_menu_, &QListWidget::itemClicked, this,
-          [this](QListWidgetItem *) { AcceptMention(); });
+          [this](QListWidgetItem*) { AcceptMention(); });
   connect(editor_, &QTextEdit::textChanged, this, [this]() {
     UpdateSlashMenu();
     UpdateMentionMenu();
@@ -132,8 +132,8 @@ Composer::~Composer() {
   mention_menu_ = nullptr;
 }
 
-void Composer::SetModelCatalog(const std::vector<ModelProvider> &providers,
-                               const QString &provider, const QString &model) {
+void Composer::SetModelCatalog(const std::vector<ModelProvider>& providers,
+                               const QString& provider, const QString& model) {
   providers_ = providers;
   provider_ = provider;
   if (!model.isEmpty()) {
@@ -142,21 +142,21 @@ void Composer::SetModelCatalog(const std::vector<ModelProvider> &providers,
   update();
 }
 
-void Composer::SetHiddenModels(const QSet<QString> &hidden) {
+void Composer::SetHiddenModels(const QSet<QString>& hidden) {
   hidden_models_ = hidden;
   update();
 }
 
-QDialog *Composer::BuildModelVisibilityDialog() {
-  auto *dialog = new QDialog(this);
+QDialog* Composer::BuildModelVisibilityDialog() {
+  auto* dialog = new QDialog(this);
   dialog->setObjectName(QStringLiteral("modelVisibilityDialog"));
   dialog->setWindowTitle(QStringLiteral("Visible models"));
   dialog->setMinimumWidth(380);
   dialog->setStyleSheet(
       QStringLiteral("QDialog { background: %1; color: %2; }")
           .arg(theme_.surface.name(), theme_.foreground.name()));
-  auto *root = new QVBoxLayout(dialog);
-  auto *hint = new QLabel(
+  auto* root = new QVBoxLayout(dialog);
+  auto* hint = new QLabel(
       QStringLiteral("Unchecked models stay in the catalog but disappear from "
                      "the composer picker."),
       dialog);
@@ -165,26 +165,26 @@ QDialog *Composer::BuildModelVisibilityDialog() {
       QStringLiteral("color: %1;").arg(theme_.text_secondary.name()));
   root->addWidget(hint);
 
-  auto *scroll = new QScrollArea(dialog);
+  auto* scroll = new QScrollArea(dialog);
   scroll->setWidgetResizable(true);
   scroll->setFrameShape(QFrame::NoFrame);
   scroll->setMaximumHeight(360);
-  auto *content = new QWidget(scroll);
-  auto *form = new QVBoxLayout(content);
+  auto* content = new QWidget(scroll);
+  auto* form = new QVBoxLayout(content);
   form->setContentsMargins(0, 0, 0, 0);
   form->setSpacing(4);
-  QHash<QString, QCheckBox *> boxes;
-  for (const ModelProvider &provider : providers_) {
-    auto *provider_label = new QLabel(
+  QHash<QString, QCheckBox*> boxes;
+  for (const ModelProvider& provider : providers_) {
+    auto* provider_label = new QLabel(
         provider.name.isEmpty() ? provider.slug : provider.name, content);
     QFont provider_font = theme_.UiFont(12, QFont::DemiBold);
     provider_label->setFont(provider_font);
     provider_label->setStyleSheet(QStringLiteral("color: %1; padding-top: 4px;")
                                       .arg(theme_.foreground.name()));
     form->addWidget(provider_label);
-    for (const QString &model : provider.models) {
+    for (const QString& model : provider.models) {
       const QString key = ModelVisibilityKey(provider.slug, model);
-      auto *box = new QCheckBox(model, content);
+      auto* box = new QCheckBox(model, content);
       box->setObjectName(
           QStringLiteral("modelVisibility_%1_%2").arg(provider.slug, model));
       box->setChecked(!hidden_models_.contains(key));
@@ -196,22 +196,22 @@ QDialog *Composer::BuildModelVisibilityDialog() {
   scroll->setWidget(content);
   root->addWidget(scroll);
 
-  auto *actions = new QHBoxLayout();
-  auto *show_all = new QPushButton(QStringLiteral("Show all"), dialog);
+  auto* actions = new QHBoxLayout();
+  auto* show_all = new QPushButton(QStringLiteral("Show all"), dialog);
   show_all->setObjectName(QStringLiteral("modelVisibilityAll"));
   actions->addWidget(show_all);
   actions->addStretch(1);
-  auto *cancel = new QPushButton(QStringLiteral("Cancel"), dialog);
+  auto* cancel = new QPushButton(QStringLiteral("Cancel"), dialog);
   cancel->setObjectName(QStringLiteral("modelVisibilityCancel"));
   actions->addWidget(cancel);
-  auto *save = new QPushButton(QStringLiteral("Save"), dialog);
+  auto* save = new QPushButton(QStringLiteral("Save"), dialog);
   save->setObjectName(QStringLiteral("modelVisibilitySave"));
   save->setDefault(true);
   actions->addWidget(save);
   root->addLayout(actions);
 
   QObject::connect(show_all, &QPushButton::clicked, dialog, [boxes]() {
-    for (QCheckBox *box : boxes) {
+    for (QCheckBox* box : boxes) {
       box->setChecked(true);
     }
   });
@@ -232,12 +232,12 @@ QDialog *Composer::BuildModelVisibilityDialog() {
   return dialog;
 }
 
-QDialog *Composer::ShowModelVisibilityDialogForTest() {
+QDialog* Composer::ShowModelVisibilityDialogForTest() {
   return BuildModelVisibilityDialog();
 }
 
 void Composer::ShowModelVisibilityDialog() {
-  QDialog *dialog = BuildModelVisibilityDialog();
+  QDialog* dialog = BuildModelVisibilityDialog();
   dialog->exec();
   dialog->deleteLater();
 }
@@ -256,7 +256,7 @@ QString CompactTokens(qint64 value) {
   return QString::number(value);
 }
 
-} // namespace
+}  // namespace
 
 void Composer::SetUsage(qint64 context_used, qint64 context_max) {
   if (context_used_ == context_used && context_max_ == context_max) {
@@ -278,8 +278,8 @@ QString Composer::TokenUsageText() const {
       .arg(percent);
 }
 
-void Composer::SetVoiceState(bool recording, const QString &partial,
-                             const QString &status) {
+void Composer::SetVoiceState(bool recording, const QString& partial,
+                             const QString& status) {
   if (voice_recording_ == recording && voice_partial_ == partial &&
       voice_status_ == status) {
     return;
@@ -309,21 +309,21 @@ void Composer::SetPinnedContextCount(int count) {
   update();
 }
 
-void Composer::SetHistory(const QStringList &history) {
+void Composer::SetHistory(const QStringList& history) {
   history_ = history;
   history_cursor_ = -1;
   history_draft_.clear();
 }
 
 void Composer::SetPathLister(
-    std::function<void(const QString &, PathListCallback)> lister) {
+    std::function<void(const QString&, PathListCallback)> lister) {
   path_lister_ = std::move(lister);
   path_cache_.clear();
   path_pending_.clear();
   ++mention_generation_;
 }
 
-void Composer::SetMentionRoot(const QString &root) {
+void Composer::SetMentionRoot(const QString& root) {
   if (mention_root_ == root) {
     return;
   }
@@ -348,7 +348,7 @@ QStringList Composer::MentionMenuEntries() const {
   return entries;
 }
 
-QString Composer::MentionDisplayPath(const QString &absolute) const {
+QString Composer::MentionDisplayPath(const QString& absolute) const {
   if (mention_root_.isEmpty()) {
     return absolute;
   }
@@ -419,8 +419,8 @@ void Composer::UpdateMentionMenu() {
       const int generation = mention_generation_;
       QPointer<Composer> self(this);
       path_lister_(directory,
-                   [self, directory, generation](const QJsonArray &entries,
-                                                 const QString &error) {
+                   [self, directory, generation](const QJsonArray& entries,
+                                                 const QString& error) {
                      if (self == nullptr) {
                        return;
                      }
@@ -440,7 +440,7 @@ void Composer::UpdateMentionMenu() {
   }
   const QJsonArray entries = path_cache_.value(directory);
   mention_menu_->clear();
-  for (const QJsonValue &value : entries) {
+  for (const QJsonValue& value : entries) {
     const QJsonObject entry = value.toObject();
     const QString name = entry.value(QStringLiteral("name")).toString();
     if (!name.startsWith(prefix, Qt::CaseInsensitive)) {
@@ -448,7 +448,7 @@ void Composer::UpdateMentionMenu() {
     }
     const bool is_directory =
         entry.value(QStringLiteral("isDirectory")).toBool();
-    auto *item = new QListWidgetItem(
+    auto* item = new QListWidgetItem(
         is_directory ? name + QLatin1Char('/') : name, mention_menu_);
     const QString absolute = entry.value(QStringLiteral("path")).toString();
     item->setData(Qt::UserRole, absolute);
@@ -482,7 +482,7 @@ void Composer::AcceptMention() {
   if (mention_menu_ == nullptr || mention_menu_->currentItem() == nullptr) {
     return;
   }
-  QListWidgetItem *item = mention_menu_->currentItem();
+  QListWidgetItem* item = mention_menu_->currentItem();
   const QString absolute = item->data(Qt::UserRole).toString();
   const bool is_directory = item->data(Qt::UserRole + 1).toBool();
   const QString display = MentionDisplayPath(absolute);
@@ -506,7 +506,7 @@ void Composer::AcceptMention() {
   }
 }
 
-QString Composer::PromotePathRefs(const QString &text) {
+QString Composer::PromotePathRefs(const QString& text) {
   static const QRegularExpression bare_path(QStringLiteral(
       R"((?<![\w@/])@((?!(?:file|folder|url|image|tool|line|terminal|session|git):)[^\s@:]*/[^\s@:]*))"));
   QString out;
@@ -532,7 +532,7 @@ QString Composer::PromotePathRefs(const QString &text) {
   return out + text.mid(cursor);
 }
 
-void Composer::SetReasoning(const QString &effort) {
+void Composer::SetReasoning(const QString& effort) {
   if (effort.isEmpty()) {
     return;
   }
@@ -558,12 +558,12 @@ void Composer::ShowModelMenu() {
                theme_.stroke.name(), theme_.selected.name()));
   const std::vector<ModelProvider> visible =
       VisibleModelCatalog(providers_, hidden_models_);
-  for (const ModelProvider &provider : visible) {
-    QMenu *submenu =
+  for (const ModelProvider& provider : visible) {
+    QMenu* submenu =
         menu.addMenu(provider.name.isEmpty() ? provider.slug : provider.name);
     submenu->setFont(theme_.UiFont(11, QFont::Normal));
-    for (const QString &model : provider.models) {
-      QAction *action = submenu->addAction(model);
+    for (const QString& model : provider.models) {
+      QAction* action = submenu->addAction(model);
       connect(action, &QAction::triggered, this, [this, provider, model]() {
         SetModelLabel(model);
         if (on_model_selected) {
@@ -573,14 +573,14 @@ void Composer::ShowModelMenu() {
     }
   }
   if (providers_.empty()) {
-    QAction *none = menu.addAction(QStringLiteral("No models available"));
+    QAction* none = menu.addAction(QStringLiteral("No models available"));
     none->setEnabled(false);
   } else if (visible.empty()) {
-    QAction *none = menu.addAction(QStringLiteral("All models hidden"));
+    QAction* none = menu.addAction(QStringLiteral("All models hidden"));
     none->setEnabled(false);
   }
   menu.addSeparator();
-  QAction *visibility = menu.addAction(QStringLiteral("Visible models…"));
+  QAction* visibility = menu.addAction(QStringLiteral("Visible models…"));
   connect(visibility, &QAction::triggered, this,
           [this]() { ShowModelVisibilityDialog(); });
   menu.exec(
@@ -598,10 +598,10 @@ void Composer::ShowReasoningMenu() {
           "QMenu::item:selected { background: %4; }")
           .arg(theme_.surface.name(), theme_.foreground.name(),
                theme_.stroke.name(), theme_.selected.name()));
-  for (const QString &level :
+  for (const QString& level :
        {QStringLiteral("off"), QStringLiteral("low"), QStringLiteral("medium"),
         QStringLiteral("high")}) {
-    QAction *action = menu.addAction(level);
+    QAction* action = menu.addAction(level);
     action->setCheckable(true);
     action->setChecked(level == reasoning_);
     connect(action, &QAction::triggered, this, [this, level]() {
@@ -619,9 +619,9 @@ void Composer::UpdateChipStyles() {
   if (model_button_ == nullptr || reasoning_button_ == nullptr) {
     return;
   }
-  const QString common =
-      QStringLiteral("QPushButton { border: none; text-align: left; padding: "
-                     "0 0 0 10px; font-size: 11px; font-weight: 600; }");
+  const QString common = QStringLiteral(
+      "QPushButton { border: none; text-align: left; padding: "
+      "0 0 0 10px; font-size: 11px; font-weight: 600; }");
   model_button_->setStyleSheet(
       common +
       QStringLiteral("QPushButton { background: transparent; color: %1; "
@@ -637,7 +637,7 @@ void Composer::UpdateChipStyles() {
           .arg(pill.name(), theme_.text_secondary.name(), pill_hover.name()));
 }
 
-void Composer::SetTheme(const Theme &theme) {
+void Composer::SetTheme(const Theme& theme) {
   theme_ = theme;
   UpdateEditorStyle();
   UpdateChipStyles();
@@ -659,7 +659,7 @@ void Composer::UpdateEditorStyle() {
           .arg(theme_.foreground.name()));
 }
 
-void Composer::SetText(const QString &text) {
+void Composer::SetText(const QString& text) {
   editor_->setPlainText(text);
   QTextCursor cursor = editor_->textCursor();
   cursor.movePosition(QTextCursor::End);
@@ -670,7 +670,7 @@ void Composer::SetText(const QString &text) {
   UpdateMentionMenu();
 }
 
-void Composer::SetModelLabel(const QString &model) {
+void Composer::SetModelLabel(const QString& model) {
   if (model.isEmpty() || model_label_ == model) {
     return;
   }
@@ -816,11 +816,11 @@ void Composer::ShowAttachmentDrawer() {
   if (visible >= static_cast<int>(attachments_.size())) {
     return;
   }
-  auto *menu = new QMenu(this);
+  auto* menu = new QMenu(this);
   menu->setObjectName(QStringLiteral("composerAttachmentDrawer"));
   menu->setAttribute(Qt::WA_DeleteOnClose);
   for (int i = visible; i < static_cast<int>(attachments_.size()); ++i) {
-    QAction *action =
+    QAction* action =
         menu->addAction(QStringLiteral("Remove %1").arg(attachments_[i].first));
     action->setData(i);
     QObject::connect(action, &QAction::triggered, this,
@@ -829,15 +829,15 @@ void Composer::ShowAttachmentDrawer() {
   menu->popup(mapToGlobal(AttachmentDrawerRect().bottomLeft().toPoint()));
 }
 
-QMenu *Composer::ShowAttachmentDrawerForTest() {
+QMenu* Composer::ShowAttachmentDrawerForTest() {
   const int visible = VisibleAttachmentCount();
   if (visible >= static_cast<int>(attachments_.size())) {
     return nullptr;
   }
-  auto *menu = new QMenu(this);
+  auto* menu = new QMenu(this);
   menu->setObjectName(QStringLiteral("composerAttachmentDrawer"));
   for (int i = visible; i < static_cast<int>(attachments_.size()); ++i) {
-    QAction *action =
+    QAction* action =
         menu->addAction(QStringLiteral("Remove %1").arg(attachments_[i].first));
     QObject::connect(action, &QAction::triggered, this,
                      [this, i]() { RemoveAttachment(i); });
@@ -865,7 +865,7 @@ QRectF Composer::ReasoningChipRect() const {
   return QRectF(model.right() + 8, model.top(), 78, model.height());
 }
 
-void Composer::paintEvent(QPaintEvent *event) {
+void Composer::paintEvent(QPaintEvent* event) {
   Q_UNUSED(event);
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
@@ -998,11 +998,11 @@ void Composer::paintEvent(QPaintEvent *event) {
     if (queued_prompts_ > 0) {
       painter.setFont(theme_.UiFont(10, QFont::Normal));
       painter.setPen(theme_.text_tertiary);
-      painter.drawText(QRectF(status.left() + 36 + label_width, status.top(),
-                              status.width() - label_width - 40,
-                              status.height()),
-                       Qt::AlignVCenter | Qt::AlignLeft,
-                       QStringLiteral("%1 queued").arg(queued_prompts_));
+      painter.drawText(
+          QRectF(status.left() + 36 + label_width, status.top(),
+                 status.width() - label_width - 40, status.height()),
+          Qt::AlignVCenter | Qt::AlignLeft,
+          QStringLiteral("%1 queued").arg(queued_prompts_));
     }
   } else {
     painter.setFont(theme_.UiFont(10, QFont::Normal));
@@ -1013,7 +1013,7 @@ void Composer::paintEvent(QPaintEvent *event) {
   }
 }
 
-void Composer::resizeEvent(QResizeEvent *event) {
+void Composer::resizeEvent(QResizeEvent* event) {
   QWidget::resizeEvent(event);
   const QRectF card = CardRect();
   editor_->setGeometry(static_cast<int>(card.left() + 14),
@@ -1035,7 +1035,7 @@ QString Composer::SubmissionText() const {
   }
   if (!attachments_.empty()) {
     QStringList lines;
-    for (const auto &attachment : attachments_) {
+    for (const auto& attachment : attachments_) {
       lines.append(
           QStringLiteral("- %1 (%2)").arg(attachment.first, attachment.second));
     }
@@ -1044,7 +1044,7 @@ QString Composer::SubmissionText() const {
   return text;
 }
 
-QPixmap Composer::AttachmentThumbnail(const QString &path) {
+QPixmap Composer::AttachmentThumbnail(const QString& path) {
   if (attachment_thumbnails_.contains(path)) {
     return attachment_thumbnails_.value(path);
   }
@@ -1116,14 +1116,14 @@ void Composer::UpdateSlashMenu() {
     return;
   }
   slash_menu_->clear();
-  for (const SlashCommand *command : matches) {
+  for (const SlashCommand* command : matches) {
     const QString label = command->takes_args
                               ? QStringLiteral("%1 %2    %3")
                                     .arg(command->name, command->argument_hint,
                                          command->description)
                               : QStringLiteral("%1    %2")
                                     .arg(command->name, command->description);
-    auto *item = new QListWidgetItem(label, slash_menu_);
+    auto* item = new QListWidgetItem(label, slash_menu_);
     item->setData(Qt::UserRole, command->name);
   }
   slash_menu_->setCurrentRow(0);
@@ -1157,7 +1157,7 @@ void Composer::AcceptSlashCommand() {
   if (slash_menu_ == nullptr) {
     return;
   }
-  QListWidgetItem *item = slash_menu_->currentItem();
+  QListWidgetItem* item = slash_menu_->currentItem();
   if (item == nullptr) {
     return;
   }
@@ -1165,11 +1165,11 @@ void Composer::AcceptSlashCommand() {
   // Resolve against the active catalog (the gateway's list): commands the
   // built-in table does not know, like /steer, still take arguments.
   bool takes_args = false;
-  const SlashCommand *builtin = FindSlashCommand(name);
+  const SlashCommand* builtin = FindSlashCommand(name);
   if (builtin != nullptr) {
     takes_args = builtin->takes_args;
   }
-  for (const SlashCommand &candidate : slash_commands_) {
+  for (const SlashCommand& candidate : slash_commands_) {
     if (candidate.name.compare(name, Qt::CaseInsensitive) == 0) {
       // Gateway catalog rows do not carry argument metadata, but most accept
       // one ("/steer <text>", "/profile [name]"), so completion offers a space.
@@ -1202,8 +1202,8 @@ std::vector<ClickTarget> Composer::ClickTargets() const {
   return targets;
 }
 
-void Composer::AddAttachment(const QString &name, const QString &path) {
-  for (const auto &attachment : attachments_) {
+void Composer::AddAttachment(const QString& name, const QString& path) {
+  for (const auto& attachment : attachments_) {
     if (attachment.second == path) {
       return;
     }
@@ -1214,13 +1214,13 @@ void Composer::AddAttachment(const QString &name, const QString &path) {
 
 QStringList Composer::AttachmentPaths() const {
   QStringList paths;
-  for (const auto &attachment : attachments_) {
+  for (const auto& attachment : attachments_) {
     paths.append(attachment.second);
   }
   return paths;
 }
 
-void Composer::mousePressEvent(QMouseEvent *event) {
+void Composer::mousePressEvent(QMouseEvent* event) {
   if (event->button() == Qt::LeftButton && !AttachmentDrawerRect().isNull() &&
       AttachmentDrawerRect().contains(event->position())) {
     ShowAttachmentDrawer();
@@ -1275,7 +1275,7 @@ void Composer::mousePressEvent(QMouseEvent *event) {
   QWidget::mousePressEvent(event);
 }
 
-void Composer::mouseMoveEvent(QMouseEvent *event) {
+void Composer::mouseMoveEvent(QMouseEvent* event) {
   const bool hovered = SendRect().contains(event->position());
   if (hovered != send_hovered_) {
     send_hovered_ = hovered;
@@ -1285,13 +1285,13 @@ void Composer::mouseMoveEvent(QMouseEvent *event) {
   QWidget::mouseMoveEvent(event);
 }
 
-void Composer::leaveEvent(QEvent *event) {
+void Composer::leaveEvent(QEvent* event) {
   send_hovered_ = false;
   update();
   QWidget::leaveEvent(event);
 }
 
-void Composer::dragEnterEvent(QDragEnterEvent *event) {
+void Composer::dragEnterEvent(QDragEnterEvent* event) {
   if (event->mimeData() != nullptr && event->mimeData()->hasUrls()) {
     event->acceptProposedAction();
     return;
@@ -1299,13 +1299,13 @@ void Composer::dragEnterEvent(QDragEnterEvent *event) {
   QWidget::dragEnterEvent(event);
 }
 
-void Composer::dropEvent(QDropEvent *event) {
+void Composer::dropEvent(QDropEvent* event) {
   if (event->mimeData() == nullptr || !event->mimeData()->hasUrls()) {
     QWidget::dropEvent(event);
     return;
   }
   QStringList paths;
-  for (const QUrl &url : event->mimeData()->urls()) {
+  for (const QUrl& url : event->mimeData()->urls()) {
     if (url.isLocalFile()) {
       paths.append(url.toLocalFile());
     }
@@ -1318,80 +1318,80 @@ void Composer::dropEvent(QDropEvent *event) {
   QWidget::dropEvent(event);
 }
 
-bool Composer::eventFilter(QObject *watched, QEvent *event) {
+bool Composer::eventFilter(QObject* watched, QEvent* event) {
   if (watched == editor_) {
     if (event->type() == QEvent::KeyPress) {
-      auto *key_event = static_cast<QKeyEvent *>(event);
+      auto* key_event = static_cast<QKeyEvent*>(event);
       if (MentionMenuVisible() && mention_menu_->count() > 0) {
         switch (key_event->key()) {
-        case Qt::Key_Down: {
-          const int next =
-              (mention_menu_->currentRow() + 1) % mention_menu_->count();
-          mention_menu_->setCurrentRow(next);
-          return true;
-        }
-        case Qt::Key_Up: {
-          const int previous =
-              (mention_menu_->currentRow() - 1 + mention_menu_->count()) %
-              mention_menu_->count();
-          mention_menu_->setCurrentRow(previous);
-          return true;
-        }
-        case Qt::Key_Tab:
-        case Qt::Key_Return:
-        case Qt::Key_Enter: {
-          AcceptMention();
-          return true;
-        }
-        case Qt::Key_Escape: {
-          HideMentionMenu();
-          return true;
-        }
-        default:
-          break;
+          case Qt::Key_Down: {
+            const int next =
+                (mention_menu_->currentRow() + 1) % mention_menu_->count();
+            mention_menu_->setCurrentRow(next);
+            return true;
+          }
+          case Qt::Key_Up: {
+            const int previous =
+                (mention_menu_->currentRow() - 1 + mention_menu_->count()) %
+                mention_menu_->count();
+            mention_menu_->setCurrentRow(previous);
+            return true;
+          }
+          case Qt::Key_Tab:
+          case Qt::Key_Return:
+          case Qt::Key_Enter: {
+            AcceptMention();
+            return true;
+          }
+          case Qt::Key_Escape: {
+            HideMentionMenu();
+            return true;
+          }
+          default:
+            break;
         }
       }
       const bool menu_open = SlashMenuVisible() && slash_menu_->count() > 0;
       if (menu_open) {
         switch (key_event->key()) {
-        case Qt::Key_Down: {
-          const int next =
-              (slash_menu_->currentRow() + 1) % slash_menu_->count();
-          slash_menu_->setCurrentRow(next);
-          return true;
-        }
-        case Qt::Key_Up: {
-          const int previous =
-              (slash_menu_->currentRow() - 1 + slash_menu_->count()) %
-              slash_menu_->count();
-          slash_menu_->setCurrentRow(previous);
-          return true;
-        }
-        case Qt::Key_Tab: {
-          AcceptSlashCommand();
-          return true;
-        }
-        case Qt::Key_Escape: {
-          HideSlashMenu();
-          return true;
-        }
-        case Qt::Key_Return:
-        case Qt::Key_Enter: {
-          // Enter completes an unfinished command, but submits when the
-          // typed text already is the command (so "/new<Enter>" runs).
-          const QString typed = Text().trimmed();
-          const QString selected =
-              slash_menu_->currentItem() == nullptr
-                  ? QString()
-                  : slash_menu_->currentItem()->data(Qt::UserRole).toString();
-          if (typed.compare(selected, Qt::CaseInsensitive) != 0) {
+          case Qt::Key_Down: {
+            const int next =
+                (slash_menu_->currentRow() + 1) % slash_menu_->count();
+            slash_menu_->setCurrentRow(next);
+            return true;
+          }
+          case Qt::Key_Up: {
+            const int previous =
+                (slash_menu_->currentRow() - 1 + slash_menu_->count()) %
+                slash_menu_->count();
+            slash_menu_->setCurrentRow(previous);
+            return true;
+          }
+          case Qt::Key_Tab: {
             AcceptSlashCommand();
             return true;
           }
-          break;
-        }
-        default:
-          break;
+          case Qt::Key_Escape: {
+            HideSlashMenu();
+            return true;
+          }
+          case Qt::Key_Return:
+          case Qt::Key_Enter: {
+            // Enter completes an unfinished command, but submits when the
+            // typed text already is the command (so "/new<Enter>" runs).
+            const QString typed = Text().trimmed();
+            const QString selected =
+                slash_menu_->currentItem() == nullptr
+                    ? QString()
+                    : slash_menu_->currentItem()->data(Qt::UserRole).toString();
+            if (typed.compare(selected, Qt::CaseInsensitive) != 0) {
+              AcceptSlashCommand();
+              return true;
+            }
+            break;
+          }
+          default:
+            break;
         }
       }
       if (key_event->matches(QKeySequence::Paste)) {
@@ -1472,4 +1472,4 @@ bool Composer::eventFilter(QObject *watched, QEvent *event) {
   return QWidget::eventFilter(watched, event);
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

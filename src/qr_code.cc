@@ -12,7 +12,7 @@
 
 namespace hermes::ui {
 
-QImage RenderQrImage(const QString &payload, int target_pixels,
+QImage RenderQrImage(const QString& payload, int target_pixels,
                      int border_modules) {
   if (payload.isEmpty() || target_pixels <= 0) {
     return QImage();
@@ -34,7 +34,7 @@ QImage RenderQrImage(const QString &payload, int target_pixels,
       const int left = (x + border) * module_pixels;
       const int top = (y + border) * module_pixels;
       for (int py = 0; py < module_pixels; ++py) {
-        QRgb *line = reinterpret_cast<QRgb *>(image.scanLine(top + py));
+        QRgb* line = reinterpret_cast<QRgb*>(image.scanLine(top + py));
         std::fill(line + left, line + left + module_pixels, qRgb(0, 0, 0));
       }
     }
@@ -42,4 +42,4 @@ QImage RenderQrImage(const QString &payload, int target_pixels,
   return image;
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

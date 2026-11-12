@@ -14,11 +14,11 @@ namespace hermes::ui {
 // in `detail`), fenced code, bullets/numbered lists/tasks, quotes, rules,
 // tables (rendered HTML in `detail`) and paragraphs. Inline spans are handled
 // by InlineHtml().
-std::vector<MessageBlock> ParseMarkdown(const QString &text);
+std::vector<MessageBlock> ParseMarkdown(const QString& text);
 
 // Escapes HTML and expands `code`, **bold** and *italic* spans.
-QString InlineHtml(const QString &text);
+QString InlineHtml(const QString& text);
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_MARKDOWN_H_
+#endif  // HERMES_UI_MARKDOWN_H_

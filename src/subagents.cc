@@ -26,7 +26,7 @@ QString Compact(QString text, int max = kPreviewMax) {
   return text;
 }
 
-QString ToolLabel(const QString &name) {
+QString ToolLabel(const QString& name) {
   const QStringList parts = name.split(QLatin1Char('_'), Qt::SkipEmptyParts);
   QStringList words;
   for (QString part : parts) {
@@ -38,14 +38,14 @@ QString ToolLabel(const QString &name) {
   return words.isEmpty() ? name : words.join(QLatin1Char(' '));
 }
 
-QString FormatTool(const QString &name, const QString &preview) {
+QString FormatTool(const QString& name, const QString& preview) {
   const QString snippet = Compact(preview, 96);
   return snippet.isEmpty()
              ? ToolLabel(name)
              : QStringLiteral("%1(\"%2\")").arg(ToolLabel(name), snippet);
 }
 
-SubagentStatus ParseStatus(const QString &text, bool terminal_event) {
+SubagentStatus ParseStatus(const QString& text, bool terminal_event) {
   const QString value = text.trimmed().toLower();
   if (value == QStringLiteral("completed")) {
     return SubagentStatus::kCompleted;
@@ -68,7 +68,7 @@ SubagentStatus ParseStatus(const QString &text, bool terminal_event) {
   return SubagentStatus::kRunning;
 }
 
-QString IdOf(const QJsonObject &payload) {
+QString IdOf(const QJsonObject& payload) {
   const QString explicit_id =
       payload.value(QStringLiteral("subagent_id")).toString();
   if (!explicit_id.isEmpty()) {
@@ -81,9 +81,9 @@ QString IdOf(const QJsonObject &payload) {
       .arg(payload.value(QStringLiteral("goal")).toString());
 }
 
-QStringList Strings(const QJsonArray &array) {
+QStringList Strings(const QJsonArray& array) {
   QStringList out;
-  for (const QJsonValue &value : array) {
+  for (const QJsonValue& value : array) {
     if (value.isString()) {
       out.append(value.toString());
     }
@@ -91,16 +91,15 @@ QStringList Strings(const QJsonArray &array) {
   return out;
 }
 
-void AppendStream(SubagentProgress *row, SubagentStreamEntry entry) {
+void AppendStream(SubagentProgress* row, SubagentStreamEntry entry) {
   // Progress payloads repeat the current tool and preview on every frame, so
   // an exact duplicate is a replay rather than new activity.
-  const bool duplicate =
-      std::any_of(row->stream.begin(), row->stream.end(),
-                  [&entry](const SubagentStreamEntry &existing) {
-                    return existing.kind == entry.kind &&
-                           existing.text == entry.text &&
-                           existing.error == entry.error;
-                  });
+  const bool duplicate = std::any_of(
+      row->stream.begin(), row->stream.end(),
+      [&entry](const SubagentStreamEntry& existing) {
+        return existing.kind == entry.kind && existing.text == entry.text &&
+               existing.error == entry.error;
+      });
   if (duplicate) {
     return;
   }
@@ -110,8 +109,8 @@ void AppendStream(SubagentProgress *row, SubagentStreamEntry entry) {
   }
 }
 
-void AppendPayloadStream(SubagentProgress *row, const QJsonObject &payload,
-                         const QString &event_type, qint64 now_ms) {
+void AppendPayloadStream(SubagentProgress* row, const QJsonObject& payload,
+                         const QString& event_type, qint64 now_ms) {
   const QString tool = payload.value(QStringLiteral("tool_name")).toString();
   const QString preview =
       payload.value(QStringLiteral("tool_preview"))
@@ -122,7 +121,7 @@ void AppendPayloadStream(SubagentProgress *row, const QJsonObject &payload,
       payload.value(QStringLiteral("text"))
           .toString(payload.value(QStringLiteral("preview")).toString()));
 
-  for (const QJsonValue &value :
+  for (const QJsonValue& value :
        payload.value(QStringLiteral("output_tail")).toArray()) {
     const QJsonObject tail = value.toObject();
     const QString tail_text = tail.value(QStringLiteral("preview")).toString();
@@ -166,7 +165,7 @@ void AppendPayloadStream(SubagentProgress *row, const QJsonObject &payload,
   }
 }
 
-QString SummaryOf(const QJsonObject &payload) {
+QString SummaryOf(const QJsonObject& payload) {
   QString summary = payload.value(QStringLiteral("summary")).toString();
   if (summary.isEmpty()) {
     summary = payload.value(QStringLiteral("preview"))
@@ -182,7 +181,7 @@ QString SummaryOf(const QJsonObject &payload) {
   return Compact(summary, 500);
 }
 
-} // namespace
+}  // namespace
 
 bool SubagentIsTerminal(SubagentStatus status) {
   return status == SubagentStatus::kCompleted ||
@@ -192,23 +191,23 @@ bool SubagentIsTerminal(SubagentStatus status) {
 
 QString SubagentStatusText(SubagentStatus status) {
   switch (status) {
-  case SubagentStatus::kQueued:
-    return QStringLiteral("Queued");
-  case SubagentStatus::kRunning:
-    return QStringLiteral("Running");
-  case SubagentStatus::kCompleted:
-    return QStringLiteral("Done");
-  case SubagentStatus::kFailed:
-    return QStringLiteral("Failed");
-  case SubagentStatus::kInterrupted:
-    return QStringLiteral("Interrupted");
+    case SubagentStatus::kQueued:
+      return QStringLiteral("Queued");
+    case SubagentStatus::kRunning:
+      return QStringLiteral("Running");
+    case SubagentStatus::kCompleted:
+      return QStringLiteral("Done");
+    case SubagentStatus::kFailed:
+      return QStringLiteral("Failed");
+    case SubagentStatus::kInterrupted:
+      return QStringLiteral("Interrupted");
   }
   return QStringLiteral("Unknown");
 }
 
-void ApplySubagentEvent(std::vector<SubagentProgress> *rows,
-                        const QString &event_type, const QString &session_id,
-                        const QJsonObject &payload, qint64 now_ms) {
+void ApplySubagentEvent(std::vector<SubagentProgress>* rows,
+                        const QString& event_type, const QString& session_id,
+                        const QJsonObject& payload, qint64 now_ms) {
   if (rows == nullptr || !event_type.startsWith(QStringLiteral("subagent."))) {
     return;
   }
@@ -218,7 +217,7 @@ void ApplySubagentEvent(std::vector<SubagentProgress> *rows,
   }
   auto it =
       std::find_if(rows->begin(), rows->end(),
-                   [&id](const SubagentProgress &row) { return row.id == id; });
+                   [&id](const SubagentProgress& row) { return row.id == id; });
   if (it == rows->end()) {
     SubagentProgress row;
     row.id = id;
@@ -228,7 +227,7 @@ void ApplySubagentEvent(std::vector<SubagentProgress> *rows,
     it = rows->end() - 1;
   }
 
-  SubagentProgress &row = *it;
+  SubagentProgress& row = *it;
   if (row.session_id.isEmpty()) {
     row.session_id = session_id;
   }
@@ -317,8 +316,8 @@ void ApplySubagentEvent(std::vector<SubagentProgress> *rows,
   row.updated_at_ms = now_ms;
 }
 
-int SubagentDepth(const QString &id,
-                  const std::vector<SubagentProgress> &rows) {
+int SubagentDepth(const QString& id,
+                  const std::vector<SubagentProgress>& rows) {
   int depth = 0;
   QString current = id;
   std::set<QString> seen;
@@ -328,7 +327,7 @@ int SubagentDepth(const QString &id,
     }
     const auto it = std::find_if(
         rows.begin(), rows.end(),
-        [&current](const SubagentProgress &row) { return row.id == current; });
+        [&current](const SubagentProgress& row) { return row.id == current; });
     if (it == rows.end() || it->parent_id.isEmpty()) {
       break;
     }
@@ -338,15 +337,15 @@ int SubagentDepth(const QString &id,
   return depth;
 }
 
-std::vector<const SubagentProgress *>
-BuildSubagentTree(const std::vector<SubagentProgress> &rows) {
-  std::map<QString, std::vector<const SubagentProgress *>> children;
-  std::vector<const SubagentProgress *> roots;
-  for (const SubagentProgress &row : rows) {
+std::vector<const SubagentProgress*> BuildSubagentTree(
+    const std::vector<SubagentProgress>& rows) {
+  std::map<QString, std::vector<const SubagentProgress*>> children;
+  std::vector<const SubagentProgress*> roots;
+  for (const SubagentProgress& row : rows) {
     const bool has_parent =
         !row.parent_id.isEmpty() &&
         std::any_of(rows.begin(), rows.end(),
-                    [&row](const SubagentProgress &candidate) {
+                    [&row](const SubagentProgress& candidate) {
                       return candidate.id == row.parent_id;
                     });
     if (has_parent) {
@@ -355,8 +354,8 @@ BuildSubagentTree(const std::vector<SubagentProgress> &rows) {
       roots.push_back(&row);
     }
   }
-  auto by_activity = [](const SubagentProgress *left,
-                        const SubagentProgress *right) {
+  auto by_activity = [](const SubagentProgress* left,
+                        const SubagentProgress* right) {
     const bool left_live = !SubagentIsTerminal(left->status);
     const bool right_live = !SubagentIsTerminal(right->status);
     if (left_live != right_live) {
@@ -366,9 +365,9 @@ BuildSubagentTree(const std::vector<SubagentProgress> &rows) {
   };
   std::sort(roots.begin(), roots.end(), by_activity);
 
-  std::vector<const SubagentProgress *> flat;
+  std::vector<const SubagentProgress*> flat;
   std::set<QString> visited;
-  const auto walk = [&](const auto &self, const SubagentProgress *row) -> void {
+  const auto walk = [&](const auto& self, const SubagentProgress* row) -> void {
     if (row == nullptr || !visited.insert(row->id).second) {
       return;
     }
@@ -378,11 +377,11 @@ BuildSubagentTree(const std::vector<SubagentProgress> &rows) {
       return;
     }
     std::sort(child_it->second.begin(), child_it->second.end(), by_activity);
-    for (const SubagentProgress *child : child_it->second) {
+    for (const SubagentProgress* child : child_it->second) {
       self(self, child);
     }
   };
-  for (const SubagentProgress *root : roots) {
+  for (const SubagentProgress* root : roots) {
     walk(walk, root);
   }
   return flat;
@@ -428,4 +427,4 @@ QString FormatSubagentAge(qint64 updated_at_ms, qint64 now_ms) {
   return QStringLiteral("%1h ago").arg(minutes / 60);
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

@@ -5,8 +5,8 @@
 #include <QSystemTrayIcon>
 
 #if defined(__APPLE__)
-bool MacShowNotification(const QString &title, const QString &body, bool silent,
-                         QString *error);
+bool MacShowNotification(const QString& title, const QString& body, bool silent,
+                         QString* error);
 #else
 #include <QApplication>
 #include <QIcon>
@@ -14,12 +14,12 @@ bool MacShowNotification(const QString &title, const QString &body, bool silent,
 
 namespace hermes::ui {
 
-NotificationService::NotificationService(QObject *parent) { Q_UNUSED(parent); }
+NotificationService::NotificationService(QObject* parent) { Q_UNUSED(parent); }
 
 NotificationService::~NotificationService() { delete tray_; }
 
-bool NotificationService::Show(const QString &title, const QString &body,
-                               bool silent, QString *error) {
+bool NotificationService::Show(const QString& title, const QString& body,
+                               bool silent, QString* error) {
 #if defined(__APPLE__)
   return MacShowNotification(title, body, silent, error);
 #else
@@ -41,4 +41,4 @@ bool NotificationService::Show(const QString &title, const QString &body,
 #endif
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

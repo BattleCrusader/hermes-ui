@@ -11,7 +11,7 @@
 
 namespace hermes::ui {
 
-StatusBar::StatusBar(const Theme &theme, QWidget *parent)
+StatusBar::StatusBar(const Theme& theme, QWidget* parent)
     : QWidget(parent), theme_(theme) {
   setFixedHeight(26);
   pulse_timer_ = new QTimer(this);
@@ -42,19 +42,19 @@ void StatusBar::SetBusy(bool busy) {
   update();
 }
 
-void StatusBar::ShowTransient(const QString &text, int milliseconds) {
+void StatusBar::ShowTransient(const QString& text, int milliseconds) {
   transient_ = text;
   transient_timer_->start(milliseconds);
   update();
 }
 
-void StatusBar::SetTheme(const Theme &theme) {
+void StatusBar::SetTheme(const Theme& theme) {
   theme_ = theme;
   update();
 }
 
-void StatusBar::SetState(const QString &left, const QString &center,
-                         const QString &right, bool healthy) {
+void StatusBar::SetState(const QString& left, const QString& center,
+                         const QString& right, bool healthy) {
   left_ = left;
   center_ = center;
   right_ = right;
@@ -62,7 +62,7 @@ void StatusBar::SetState(const QString &left, const QString &center,
   update();
 }
 
-void StatusBar::SetUsage(const QString &usage) {
+void StatusBar::SetUsage(const QString& usage) {
   if (usage_ == usage) {
     return;
   }
@@ -70,7 +70,7 @@ void StatusBar::SetUsage(const QString &usage) {
   update();
 }
 
-void StatusBar::paintEvent(QPaintEvent *event) {
+void StatusBar::paintEvent(QPaintEvent* event) {
   Q_UNUSED(event);
   QPainter painter(this);
   painter.setRenderHint(QPainter::Antialiasing, true);
@@ -119,4 +119,4 @@ void StatusBar::paintEvent(QPaintEvent *event) {
                  theme_.text_tertiary, theme_.UiFont(10, QFont::Normal));
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

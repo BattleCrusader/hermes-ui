@@ -13,14 +13,14 @@
 
 namespace hermes::ui {
 
-QuickEntryDialog::QuickEntryDialog(QWidget *parent) : QDialog(parent) {
+QuickEntryDialog::QuickEntryDialog(QWidget* parent) : QDialog(parent) {
   setObjectName(QStringLiteral("quickEntryDialog"));
   setWindowTitle(QStringLiteral("Quick entry"));
   setWindowFlag(Qt::Tool, true);
   setWindowFlag(Qt::WindowStaysOnTopHint, true);
   resize(560, 190);
 
-  auto *layout = new QVBoxLayout(this);
+  auto* layout = new QVBoxLayout(this);
   layout->setContentsMargins(16, 14, 16, 14);
   layout->setSpacing(8);
 
@@ -39,7 +39,7 @@ QuickEntryDialog::QuickEntryDialog(QWidget *parent) : QDialog(parent) {
   text_->installEventFilter(this);
   layout->addWidget(text_, 1);
 
-  auto *footer = new QHBoxLayout();
+  auto* footer = new QHBoxLayout();
   footer->setContentsMargins(0, 0, 0, 0);
   footer->setSpacing(8);
   hint_ = new QLabel(QStringLiteral("Starts a new chat · Esc closes"), this);
@@ -56,11 +56,11 @@ QuickEntryDialog::QuickEntryDialog(QWidget *parent) : QDialog(parent) {
 }
 
 void QuickEntryDialog::SetSubmitHandler(
-    std::function<void(const QString &)> handler) {
+    std::function<void(const QString&)> handler) {
   submit_handler_ = std::move(handler);
 }
 
-void QuickEntryDialog::SetSessionLabel(const QString &label) {
+void QuickEntryDialog::SetSessionLabel(const QString& label) {
   session_label_->setText(label);
 }
 
@@ -71,14 +71,14 @@ void QuickEntryDialog::FocusEditor() {
 
 QString QuickEntryDialog::Text() const { return text_->toPlainText(); }
 
-void QuickEntryDialog::SetText(const QString &text) {
+void QuickEntryDialog::SetText(const QString& text) {
   text_->setPlainText(text);
   text_->moveCursor(QTextCursor::End);
 }
 
-bool QuickEntryDialog::eventFilter(QObject *watched, QEvent *event) {
+bool QuickEntryDialog::eventFilter(QObject* watched, QEvent* event) {
   if (watched == text_ && event->type() == QEvent::KeyPress) {
-    auto *key = static_cast<QKeyEvent *>(event);
+    auto* key = static_cast<QKeyEvent*>(event);
     if ((key->key() == Qt::Key_Return || key->key() == Qt::Key_Enter) &&
         (key->modifiers() & Qt::ShiftModifier) == 0) {
       Submit();
@@ -101,4 +101,4 @@ void QuickEntryDialog::Submit() {
   hide();
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

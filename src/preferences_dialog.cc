@@ -12,22 +12,22 @@
 
 namespace hermes::ui {
 
-PreferencesDialog::PreferencesDialog(const Theme &theme, QWidget *parent)
+PreferencesDialog::PreferencesDialog(const Theme& theme, QWidget* parent)
     : QDialog(parent), theme_(theme) {
   setObjectName(QStringLiteral("preferences"));
   setWindowTitle(QStringLiteral("Preferences"));
   setModal(false);
   setMinimumWidth(500);
 
-  auto *root = new QVBoxLayout(this);
+  auto* root = new QVBoxLayout(this);
   root->setContentsMargins(20, 18, 20, 16);
   root->setSpacing(12);
 
-  auto *title = new QLabel(QStringLiteral("Preferences"), this);
+  auto* title = new QLabel(QStringLiteral("Preferences"), this);
   title->setObjectName(QStringLiteral("preferencesTitle"));
   root->addWidget(title);
 
-  auto *appearance = new QLabel(QStringLiteral("Appearance"), this);
+  auto* appearance = new QLabel(QStringLiteral("Appearance"), this);
   appearance->setObjectName(QStringLiteral("preferencesSection"));
   root->addWidget(appearance);
   theme_combo_ = new QComboBox(this);
@@ -42,11 +42,11 @@ PreferencesDialog::PreferencesDialog(const Theme &theme, QWidget *parent)
           });
   root->addWidget(theme_combo_);
 
-  auto *model_heading = new QLabel(QStringLiteral("Model"), this);
+  auto* model_heading = new QLabel(QStringLiteral("Model"), this);
   model_heading->setObjectName(QStringLiteral("preferencesSection"));
   root->addWidget(model_heading);
 
-  auto *form = new QFormLayout();
+  auto* form = new QFormLayout();
   form->setContentsMargins(0, 0, 0, 0);
   form->setSpacing(8);
   provider_ = new QComboBox(this);
@@ -64,7 +64,7 @@ PreferencesDialog::PreferencesDialog(const Theme &theme, QWidget *parent)
 
   reasoning_ = new QComboBox(this);
   reasoning_->setObjectName(QStringLiteral("preferencesReasoning"));
-  for (const QString &level :
+  for (const QString& level :
        {QStringLiteral("off"), QStringLiteral("low"), QStringLiteral("medium"),
         QStringLiteral("high")}) {
     reasoning_->addItem(level, level);
@@ -77,13 +77,13 @@ PreferencesDialog::PreferencesDialog(const Theme &theme, QWidget *parent)
   gateway_->setObjectName(QStringLiteral("preferencesGateway"));
   root->addWidget(gateway_);
 
-  auto *actions = new QHBoxLayout();
+  auto* actions = new QHBoxLayout();
   actions->addStretch(1);
-  auto *close = new QPushButton(QStringLiteral("Close"), this);
+  auto* close = new QPushButton(QStringLiteral("Close"), this);
   close->setObjectName(QStringLiteral("preferencesClose"));
   connect(close, &QPushButton::clicked, this, &QDialog::reject);
   actions->addWidget(close);
-  auto *apply = new QPushButton(QStringLiteral("Apply"), this);
+  auto* apply = new QPushButton(QStringLiteral("Apply"), this);
   apply->setObjectName(QStringLiteral("preferencesApply"));
   apply->setDefault(true);
   connect(apply, &QPushButton::clicked, this, [this]() { Apply(); });
@@ -93,12 +93,12 @@ PreferencesDialog::PreferencesDialog(const Theme &theme, QWidget *parent)
   SetTheme(theme);
 }
 
-void PreferencesDialog::SetTheme(const Theme &theme) {
+void PreferencesDialog::SetTheme(const Theme& theme) {
   theme_ = theme;
   Style();
 }
 
-void PreferencesDialog::SetSnapshot(const ProfileSnapshot &snapshot) {
+void PreferencesDialog::SetSnapshot(const ProfileSnapshot& snapshot) {
   snapshot_ = snapshot;
   {
     const QSignalBlocker blocker(theme_combo_);
@@ -119,32 +119,32 @@ void PreferencesDialog::SetSnapshot(const ProfileSnapshot &snapshot) {
   }
 }
 
-void PreferencesDialog::RebuildProviders(const QString &provider,
-                                         const QString &model) {
+void PreferencesDialog::RebuildProviders(const QString& provider,
+                                         const QString& model) {
   const QSignalBlocker blocker(provider_);
   provider_->clear();
-  for (const ModelProvider &row : snapshot_.model_providers) {
+  for (const ModelProvider& row : snapshot_.model_providers) {
     provider_->addItem(row.name.isEmpty() ? row.slug : row.name, row.slug);
   }
   if (provider_->count() == 0) {
-    provider_->addItem(provider.isEmpty() ? QStringLiteral("No provider")
-                                          : provider,
-                       provider);
+    provider_->addItem(
+        provider.isEmpty() ? QStringLiteral("No provider") : provider,
+        provider);
   }
   const int index = provider_->findData(provider);
   provider_->setCurrentIndex(index >= 0 ? index : 0);
   RebuildModels(model);
 }
 
-void PreferencesDialog::RebuildModels(const QString &model) {
+void PreferencesDialog::RebuildModels(const QString& model) {
   const QSignalBlocker blocker(model_);
   model_->clear();
   const QString slug = provider_->currentData().toString();
-  for (const ModelProvider &row : snapshot_.model_providers) {
+  for (const ModelProvider& row : snapshot_.model_providers) {
     if (row.slug != slug) {
       continue;
     }
-    for (const QString &id : row.models) {
+    for (const QString& id : row.models) {
       model_->addItem(id, id);
     }
     break;
@@ -187,4 +187,4 @@ void PreferencesDialog::Style() {
                theme_.accent.name()));
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

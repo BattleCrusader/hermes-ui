@@ -9,15 +9,15 @@
 
 namespace hermes::ui {
 
-QString ModelVisibilityKey(const QString &provider, const QString &model) {
+QString ModelVisibilityKey(const QString& provider, const QString& model) {
   return provider.trimmed() + QLatin1Char('/') + model.trimmed();
 }
 
-QSet<QString> ParseHiddenModels(const QString &stored) {
+QSet<QString> ParseHiddenModels(const QString& stored) {
   QSet<QString> hidden;
   const QStringList parts = stored.split(
       QRegularExpression(QStringLiteral("[\\n,]")), Qt::SkipEmptyParts);
-  for (const QString &part : parts) {
+  for (const QString& part : parts) {
     const QString key = part.trimmed();
     if (!key.isEmpty()) {
       hidden.insert(key);
@@ -26,20 +26,19 @@ QSet<QString> ParseHiddenModels(const QString &stored) {
   return hidden;
 }
 
-QString FormatHiddenModels(const QSet<QString> &hidden) {
+QString FormatHiddenModels(const QSet<QString>& hidden) {
   QStringList keys = hidden.values();
   keys.sort(Qt::CaseInsensitive);
   return keys.join(QLatin1Char('\n'));
 }
 
-std::vector<ModelProvider>
-VisibleModelCatalog(const std::vector<ModelProvider> &providers,
-                    const QSet<QString> &hidden) {
+std::vector<ModelProvider> VisibleModelCatalog(
+    const std::vector<ModelProvider>& providers, const QSet<QString>& hidden) {
   std::vector<ModelProvider> visible;
-  for (const ModelProvider &provider : providers) {
+  for (const ModelProvider& provider : providers) {
     ModelProvider filtered = provider;
     filtered.models.clear();
-    for (const QString &model : provider.models) {
+    for (const QString& model : provider.models) {
       if (!hidden.contains(ModelVisibilityKey(provider.slug, model))) {
         filtered.models.push_back(model);
       }
@@ -51,4 +50,4 @@ VisibleModelCatalog(const std::vector<ModelProvider> &providers,
   return visible;
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

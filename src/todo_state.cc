@@ -12,8 +12,8 @@
 
 namespace hermes::ui {
 
-bool ParseTodoState(const QJsonObject &payload, std::vector<TodoItem> *todos,
-                    int *revision) {
+bool ParseTodoState(const QJsonObject& payload, std::vector<TodoItem>* todos,
+                    int* revision) {
   if (todos == nullptr || revision == nullptr) {
     return false;
   }
@@ -29,7 +29,7 @@ bool ParseTodoState(const QJsonObject &payload, std::vector<TodoItem> *todos,
     return false;
   }
   std::vector<TodoItem> parsed;
-  for (const QJsonValue &value : list.toArray()) {
+  for (const QJsonValue& value : list.toArray()) {
     const QJsonObject row = value.toObject();
     TodoItem item;
     item.id = row.value(QStringLiteral("id")).toString();
@@ -53,7 +53,7 @@ bool ParseTodoState(const QJsonObject &payload, std::vector<TodoItem> *todos,
   return true;
 }
 
-QString TodoStatusMarker(const QString &status) {
+QString TodoStatusMarker(const QString& status) {
   if (status == QStringLiteral("completed")) {
     return QStringLiteral("[x]");
   }
@@ -66,7 +66,7 @@ QString TodoStatusMarker(const QString &status) {
   return QStringLiteral("[ ]");
 }
 
-int TodoDepth(const TodoItem &item, const std::vector<TodoItem> &todos) {
+int TodoDepth(const TodoItem& item, const std::vector<TodoItem>& todos) {
   QSet<QString> seen;
   seen.insert(item.id);
   QString parent = item.parent;
@@ -78,7 +78,7 @@ int TodoDepth(const TodoItem &item, const std::vector<TodoItem> &todos) {
     seen.insert(parent);
     const auto found = std::find_if(
         todos.begin(), todos.end(),
-        [&parent](const TodoItem &row) { return row.id == parent; });
+        [&parent](const TodoItem& row) { return row.id == parent; });
     if (found == todos.end()) {
       return 0;
     }
@@ -88,11 +88,11 @@ int TodoDepth(const TodoItem &item, const std::vector<TodoItem> &todos) {
   return depth;
 }
 
-QString TodoSummaryText(const std::vector<TodoItem> &todos) {
+QString TodoSummaryText(const std::vector<TodoItem>& todos) {
   int active = 0;
   int done = 0;
   int cancelled = 0;
-  for (const TodoItem &item : todos) {
+  for (const TodoItem& item : todos) {
     if (item.status == QStringLiteral("pending") ||
         item.status == QStringLiteral("in_progress")) {
       ++active;
@@ -116,4 +116,4 @@ QString TodoSummaryText(const std::vector<TodoItem> &todos) {
                          : parts.join(QStringLiteral(" · "));
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

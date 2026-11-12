@@ -90,8 +90,8 @@ bool SaveBrowserScreenshot(const QByteArray& png, const QString& path,
                            QString* error);
 
 using CdpCallback = std::function<void(const QJsonObject&, const QString&)>;
-using CdpScreenshotCallback =
-    std::function<void(const QByteArray&, const QString&)>;
+using CdpScreenshotCallback = std::function<void(
+    const QByteArray&, const QString&)>;  // NOLINT(whitespace/indent_namespace)
 
 // Minimal Chrome DevTools Protocol client: HTTP discovery, websocket framing,
 // request/response ids, optional flat-session attach for browser targets, and

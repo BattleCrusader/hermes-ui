@@ -56,12 +56,12 @@ QJsonObject Payload() {
   };
 }
 
-} // namespace
+}  // namespace
 
 class PetOverlayTest : public QObject {
   Q_OBJECT
 
-private slots:
+ private slots:
   void disabledPayloadIsClean();
   void decodesSpriteGeometryAndRows();
   void rejectsMalformedSprites();

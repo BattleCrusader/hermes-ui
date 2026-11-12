@@ -27,7 +27,9 @@
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
+#include <utility>
 
 #if defined(Q_OS_UNIX)
 #include <fcntl.h>
@@ -354,8 +356,8 @@ bool TerminalWidget::StartUnix() {
       (QFileInfo(working_directory_).isDir() ? working_directory_
                                              : QDir::homePath())
           .toLocal8Bit();
-  struct winsize size{static_cast<unsigned short>(primary_.rows),
-                      static_cast<unsigned short>(primary_.columns), 0, 0};
+  struct winsize size{static_cast<uint16_t>(primary_.rows),
+                      static_cast<uint16_t>(primary_.columns), 0, 0};
   int master = -1;
   const pid_t pid = ::forkpty(&master, nullptr, nullptr, &size);
   if (pid == 0) {
@@ -1476,8 +1478,8 @@ void TerminalWidget::ApplyWindowSize() {
       std::clamp(scroll_offset_, 0, static_cast<int>(scrollback_.size()));
 #if defined(Q_OS_UNIX)
   if (master_fd_ >= 0) {
-    struct winsize size{static_cast<unsigned short>(rows),
-                        static_cast<unsigned short>(columns), 0, 0};
+    struct winsize size{static_cast<uint16_t>(rows),
+                        static_cast<uint16_t>(columns), 0, 0};
     ::ioctl(master_fd_, TIOCSWINSZ, &size);
   }
 #endif

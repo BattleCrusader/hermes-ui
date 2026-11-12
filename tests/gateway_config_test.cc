@@ -9,10 +9,10 @@
 
 namespace {
 
-QJsonValue FindKey(const QJsonObject &object, const QString &key) {
+QJsonValue FindKey(const QJsonObject& object, const QString& key) {
   const QStringList parts = key.split(QLatin1Char('.'));
   QJsonValue current = object;
-  for (const QString &part : parts) {
+  for (const QString& part : parts) {
     if (!current.isObject()) {
       return QJsonValue();
     }
@@ -25,7 +25,7 @@ QJsonValue FindKey(const QJsonObject &object, const QString &key) {
   return current;
 }
 
-} // namespace
+}  // namespace
 
 // Live contract test: GET the sparse config, write the *same* scalar back with
 // PUT /api/config, then read it again. This proves the native save path is
@@ -33,7 +33,7 @@ QJsonValue FindKey(const QJsonObject &object, const QString &key) {
 class GatewayConfigTest : public QObject {
   Q_OBJECT
 
-private slots:
+ private slots:
   void putConfigRoundTrips();
   void settingsPageEndpointsRespond();
   void settingsPagePayloadShapesMatchRenderers();
@@ -103,7 +103,7 @@ void GatewayConfigTest::settingsPageEndpointsRespond() {
       QStringLiteral("/api/skills"),
       QStringLiteral("/api/mcp/servers"),
   };
-  for (const QString &path : paths) {
+  for (const QString& path : paths) {
     QJsonDocument document;
     QString route_error;
     QVERIFY2(http.GetJson(path, &document, &route_error),
@@ -163,7 +163,7 @@ void GatewayConfigTest::settingsPagePayloadShapesMatchRenderers() {
   }
   hermes::ui::GatewayHttp http(hermes::ui::HermesHome(),
                                QStringLiteral("default"), endpoint);
-  auto get = [&http, &error](const QString &path) {
+  auto get = [&http, &error](const QString& path) {
     QJsonDocument document;
     const bool ok = http.GetJson(path, &document, &error);
     if (!ok) {

@@ -6,7 +6,7 @@
 
 namespace hermes::ui {
 
-void RunBackground(QObject *context, std::function<BackgroundResult()> work,
+void RunBackground(QObject* context, std::function<BackgroundResult()> work,
                    BackgroundDone done) {
   if (context == nullptr || !work) {
     if (done) {
@@ -15,7 +15,7 @@ void RunBackground(QObject *context, std::function<BackgroundResult()> work,
     }
     return;
   }
-  auto *watcher = new QFutureWatcher<BackgroundResult>(context);
+  auto* watcher = new QFutureWatcher<BackgroundResult>(context);
   QObject::connect(watcher, &QFutureWatcher<BackgroundResult>::finished,
                    context, [watcher, done = std::move(done)]() mutable {
                      const BackgroundResult result = watcher->result();
@@ -27,4 +27,4 @@ void RunBackground(QObject *context, std::function<BackgroundResult()> work,
   watcher->setFuture(QtConcurrent::run(std::move(work)));
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

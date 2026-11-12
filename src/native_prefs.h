@@ -12,10 +12,10 @@ namespace hermes::ui {
 // in QSettings, not the gateway config: the desktop keeps them in renderer
 // local storage. HERMES_UI_PREFS redirects the store to an INI directory so
 // tests and portable runs never touch the user's real domain.
-QString NativePref(const QString &key);
-void SetNativePref(const QString &key, const QString &value);
+QString NativePref(const QString& key);
+void SetNativePref(const QString& key, const QString& value);
 QStringList NativePrefKeys();
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_NATIVE_PREFS_H_
+#endif  // HERMES_UI_NATIVE_PREFS_H_

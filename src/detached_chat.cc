@@ -11,22 +11,22 @@
 
 namespace hermes::ui {
 
-DetachedChatWindow::DetachedChatWindow(const Theme &theme, QWidget *parent)
+DetachedChatWindow::DetachedChatWindow(const Theme& theme, QWidget* parent)
     : QWidget(parent, Qt::Window), theme_(theme) {
   setObjectName(QStringLiteral("detachedChat"));
   setAttribute(Qt::WA_DeleteOnClose);
   setWindowTitle(QStringLiteral("Hermes · chat"));
   resize(940, 780);
 
-  auto *layout = new QVBoxLayout(this);
+  auto* layout = new QVBoxLayout(this);
   layout->setContentsMargins(0, 0, 0, 0);
   layout->setSpacing(0);
 
   chat_view_ = new ChatView(theme_, this);
   layout->addWidget(chat_view_, 1);
 
-  auto *composer_host = new QWidget(this);
-  auto *composer_layout = new QVBoxLayout(composer_host);
+  auto* composer_host = new QWidget(this);
+  auto* composer_layout = new QVBoxLayout(composer_host);
   composer_layout->setContentsMargins(24, 0, 24, 8);
   composer_layout->setSpacing(4);
   status_ = new QLabel(composer_host);
@@ -45,7 +45,7 @@ DetachedChatWindow::DetachedChatWindow(const Theme &theme, QWidget *parent)
   SetTheme(theme_);
 }
 
-void DetachedChatWindow::SetTheme(const Theme &theme) {
+void DetachedChatWindow::SetTheme(const Theme& theme) {
   theme_ = theme;
   setStyleSheet(QStringLiteral("QWidget#detachedChat { background: %1; }")
                     .arg(theme.background.name()));
@@ -86,7 +86,7 @@ void DetachedChatWindow::SetSnapshot(
   SetStatus(snapshot->connected ? QString() : snapshot->status_text);
 }
 
-void DetachedChatWindow::SetProfileName(const QString &name) {
+void DetachedChatWindow::SetProfileName(const QString& name) {
   chat_view_->SetProfileName(name);
   setWindowTitle(name.isEmpty() ? QStringLiteral("Hermes · chat")
                                 : QStringLiteral("Hermes · %1").arg(name));
@@ -96,7 +96,7 @@ void DetachedChatWindow::SetRunning(bool running) {
   composer_->SetRunning(running);
 }
 
-void DetachedChatWindow::SetStatus(const QString &status) {
+void DetachedChatWindow::SetStatus(const QString& status) {
   if (status_ == nullptr) {
     return;
   }
@@ -104,10 +104,10 @@ void DetachedChatWindow::SetStatus(const QString &status) {
   status_->setVisible(!status.isEmpty());
 }
 
-void DetachedChatWindow::SetDraft(const QString &text) {
+void DetachedChatWindow::SetDraft(const QString& text) {
   composer_->SetText(text);
 }
 
 QString DetachedChatWindow::Draft() const { return composer_->Text(); }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

@@ -8,9 +8,9 @@
 
 namespace hermes::ui {
 
-QString FormatFallbackChain(const QJsonArray &entries) {
+QString FormatFallbackChain(const QJsonArray& entries) {
   QStringList lines;
-  for (const QJsonValue &value : entries) {
+  for (const QJsonValue& value : entries) {
     if (value.isObject()) {
       const QJsonObject entry = value.toObject();
       const QString provider =
@@ -26,11 +26,11 @@ QString FormatFallbackChain(const QJsonArray &entries) {
   return lines.join(QStringLiteral(", "));
 }
 
-QJsonArray ParseFallbackChain(const QString &text, const QJsonArray &previous) {
+QJsonArray ParseFallbackChain(const QString& text, const QJsonArray& previous) {
   QJsonArray entries;
   const QStringList parts = text.split(
       QRegularExpression(QStringLiteral("[\\n,]")), Qt::SkipEmptyParts);
-  for (const QString &raw : parts) {
+  for (const QString& raw : parts) {
     const QString line = raw.trimmed();
     if (line.isEmpty()) {
       continue;
@@ -42,7 +42,7 @@ QJsonArray ParseFallbackChain(const QString &text, const QJsonArray &previous) {
       continue;
     }
     QJsonObject entry;
-    for (const QJsonValue &value : previous) {
+    for (const QJsonValue& value : previous) {
       const QJsonObject old = value.toObject();
       if (old.value(QStringLiteral("provider")).toString() == provider &&
           old.value(QStringLiteral("model")).toString() == model) {
@@ -57,4 +57,4 @@ QJsonArray ParseFallbackChain(const QString &text, const QJsonArray &previous) {
   return entries;
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

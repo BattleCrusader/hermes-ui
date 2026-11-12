@@ -3,6 +3,8 @@
 #include "src/gateway_protocol.h"
 
 #include <QStringList>
+#include <utility>
+#include <vector>
 
 namespace hermes::ui {
 namespace {

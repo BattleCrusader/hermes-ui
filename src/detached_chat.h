@@ -22,27 +22,27 @@ class Composer;
 class DetachedChatWindow : public QWidget {
   Q_OBJECT
 
-public:
-  explicit DetachedChatWindow(const Theme &theme, QWidget *parent = nullptr);
+ public:
+  explicit DetachedChatWindow(const Theme& theme, QWidget* parent = nullptr);
 
-  void SetTheme(const Theme &theme);
+  void SetTheme(const Theme& theme);
   void SetSnapshot(std::shared_ptr<const ProfileSnapshot> snapshot);
-  void SetProfileName(const QString &name);
+  void SetProfileName(const QString& name);
   void SetRunning(bool running);
-  void SetStatus(const QString &status);
-  void SetDraft(const QString &text);
+  void SetStatus(const QString& status);
+  void SetDraft(const QString& text);
   QString Draft() const;
 
-  ChatView *chat_view() const { return chat_view_; }
-  Composer *composer() const { return composer_; }
+  ChatView* chat_view() const { return chat_view_; }
+  Composer* composer() const { return composer_; }
 
-private:
+ private:
   Theme theme_;
-  ChatView *chat_view_ = nullptr;
-  Composer *composer_ = nullptr;
-  QLabel *status_ = nullptr;
+  ChatView* chat_view_ = nullptr;
+  Composer* composer_ = nullptr;
+  QLabel* status_ = nullptr;
 };
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_SRC_DETACHED_CHAT_H_
+#endif  // HERMES_UI_SRC_DETACHED_CHAT_H_

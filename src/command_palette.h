@@ -31,37 +31,37 @@ struct PaletteCommand {
 // provider callback means the list is rebuilt from the live snapshot each time
 // it opens instead of going stale between profiles.
 class CommandPalette : public QWidget {
-public:
-  explicit CommandPalette(const Theme &theme, QWidget *parent = nullptr);
+ public:
+  explicit CommandPalette(const Theme& theme, QWidget* parent = nullptr);
 
-  void SetTheme(const Theme &theme);
+  void SetTheme(const Theme& theme);
   void SetCommands(std::vector<PaletteCommand> commands);
   void Open();
   // Opens with a query already typed (e.g. "model" from Cmd+Shift+M).
-  void OpenWith(const QString &query);
+  void OpenWith(const QString& query);
   void Close();
   bool IsOpen() const { return isVisible(); }
 
-protected:
-  void paintEvent(QPaintEvent *event) override;
-  void mousePressEvent(QMouseEvent *event) override;
-  void resizeEvent(QResizeEvent *event) override;
-  bool eventFilter(QObject *watched, QEvent *event) override;
+ protected:
+  void paintEvent(QPaintEvent* event) override;
+  void mousePressEvent(QMouseEvent* event) override;
+  void resizeEvent(QResizeEvent* event) override;
+  bool eventFilter(QObject* watched, QEvent* event) override;
 
-private:
+ private:
   void Filter();
   void MoveSelection(int delta);
   void RunCurrent();
   void LayoutCard();
 
   Theme theme_;
-  QFrame *card_ = nullptr;
-  QLineEdit *search_ = nullptr;
-  QListWidget *list_ = nullptr;
-  QLabel *empty_ = nullptr;
+  QFrame* card_ = nullptr;
+  QLineEdit* search_ = nullptr;
+  QListWidget* list_ = nullptr;
+  QLabel* empty_ = nullptr;
   std::vector<PaletteCommand> commands_;
 };
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_COMMAND_PALETTE_H_
+#endif  // HERMES_UI_COMMAND_PALETTE_H_

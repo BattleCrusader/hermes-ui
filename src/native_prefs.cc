@@ -11,8 +11,8 @@ namespace {
 // One QSettings for the window's preferences. HERMES_UI_PREFS points it at an
 // explicit INI file so tests and portable runs never touch the user's real
 // com.hermes.hermes-ui domain; without it the platform-native store is used.
-QSettings &Settings() {
-  static QSettings *settings = []() {
+QSettings& Settings() {
+  static QSettings* settings = []() {
     const QString override = qEnvironmentVariable("HERMES_UI_PREFS");
     if (override.isEmpty() || !QDir().mkpath(override)) {
       return new QSettings(QStringLiteral("Hermes"),
@@ -25,17 +25,17 @@ QSettings &Settings() {
   return *settings;
 }
 
-} // namespace
+}  // namespace
 
-QString NativePref(const QString &key) {
+QString NativePref(const QString& key) {
   return Settings().value(key).toString();
 }
 
-void SetNativePref(const QString &key, const QString &value) {
+void SetNativePref(const QString& key, const QString& value) {
   Settings().setValue(key, value);
   Settings().sync();
 }
 
 QStringList NativePrefKeys() { return Settings().allKeys(); }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

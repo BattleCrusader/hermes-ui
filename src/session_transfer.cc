@@ -8,8 +8,8 @@
 
 namespace hermes::ui {
 
-bool ParseSessionImport(const QByteArray &bytes, QJsonArray *sessions,
-                        QString *error) {
+bool ParseSessionImport(const QByteArray& bytes, QJsonArray* sessions,
+                        QString* error) {
   if (sessions != nullptr) {
     *sessions = QJsonArray();
   }
@@ -44,4 +44,4 @@ bool ParseSessionImport(const QByteArray &bytes, QJsonArray *sessions,
   return true;
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

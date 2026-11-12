@@ -13,7 +13,7 @@
 
 namespace hermes::ui {
 
-PagesView::PagesView(Theme theme, QWidget *parent)
+PagesView::PagesView(Theme theme, QWidget* parent)
     : QWidget(parent), theme_(theme) {
   setObjectName(QStringLiteral("pagesView"));
   setAttribute(Qt::WA_StyledBackground, true);
@@ -22,15 +22,15 @@ PagesView::PagesView(Theme theme, QWidget *parent)
 }
 
 void PagesView::BuildUi() {
-  auto *root = new QVBoxLayout(this);
+  auto* root = new QVBoxLayout(this);
   root->setContentsMargins(28, 22, 28, 22);
   root->setSpacing(14);
 
-  auto *header = new QWidget(this);
-  auto *header_row = new QHBoxLayout(header);
+  auto* header = new QWidget(this);
+  auto* header_row = new QHBoxLayout(header);
   header_row->setContentsMargins(0, 0, 0, 0);
   header_row->setSpacing(12);
-  auto *titles = new QVBoxLayout();
+  auto* titles = new QVBoxLayout();
   titles->setSpacing(2);
   title_ = new QLabel(header);
   title_->setObjectName(QStringLiteral("pagesTitle"));
@@ -47,7 +47,7 @@ void PagesView::BuildUi() {
     }
   });
   header_row->addWidget(refresh_);
-  auto *close = new QPushButton(QStringLiteral("Close"), header);
+  auto* close = new QPushButton(QStringLiteral("Close"), header);
   close->setObjectName(QStringLiteral("pagesClose"));
   connect(close, &QPushButton::clicked, this, [this]() {
     if (on_close) {
@@ -74,7 +74,7 @@ void PagesView::BuildUi() {
   root->addWidget(scroll_, 1);
 }
 
-void PagesView::SetTheme(const Theme &theme) {
+void PagesView::SetTheme(const Theme& theme) {
   theme_ = theme;
   setStyleSheet(
       QStringLiteral(
@@ -99,7 +99,7 @@ void PagesView::SetTheme(const Theme &theme) {
   update();
 }
 
-void PagesView::SetSnapshot(const ProfileSnapshot &snapshot) {
+void PagesView::SetSnapshot(const ProfileSnapshot& snapshot) {
   const bool changed = snapshot.revision != last_revision_;
   snapshot_ = snapshot;
   if (!changed || !isVisible() || page_.isEmpty()) {
@@ -108,7 +108,7 @@ void PagesView::SetSnapshot(const ProfileSnapshot &snapshot) {
   Rebuild();
 }
 
-void PagesView::OpenPage(const QString &id) {
+void PagesView::OpenPage(const QString& id) {
   page_ = id;
   title_->setText(TitleFor(id));
   subtitle_->setText(QStringLiteral("Workspace · %1").arg(snapshot_.label));
@@ -120,8 +120,8 @@ void PagesView::OpenPage(const QString &id) {
 }
 
 void PagesView::ClearBody() {
-  while (QLayoutItem *item = body_layout_->takeAt(0)) {
-    if (QWidget *widget = item->widget()) {
+  while (QLayoutItem* item = body_layout_->takeAt(0)) {
+    if (QWidget* widget = item->widget()) {
       widget->deleteLater();
     }
     delete item;
@@ -143,7 +143,7 @@ void PagesView::Rebuild() {
   context.theme = theme_;
   context.snapshot = &snapshot_;
   context.suppress_page_heading = true;
-  context.refresh = [this](const QString &page) {
+  context.refresh = [this](const QString& page) {
     if (on_page_request) {
       on_page_request(page);
     }
@@ -208,9 +208,9 @@ void PagesView::Rebuild() {
   context.get_pref = get_pref;
   context.set_pref = set_pref;
 
-  QWidget *content = BuildDataPage(page_, context, body_);
+  QWidget* content = BuildDataPage(page_, context, body_);
   if (content == nullptr) {
-    auto *label = new QLabel(
+    auto* label = new QLabel(
         QStringLiteral("This workspace page is not ported yet."), body_);
     label->setObjectName(QStringLiteral("settingDescription"));
     body_layout_->addWidget(label);
@@ -234,7 +234,7 @@ void PagesView::Rebuild() {
   }
 }
 
-QString PagesView::TitleFor(const QString &id) {
+QString PagesView::TitleFor(const QString& id) {
   if (id == QStringLiteral("capabilities")) {
     return QStringLiteral("Capabilities");
   }
@@ -264,15 +264,15 @@ QString PagesView::TitleFor(const QString &id) {
 
 bool PagesView::IsOpen() const { return isVisible(); }
 
-void PagesView::paintEvent(QPaintEvent *event) {
+void PagesView::paintEvent(QPaintEvent* event) {
   Q_UNUSED(event);
   QPainter painter(this);
   painter.fillRect(rect(), theme_.background);
 }
 
-void PagesView::resizeEvent(QResizeEvent *event) {
+void PagesView::resizeEvent(QResizeEvent* event) {
   QWidget::resizeEvent(event);
   scroll_->setGeometry(scroll_->geometry());
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

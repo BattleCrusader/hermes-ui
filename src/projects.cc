@@ -9,6 +9,8 @@
 #include <QJsonValue>
 #include <QSet>
 #include <algorithm>
+#include <utility>
+#include <vector>
 
 namespace hermes::ui {
 namespace {

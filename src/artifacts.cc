@@ -7,6 +7,9 @@
 #include <QSet>
 #include <QStringList>
 #include <algorithm>
+#include <cstddef>
+#include <utility>
+#include <vector>
 
 namespace hermes::ui {
 namespace {
@@ -185,8 +188,9 @@ void PruneRegistry(std::vector<ArtifactRecord>* records) {
       }
     }
     if (oldest_record != nullptr) {
-      oldest_record->versions.erase(oldest_record->versions.begin() +
-                                    static_cast<long>(oldest_version));
+      oldest_record->versions.erase(
+          oldest_record->versions.begin() +
+          static_cast<std::ptrdiff_t>(oldest_version));
       continue;
     }
     if (records->size() <= 1) {

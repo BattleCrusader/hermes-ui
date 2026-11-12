@@ -20,6 +20,6 @@ struct ClickTarget {
   bool modal = false;
 };
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_CLICK_TARGET_H_
+#endif  // HERMES_UI_CLICK_TARGET_H_

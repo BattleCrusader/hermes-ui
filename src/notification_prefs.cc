@@ -7,7 +7,7 @@
 namespace hermes::ui {
 namespace {
 
-bool PrefOn(const QString &key, bool fallback) {
+bool PrefOn(const QString& key, bool fallback) {
   const QString value = NativePref(key);
   if (value.isEmpty()) {
     return fallback;
@@ -15,70 +15,70 @@ bool PrefOn(const QString &key, bool fallback) {
   return value == QStringLiteral("1") || value == QStringLiteral("true");
 }
 
-} // namespace
+}  // namespace
 
 QString NotificationKindId(NotificationKind kind) {
   switch (kind) {
-  case NotificationKind::kApproval:
-    return QStringLiteral("approval");
-  case NotificationKind::kInput:
-    return QStringLiteral("input");
-  case NotificationKind::kTurnDone:
-    return QStringLiteral("turnDone");
-  case NotificationKind::kTurnError:
-    return QStringLiteral("turnError");
-  case NotificationKind::kBackgroundDone:
-    return QStringLiteral("backgroundDone");
-  case NotificationKind::kCredits:
-    return QStringLiteral("credits");
-  case NotificationKind::kPlugin:
-    return QStringLiteral("plugin");
+    case NotificationKind::kApproval:
+      return QStringLiteral("approval");
+    case NotificationKind::kInput:
+      return QStringLiteral("input");
+    case NotificationKind::kTurnDone:
+      return QStringLiteral("turnDone");
+    case NotificationKind::kTurnError:
+      return QStringLiteral("turnError");
+    case NotificationKind::kBackgroundDone:
+      return QStringLiteral("backgroundDone");
+    case NotificationKind::kCredits:
+      return QStringLiteral("credits");
+    case NotificationKind::kPlugin:
+      return QStringLiteral("plugin");
   }
   return QStringLiteral("turnDone");
 }
 
 QString NotificationKindLabel(NotificationKind kind) {
   switch (kind) {
-  case NotificationKind::kApproval:
-    return QStringLiteral("Approval requests");
-  case NotificationKind::kInput:
-    return QStringLiteral("Clarify and input requests");
-  case NotificationKind::kTurnDone:
-    return QStringLiteral("Turn finished");
-  case NotificationKind::kTurnError:
-    return QStringLiteral("Turn failed");
-  case NotificationKind::kBackgroundDone:
-    return QStringLiteral("Background work finished");
-  case NotificationKind::kCredits:
-    return QStringLiteral("Credits and billing");
-  case NotificationKind::kPlugin:
-    return QStringLiteral("Plugin events");
+    case NotificationKind::kApproval:
+      return QStringLiteral("Approval requests");
+    case NotificationKind::kInput:
+      return QStringLiteral("Clarify and input requests");
+    case NotificationKind::kTurnDone:
+      return QStringLiteral("Turn finished");
+    case NotificationKind::kTurnError:
+      return QStringLiteral("Turn failed");
+    case NotificationKind::kBackgroundDone:
+      return QStringLiteral("Background work finished");
+    case NotificationKind::kCredits:
+      return QStringLiteral("Credits and billing");
+    case NotificationKind::kPlugin:
+      return QStringLiteral("Plugin events");
   }
   return QString();
 }
 
 QString NotificationKindDescription(NotificationKind kind) {
   switch (kind) {
-  case NotificationKind::kApproval:
-    return QStringLiteral(
-        "Show the session name when an approval blocks another chat.");
-  case NotificationKind::kInput:
-    return QStringLiteral(
-        "Clarify, sudo and secret prompts that need an answer.");
-  case NotificationKind::kTurnDone:
-    return QStringLiteral(
-        "Only for the selected session, and only while Hermes is in the "
-        "background.");
-  case NotificationKind::kTurnError:
-    return QStringLiteral(
-        "A selected-session turn ended with an error while Hermes was in "
-        "the background.");
-  case NotificationKind::kBackgroundDone:
-    return QStringLiteral("Background research, cron or delegated work.");
-  case NotificationKind::kCredits:
-    return QStringLiteral("Low balance and automatic top-up events.");
-  case NotificationKind::kPlugin:
-    return QStringLiteral("Plugin and external-surface events.");
+    case NotificationKind::kApproval:
+      return QStringLiteral(
+          "Show the session name when an approval blocks another chat.");
+    case NotificationKind::kInput:
+      return QStringLiteral(
+          "Clarify, sudo and secret prompts that need an answer.");
+    case NotificationKind::kTurnDone:
+      return QStringLiteral(
+          "Only for the selected session, and only while Hermes is in the "
+          "background.");
+    case NotificationKind::kTurnError:
+      return QStringLiteral(
+          "A selected-session turn ended with an error while Hermes was in "
+          "the background.");
+    case NotificationKind::kBackgroundDone:
+      return QStringLiteral("Background research, cron or delegated work.");
+    case NotificationKind::kCredits:
+      return QStringLiteral("Low balance and automatic top-up events.");
+    case NotificationKind::kPlugin:
+      return QStringLiteral("Plugin and external-surface events.");
   }
   return QString();
 }
@@ -113,7 +113,7 @@ NotificationPrefs LoadNotificationPrefs() {
   return prefs;
 }
 
-bool NotificationThrottle::Allow(const QString &key, qint64 now_ms) {
+bool NotificationThrottle::Allow(const QString& key, qint64 now_ms) {
   constexpr qint64 kWindowMs = 1000;
   for (auto it = last_fired_.begin(); it != last_fired_.end();) {
     if (now_ms - it.value() >= kWindowMs || now_ms < it.value()) {
@@ -130,7 +130,7 @@ bool NotificationThrottle::Allow(const QString &key, qint64 now_ms) {
 }
 
 bool ShouldDeliverNotification(NotificationKind kind,
-                               const NotificationPrefs &prefs,
+                               const NotificationPrefs& prefs,
                                bool backgrounded, bool session_is_active,
                                bool global) {
   if (!prefs.enabled || !prefs.kinds[NotificationKindIndex(kind)]) {
@@ -145,4 +145,4 @@ bool ShouldDeliverNotification(NotificationKind kind,
   return backgrounded && session_is_active;
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

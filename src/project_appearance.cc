@@ -12,6 +12,7 @@
 #include <QVBoxLayout>
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace hermes::ui {
 namespace {

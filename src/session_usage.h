@@ -12,9 +12,9 @@ namespace hermes::ui {
 // Merge one session.usage payload into `usage`. Two shapes travel this event:
 // the embedded ticker's nested `usage` view and the older top-level counters.
 // The nested view wins field by field; absent fields keep their prior values.
-SessionUsage MergeSessionUsage(const SessionUsage &usage,
-                               const QJsonObject &payload);
+SessionUsage MergeSessionUsage(const SessionUsage& usage,
+                               const QJsonObject& payload);
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_SESSION_USAGE_H_
+#endif  // HERMES_UI_SESSION_USAGE_H_

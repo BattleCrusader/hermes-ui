@@ -39,6 +39,7 @@
 #include <QVBoxLayout>
 #include <algorithm>
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "src/flow_layout.h"

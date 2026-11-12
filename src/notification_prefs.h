@@ -53,7 +53,7 @@ NotificationPrefs LoadNotificationPrefs();
 // Global notifications (credits/plugin work) have no session and only need the
 // window to be backgrounded.
 bool ShouldDeliverNotification(NotificationKind kind,
-                               const NotificationPrefs &prefs,
+                               const NotificationPrefs& prefs,
                                bool backgrounded, bool session_is_active,
                                bool global);
 
@@ -61,13 +61,13 @@ bool ShouldDeliverNotification(NotificationKind kind,
 // replayed gateway events cannot stack duplicate OS alerts. Entries older than
 // the window are pruned on every check, keeping the map bounded.
 class NotificationThrottle {
-public:
-  bool Allow(const QString &key, qint64 now_ms);
+ public:
+  bool Allow(const QString& key, qint64 now_ms);
 
-private:
+ private:
   QHash<QString, qint64> last_fired_;
 };
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_NOTIFICATION_PREFS_H_
+#endif  // HERMES_UI_NOTIFICATION_PREFS_H_

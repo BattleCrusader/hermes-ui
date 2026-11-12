@@ -20,7 +20,7 @@ enum class SubagentStatus {
 
 struct SubagentStreamEntry {
   qint64 at_ms = 0;
-  QString kind; // progress, tool, thinking, summary
+  QString kind;  // progress, tool, thinking, summary
   QString text;
   bool error = false;
 };
@@ -52,20 +52,20 @@ struct SubagentProgress {
 
 // Applies one subagent.* event to the profile's live roster. The reducer is
 // pure so worker tests can replay payloads without a gateway connection.
-void ApplySubagentEvent(std::vector<SubagentProgress> *rows,
-                        const QString &event_type, const QString &session_id,
-                        const QJsonObject &payload, qint64 now_ms);
+void ApplySubagentEvent(std::vector<SubagentProgress>* rows,
+                        const QString& event_type, const QString& session_id,
+                        const QJsonObject& payload, qint64 now_ms);
 
 bool SubagentIsTerminal(SubagentStatus status);
 QString SubagentStatusText(SubagentStatus status);
 // Flat depth-first order with children after their parent.
-std::vector<const SubagentProgress *>
-BuildSubagentTree(const std::vector<SubagentProgress> &rows);
-int SubagentDepth(const QString &id, const std::vector<SubagentProgress> &rows);
+std::vector<const SubagentProgress*> BuildSubagentTree(
+    const std::vector<SubagentProgress>& rows);
+int SubagentDepth(const QString& id, const std::vector<SubagentProgress>& rows);
 QString FormatSubagentDuration(double seconds);
 QString FormatSubagentTokens(qint64 tokens);
 QString FormatSubagentAge(qint64 updated_at_ms, qint64 now_ms);
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_SUBAGENTS_H_
+#endif  // HERMES_UI_SUBAGENTS_H_

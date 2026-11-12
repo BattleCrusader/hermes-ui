@@ -22,21 +22,21 @@ namespace hermes::ui {
 class PetOverlay : public QWidget {
   Q_OBJECT
 
-public:
-  explicit PetOverlay(const Theme &theme, QWidget *parent = nullptr);
+ public:
+  explicit PetOverlay(const Theme& theme, QWidget* parent = nullptr);
   ~PetOverlay() override;
 
-  void SetTheme(const Theme &theme);
+  void SetTheme(const Theme& theme);
   // Async decode: the multi-megabyte sheet never blocks the UI thread.
-  void SetSpritePayload(const QJsonObject &payload);
-  void SetSprite(const PetSpriteInfo &sprite);
-  void SetState(const QString &state);
-  void SetStatus(const QString &status);
+  void SetSpritePayload(const QJsonObject& payload);
+  void SetSprite(const PetSpriteInfo& sprite);
+  void SetState(const QString& state);
+  void SetStatus(const QString& status);
   bool HasSprite() const;
   QString Revision() const;
   QSize PreferredSize() const;
 
-  void SetSubmitHandler(std::function<void(const QString &)> handler);
+  void SetSubmitHandler(std::function<void(const QString&)> handler);
   void SetQuickEntryHandler(std::function<void()> handler);
   void SetHideHandler(std::function<void()> handler);
 
@@ -45,16 +45,16 @@ public:
   int FrameForTest() const;
   QString StateForTest() const;
 
-protected:
-  void paintEvent(QPaintEvent *event) override;
-  void mousePressEvent(QMouseEvent *event) override;
-  void mouseMoveEvent(QMouseEvent *event) override;
-  void mouseReleaseEvent(QMouseEvent *event) override;
-  void mouseDoubleClickEvent(QMouseEvent *event) override;
-  void contextMenuEvent(QContextMenuEvent *event) override;
-  void moveEvent(QMoveEvent *event) override;
+ protected:
+  void paintEvent(QPaintEvent* event) override;
+  void mousePressEvent(QMouseEvent* event) override;
+  void mouseMoveEvent(QMouseEvent* event) override;
+  void mouseReleaseEvent(QMouseEvent* event) override;
+  void mouseDoubleClickEvent(QMouseEvent* event) override;
+  void contextMenuEvent(QContextMenuEvent* event) override;
+  void moveEvent(QMoveEvent* event) override;
 
-private:
+ private:
   void RestartAnimation();
   void AdvanceFrame();
   void UpdateMask();
@@ -72,12 +72,12 @@ private:
   quint64 decode_token_ = 0;
   bool dragging_ = false;
   QPoint drag_offset_;
-  QTimer *timer_ = nullptr;
-  std::function<void(const QString &)> submit_handler_;
+  QTimer* timer_ = nullptr;
+  std::function<void(const QString&)> submit_handler_;
   std::function<void()> quick_entry_handler_;
   std::function<void()> hide_handler_;
 };
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_SRC_PET_OVERLAY_H_
+#endif  // HERMES_UI_SRC_PET_OVERLAY_H_

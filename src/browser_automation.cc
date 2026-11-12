@@ -26,7 +26,9 @@
 #include <QVBoxLayout>
 #include <QWebSocket>
 #include <algorithm>
+#include <memory>
 #include <utility>
+#include <vector>
 
 namespace hermes::ui {
 namespace {

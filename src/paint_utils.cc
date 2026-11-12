@@ -9,8 +9,8 @@
 
 namespace hermes::ui {
 
-void FillRounded(QPainter &painter, const QRectF &rect, qreal radius,
-                 const QColor &color) {
+void FillRounded(QPainter& painter, const QRectF& rect, qreal radius,
+                 const QColor& color) {
   painter.save();
   painter.setPen(Qt::NoPen);
   painter.setBrush(color);
@@ -18,8 +18,8 @@ void FillRounded(QPainter &painter, const QRectF &rect, qreal radius,
   painter.restore();
 }
 
-void StrokeRounded(QPainter &painter, const QRectF &rect, qreal radius,
-                   const QColor &color, qreal width) {
+void StrokeRounded(QPainter& painter, const QRectF& rect, qreal radius,
+                   const QColor& color, qreal width) {
   painter.save();
   painter.setBrush(Qt::NoBrush);
   QPen pen(color);
@@ -31,8 +31,8 @@ void StrokeRounded(QPainter &painter, const QRectF &rect, qreal radius,
   painter.restore();
 }
 
-void DrawCodicon(QPainter &painter, const QRectF &box, ushort codepoint,
-                 const QColor &color, int pixel_size) {
+void DrawCodicon(QPainter& painter, const QRectF& box, ushort codepoint,
+                 const QColor& color, int pixel_size) {
   QFont font(QStringLiteral("codicon"));
   font.setPixelSize(pixel_size);
   painter.save();
@@ -42,9 +42,9 @@ void DrawCodicon(QPainter &painter, const QRectF &box, ushort codepoint,
   painter.restore();
 }
 
-void DrawElidedText(QPainter &painter, const QRectF &rect, int flags,
-                    const QString &text, const QColor &color,
-                    const QFont &font) {
+void DrawElidedText(QPainter& painter, const QRectF& rect, int flags,
+                    const QString& text, const QColor& color,
+                    const QFont& font) {
   painter.save();
   painter.setFont(font);
   painter.setPen(color);
@@ -55,7 +55,7 @@ void DrawElidedText(QPainter &painter, const QRectF &rect, int flags,
   painter.restore();
 }
 
-void DrawSoftShadow(QPainter &painter, const QRectF &rect, qreal radius,
+void DrawSoftShadow(QPainter& painter, const QRectF& rect, qreal radius,
                     int alpha, int spread) {
   painter.save();
   painter.setPen(Qt::NoPen);
@@ -70,4 +70,4 @@ void DrawSoftShadow(QPainter &painter, const QRectF &rect, qreal radius,
   painter.restore();
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

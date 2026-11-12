@@ -11,7 +11,7 @@
 namespace hermes::ui {
 namespace {
 
-const QStringList &DefaultRows() {
+const QStringList& DefaultRows() {
   static const QStringList rows = {
       QStringLiteral("idle"),         QStringLiteral("running-right"),
       QStringLiteral("running-left"), QStringLiteral("waving"),
@@ -21,7 +21,7 @@ const QStringList &DefaultRows() {
   return rows;
 }
 
-QString CanonicalState(const QString &state) {
+QString CanonicalState(const QString& state) {
   const QString s = state.toLower();
   if (s == QStringLiteral("wave") || s == QStringLiteral("waving")) {
     return QStringLiteral("waving");
@@ -46,7 +46,7 @@ QString CanonicalState(const QString &state) {
   return QStringLiteral("idle");
 }
 
-int StateFrameFallback(const PetSpriteInfo &info, const QString &state) {
+int StateFrameFallback(const PetSpriteInfo& info, const QString& state) {
   const QString canonical = CanonicalState(state);
   const int direct = info.frames_by_state.value(canonical, 0);
   if (direct > 0) {
@@ -56,7 +56,7 @@ int StateFrameFallback(const PetSpriteInfo &info, const QString &state) {
   return raw > 0 ? raw : 0;
 }
 
-} // namespace
+}  // namespace
 
 bool PetSpriteInfo::HasSheet() const {
   return enabled && !sheet.isNull() && frame_w > 0 && frame_h > 0;
@@ -76,7 +76,7 @@ QSize PetSpriteInfo::WindowSize() const {
                std::max(260, draw.height() + 116));
 }
 
-QString PetSpriteInfo::RowNameForState(const QString &state) const {
+QString PetSpriteInfo::RowNameForState(const QString& state) const {
   const QString canonical = CanonicalState(state);
   const QStringList rows = state_rows.isEmpty() ? DefaultRows() : state_rows;
   const QStringList aliases =
@@ -89,7 +89,7 @@ QString PetSpriteInfo::RowNameForState(const QString &state) const {
                         QStringLiteral("running-left"),
                         QStringLiteral("running-right")}
           : QStringList{canonical};
-  for (const QString &alias : aliases) {
+  for (const QString& alias : aliases) {
     if (rows.contains(alias)) {
       return alias;
     }
@@ -97,7 +97,7 @@ QString PetSpriteInfo::RowNameForState(const QString &state) const {
   return rows.value(0, QStringLiteral("idle"));
 }
 
-int PetSpriteInfo::RowForState(const QString &state) const {
+int PetSpriteInfo::RowForState(const QString& state) const {
   const QStringList rows = state_rows.isEmpty() ? DefaultRows() : state_rows;
   const int index = rows.indexOf(RowNameForState(state));
   return index < 0 ? 0 : index;
@@ -124,7 +124,7 @@ int PetSpriteInfo::FrameCountForRow(int row) const {
   return std::max(1, frames_per_state);
 }
 
-int PetSpriteInfo::FrameCountForState(const QString &state) const {
+int PetSpriteInfo::FrameCountForState(const QString& state) const {
   const int frames = StateFrameFallback(*this, state);
   if (frames > 0) {
     return frames;
@@ -133,8 +133,8 @@ int PetSpriteInfo::FrameCountForState(const QString &state) const {
   return idle > 0 ? idle : std::max(1, frames_per_state);
 }
 
-bool DecodePetSprite(const QJsonObject &payload, PetSpriteInfo *info,
-                     QString *error) {
+bool DecodePetSprite(const QJsonObject& payload, PetSpriteInfo* info,
+                     QString* error) {
   if (info == nullptr) {
     if (error != nullptr) {
       *error = QStringLiteral("No pet sprite target");
@@ -164,7 +164,7 @@ bool DecodePetSprite(const QJsonObject &payload, PetSpriteInfo *info,
     info->scale = 0.33;
   }
   const QJsonArray rows = payload.value(QStringLiteral("stateRows")).toArray();
-  for (const QJsonValue &row : rows) {
+  for (const QJsonValue& row : rows) {
     if (row.isString() && !row.toString().isEmpty()) {
       info->state_rows.push_back(row.toString());
     }
@@ -206,4 +206,4 @@ bool DecodePetSprite(const QJsonObject &payload, PetSpriteInfo *info,
   return true;
 }
 
-} // namespace hermes::ui
+}  // namespace hermes::ui

@@ -14,20 +14,20 @@ namespace hermes::ui {
 // without requiring a bundle proxy; other platforms use a tray balloon. The
 // shell owns the policy; this class only delivers or reports why it could not.
 class NotificationService {
-public:
-  explicit NotificationService(QObject *parent = nullptr);
+ public:
+  explicit NotificationService(QObject* parent = nullptr);
   ~NotificationService();
 
-  NotificationService(const NotificationService &) = delete;
-  NotificationService &operator=(const NotificationService &) = delete;
+  NotificationService(const NotificationService&) = delete;
+  NotificationService& operator=(const NotificationService&) = delete;
 
-  bool Show(const QString &title, const QString &body, bool silent,
-            QString *error);
+  bool Show(const QString& title, const QString& body, bool silent,
+            QString* error);
 
-private:
-  QSystemTrayIcon *tray_ = nullptr;
+ private:
+  QSystemTrayIcon* tray_ = nullptr;
 };
 
-} // namespace hermes::ui
+}  // namespace hermes::ui
 
-#endif // HERMES_UI_NOTIFICATION_SERVICE_H_
+#endif  // HERMES_UI_NOTIFICATION_SERVICE_H_

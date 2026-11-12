@@ -12,6 +12,7 @@
 #include <QPointer>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <utility>
 
 #include "src/search_completion.h"
 
