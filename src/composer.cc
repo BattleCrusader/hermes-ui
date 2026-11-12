@@ -52,6 +52,14 @@ constexpr int kEditorHeight = 40;
 constexpr int kComposerHeight = 116;
 constexpr int kStatusLineHeight = 18;
 
+QString CssColor(const QColor& color) {
+  return QStringLiteral("rgba(%1,%2,%3,%4)")
+      .arg(color.red())
+      .arg(color.green())
+      .arg(color.blue())
+      .arg(color.alpha());
+}
+
 }  // namespace
 
 Composer::Composer(const Theme& theme, QWidget* parent)
@@ -152,24 +160,68 @@ QDialog* Composer::BuildModelVisibilityDialog() {
   dialog->setObjectName(QStringLiteral("modelVisibilityDialog"));
   dialog->setWindowTitle(QStringLiteral("Visible models"));
   dialog->setMinimumWidth(380);
+  // A QScrollArea viewport paints QPalette::Base, which defaults to the light
+  // platform palette even when QDialog is dark. Set both the palette and the
+  // stylesheet so a dark theme cannot produce light checkbox text on a white
+  // scrolling surface.
+  QPalette dialog_palette = dialog->palette();
+  dialog_palette.setColor(QPalette::Window, theme_.surface);
+  dialog_palette.setColor(QPalette::Base, theme_.surface);
+  dialog_palette.setColor(QPalette::WindowText, theme_.foreground);
+  dialog_palette.setColor(QPalette::Text, theme_.foreground);
+  dialog->setPalette(dialog_palette);
   dialog->setStyleSheet(
-      QStringLiteral("QDialog { background: %1; color: %2; }")
-          .arg(theme_.surface.name(), theme_.foreground.name()));
+      QStringLiteral(
+          "QDialog#modelVisibilityDialog { background: %1; color: %2; }"
+          "QScrollArea#modelVisibilityScroll { background: %1; border: none; }"
+          "QScrollArea#modelVisibilityScroll > QWidget > QWidget { "
+          "background: %1; }"
+          "QWidget#modelVisibilityContent { background: %1; }"
+          "QLabel { color: %2; }"
+          "QLabel#modelVisibilityHint { color: %3; }"
+          "QCheckBox { color: %2; spacing: 8px; }"
+          "QCheckBox::indicator { width: 16px; height: 16px; "
+          "border: 1px solid %5; border-radius: 4px; background: %4; }"
+          "QCheckBox::indicator:hover { border-color: %7; }"
+          "QCheckBox::indicator:checked { background: %7; border-color: %7; "
+          "image: url(:/check.svg); }"
+          "QPushButton { background: %4; color: %2; border: 1px solid %5; "
+          "border-radius: 8px; padding: 6px 12px; }"
+          "QPushButton:hover { background: %6; }"
+          "QPushButton#modelVisibilitySave { background: %7; color: white; "
+          "border-color: %7; }")
+          .arg(theme_.surface.name(), theme_.foreground.name(),
+               theme_.text_secondary.name(), theme_.surface_raised.name(),
+               CssColor(theme_.stroke), CssColor(theme_.hover),
+               theme_.accent.name()));
   auto* root = new QVBoxLayout(dialog);
   auto* hint = new QLabel(
       QStringLiteral("Unchecked models stay in the catalog but disappear from "
                      "the composer picker."),
       dialog);
+  hint->setObjectName(QStringLiteral("modelVisibilityHint"));
   hint->setWordWrap(true);
-  hint->setStyleSheet(
-      QStringLiteral("color: %1;").arg(theme_.text_secondary.name()));
   root->addWidget(hint);
 
   auto* scroll = new QScrollArea(dialog);
+  scroll->setObjectName(QStringLiteral("modelVisibilityScroll"));
   scroll->setWidgetResizable(true);
   scroll->setFrameShape(QFrame::NoFrame);
   scroll->setMaximumHeight(360);
+  QPalette scroll_palette = scroll->palette();
+  scroll_palette.setColor(QPalette::Window, theme_.surface);
+  scroll_palette.setColor(QPalette::Base, theme_.surface);
+  scroll_palette.setColor(QPalette::WindowText, theme_.foreground);
+  scroll_palette.setColor(QPalette::Text, theme_.foreground);
+  scroll->setPalette(scroll_palette);
+  scroll->viewport()->setPalette(scroll_palette);
   auto* content = new QWidget(scroll);
+  content->setObjectName(QStringLiteral("modelVisibilityContent"));
+  content->setAutoFillBackground(true);
+  QPalette content_palette = content->palette();
+  content_palette.setColor(QPalette::Window, theme_.surface);
+  content_palette.setColor(QPalette::WindowText, theme_.foreground);
+  content->setPalette(content_palette);
   auto* form = new QVBoxLayout(content);
   form->setContentsMargins(0, 0, 0, 0);
   form->setSpacing(4);

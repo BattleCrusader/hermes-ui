@@ -2055,6 +2055,30 @@ void PreferencesTest::modelVisibilityFiltersPickerAndPersists() {
               QSet<QString>{QStringLiteral("b/2"), QStringLiteral("a/1")}) ==
           QStringLiteral("a/1\nb/2"));
   dialog->deleteLater();
+
+  // A QScrollArea viewport defaults to QPalette::Base, not the dialog's
+  // window colour. Without an explicit dark Base the checkbox labels (light
+  // theme foreground) rendered on a white strip and became unreadable.
+  hermes::ui::Theme dark = hermes::ui::Theme::Dark();
+  hermes::ui::Composer dark_composer(dark);
+  dark_composer.SetModelCatalog({first, second}, QStringLiteral("p1"),
+                                QStringLiteral("m1"));
+  QDialog* dark_dialog = dark_composer.ShowModelVisibilityDialogForTest();
+  QVERIFY(dark_dialog != nullptr);
+  dark_dialog->show();
+  auto* dark_scroll = dark_dialog->findChild<QScrollArea*>(
+      QStringLiteral("modelVisibilityScroll"));
+  auto* dark_content = dark_dialog->findChild<QWidget*>(
+      QStringLiteral("modelVisibilityContent"));
+  QVERIFY(dark_scroll != nullptr);
+  QVERIFY(dark_content != nullptr);
+  QCOMPARE(dark_dialog->palette().color(QPalette::Window), dark.surface);
+  QCOMPARE(dark_scroll->viewport()->palette().color(QPalette::Base),
+           dark.surface);
+  QCOMPARE(dark_content->palette().color(QPalette::Window), dark.surface);
+  QVERIFY(dark_dialog->styleSheet().contains(dark.surface.name()));
+  QVERIFY(dark_dialog->styleSheet().contains(dark.foreground.name()));
+  dark_dialog->deleteLater();
 }
 
 void PreferencesTest::projectsParseListTreeAndMutators() {

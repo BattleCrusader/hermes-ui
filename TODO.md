@@ -38,6 +38,27 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-13 (seventieth pass)
+
+**The Visible models dialog now themes its scrolling surface.**
+
+- [x] **White viewport in dark mode.** The dialog styled `QDialog` but left its
+  `QScrollArea` viewport on `QPalette::Base`, which still resolved to the light
+  platform base. Light checkbox labels therefore sat on a near-white strip.
+- [x] **Explicit palette and stylesheet.** The dialog, scroll area, viewport and
+  content widget all set `Window`/`Base` to `theme.surface`; the dialog QSS
+  paints the scroll area, content, labels, checkboxes, indicators and buttons.
+  The Save button uses the accent fill with white text.
+- [x] **Self-contained control styling.** Checkbox indicators and buttons no
+  longer depend on the application stylesheet, so the dialog remains readable
+  even when built standalone in tests or another shell.
+- [x] **Regression coverage.** The model-visibility test now builds a dark
+  dialog and asserts the dialog/content `Window` and scroll viewport `Base`
+  colors equal `Theme::Dark().surface`, plus surface/foreground QSS values.
+- [x] Dark-theme screenshot OCR reads every provider, model, and button; the
+  dialog is uniformly dark instead of a dark frame around a white list.
+- [x] Full native suite: **9/9 passed** in 28.20 s.
+
 ## Status update — 2026-11-13 (sixty-ninth pass)
 
 **Transcript selection now paints every wrapped visual line.**
