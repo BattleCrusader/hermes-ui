@@ -339,6 +339,57 @@ QString ArtifactsWorkingDirectory(const ProjectsState& state,
   return project_path.isEmpty() ? QDir::homePath() : project_path;
 }
 
+bool ProjectTreeContainsSession(const std::vector<ProjectNode>& tree,
+                                const QString& session_id) {
+  if (session_id.isEmpty()) {
+    return false;
+  }
+  for (const ProjectNode& node : tree) {
+    if (!node.is_no_project && node.session_ids.contains(session_id)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+ProjectEntryDecision ResolveProjectEntry(const ProjectsState& state,
+                                         const QString& project_id,
+                                         const QStringList& sessions_by_recency,
+                                         const QString& current_session_id,
+                                         const QString& current_project_id) {
+  ProjectEntryDecision decision;
+  if (project_id.isEmpty() || project_id == AllProjectsId()) {
+    return decision;
+  }
+  const auto node = std::find_if(
+      state.tree.begin(), state.tree.end(),
+      [&project_id](const ProjectNode& row) { return row.id == project_id; });
+  if (node == state.tree.end()) {
+    return decision;
+  }
+  if (node->session_ids.contains(current_session_id) ||
+      (!current_session_id.isEmpty() && current_project_id == project_id &&
+       !ProjectTreeContainsSession(state.tree, current_session_id))) {
+    return decision;
+  }
+  for (const QString& id : sessions_by_recency) {
+    if (node->session_ids.contains(id)) {
+      decision.action = ProjectEntryAction::kSelectSession;
+      decision.session_id = id;
+      return decision;
+    }
+  }
+  if (!node->session_ids.isEmpty()) {
+    decision.action = ProjectEntryAction::kSelectSession;
+    decision.session_id = node->session_ids.first();
+    return decision;
+  }
+  if (node->session_count <= 0) {
+    decision.action = ProjectEntryAction::kStartSession;
+  }
+  return decision;
+}
+
 namespace {
 
 QString RepoPathKey(const QString& path) {

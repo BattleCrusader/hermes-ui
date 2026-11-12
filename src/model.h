@@ -126,6 +126,11 @@ struct SessionSummary {
   QString title;
   QString preview;
   QString source;
+  // Project that requested a local `session.create`. The gateway writes the
+  // session row (and `projects.tree` membership) asynchronously, so this lets
+  // the sidebar keep a fresh new chat under the project that started it
+  // without treating every selected local chat as a member of every project.
+  QString project_id;
   QString model;
   QString provider;
   // Empty when the gateway list does not carry it yet. The cache and live

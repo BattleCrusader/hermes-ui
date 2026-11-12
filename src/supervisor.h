@@ -51,7 +51,8 @@ class Supervisor {
                                  const QStringList& attachments);
   void SendPromptAt(int index, const QString& text, qint64 truncate_row_id,
                     bool confirm_empty_truncate, bool confirm_deep_truncate);
-  void NewSession(int index, const QString& cwd = QString());
+  void NewSession(int index, const QString& cwd = QString(),
+                  const QString& project_id = QString());
   void Interrupt(int index);
   void RespondRequest(int index, const QString& request_id,
                       const QJsonObject& result);

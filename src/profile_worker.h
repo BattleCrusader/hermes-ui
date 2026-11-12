@@ -72,8 +72,11 @@ class ProfileWorker : public QObject {
                                    const QStringList& attachments);
   void NewSession();
   // Project-scoped new chat: `session.create` carries cwd/cwd_explicit so the
-  // gateway starts the session in the project's primary folder.
-  void NewSessionInDir(const QString& cwd);
+  // gateway starts the session in the project's primary folder. `project_id`
+  // tags the local placeholder so the sidebar can keep it under the project
+  // that started it before `projects.tree` reports the row.
+  void NewSessionInDir(const QString& cwd,
+                       const QString& project_id = QString());
   void Interrupt();
   void Refresh();
   void AttachIfForeground();
@@ -237,6 +240,7 @@ class ProfileWorker : public QObject {
   QString attached_session_id_;
   QString runtime_session_id_;
   int pending_create_id_ = -1;
+  QString pending_create_project_id_;
   int pending_catalog_id_ = -1;
   bool catalog_requested_ = false;
   // Execution identity of the turn currently claimed on this session; the
@@ -276,6 +280,7 @@ class ProfileWorker : public QObject {
   bool cache_dirty_ = false;
   bool pending_new_session_ = false;
   QString pending_new_session_cwd_;
+  QString pending_new_session_project_id_;
   bool models_loaded_ = false;
   bool settings_requested_ = false;
   // Bytes the spot editor was seeded with, so a save can detect an

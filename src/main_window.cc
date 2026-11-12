@@ -2118,7 +2118,10 @@ QString MainWindow::NewSessionCwd() const {
 }
 
 void MainWindow::NewSession() {
-  supervisor_.NewSession(supervisor_.active_index(), NewSessionCwd());
+  const QString project_id =
+      project_scope_ == AllProjectsId() ? QString() : project_scope_;
+  supervisor_.NewSession(supervisor_.active_index(), NewSessionCwd(),
+                         project_id);
   ClearPinnedContext();
 }
 
@@ -2868,7 +2871,9 @@ void MainWindow::SubmitQuickEntry(const QString& text) {
   }
   // The desktop quick window has no gateway connection of its own; it hands
   // the prompt to the primary shell, which uses the normal new-chat path.
-  supervisor_.NewSession(active, NewSessionCwd());
+  const QString project_id =
+      project_scope_ == AllProjectsId() ? QString() : project_scope_;
+  supervisor_.NewSession(active, NewSessionCwd(), project_id);
   supervisor_.SendPrompt(active, text.trimmed());
   status_bar_->ShowTransient(QStringLiteral("Quick entry started a new chat"));
 }
@@ -4123,10 +4128,15 @@ void MainWindow::PersistProjectCacheNow() {
       [](const BackgroundResult&) {});
 }
 
-void MainWindow::SetProjectScope(const QString& project_id) {
-  project_scope_ = project_id.isEmpty() ? AllProjectsId() : project_id;
+void MainWindow::SetProjectScope(const QString& project_id,
+                                 bool ensure_session) {
+  const QString next_scope =
+      project_id.isEmpty() ? AllProjectsId() : project_id;
+  const bool scope_changed = next_scope != project_scope_;
+  project_scope_ = next_scope;
   ApplyProjectState();
   if (project_scope_ == AllProjectsId()) {
+    pending_auto_project_session_.clear();
     return;
   }
   // Only explicit, persisted projects become the profile's durable active
@@ -4138,6 +4148,54 @@ void MainWindow::SetProjectScope(const QString& project_id) {
       !node->is_no_project) {
     SetActiveProject(project_scope_);
   }
+  if (ensure_session && scope_changed) {
+    EnsureSessionForProjectScope();
+  }
+}
+
+void MainWindow::EnsureSessionForProjectScope() {
+  if (project_scope_.isEmpty() || project_scope_ == AllProjectsId()) {
+    return;
+  }
+  const auto snapshot = supervisor_.ActiveSnapshot();
+  if (!snapshot) {
+    return;
+  }
+
+  const QString current = snapshot->selected_session_id;
+  QString current_project_id;
+  QStringList recency;
+  recency.reserve(static_cast<int>(snapshot->sessions.size()));
+  for (const SessionSummary& session : snapshot->sessions) {
+    if (session.id == current) {
+      current_project_id = session.project_id;
+    }
+    if (!session.archived) {
+      recency.push_back(session.id);
+    }
+  }
+
+  const ProjectEntryDecision decision = ResolveProjectEntry(
+      project_state_, project_scope_, recency, current, current_project_id);
+  if (decision.action == ProjectEntryAction::kSelectSession) {
+    supervisor_.SelectSession(supervisor_.active_index(), decision.session_id);
+    ClearPinnedContext();
+    pending_auto_project_session_.clear();
+    return;
+  }
+  if (decision.action != ProjectEntryAction::kStartSession) {
+    pending_auto_project_session_.clear();
+    return;
+  }
+
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  if (pending_auto_project_session_ == project_scope_ &&
+      now - pending_auto_project_session_ms_ < 5000) {
+    return;
+  }
+  pending_auto_project_session_ = project_scope_;
+  pending_auto_project_session_ms_ = now;
+  NewSession();
 }
 
 void MainWindow::SetActiveProject(const QString& project_id) {
@@ -4417,7 +4475,9 @@ void MainWindow::HandleProjectAction(const QString& project_id,
     return;
   }
   if (action == QStringLiteral("new")) {
-    SetProjectScope(project_id);
+    // The user explicitly asked for a fresh chat; do not let project entry
+    // auto-select an existing conversation or mint an extra blank one.
+    SetProjectScope(project_id, false);
     NewSession();
     return;
   }

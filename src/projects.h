@@ -117,6 +117,38 @@ QStringList DecodeDismissedAutoProjectIds(const QString& encoded);
 QString ProjectWorkingDirectory(const ProjectsState& state,
                                 const QString& project_id);
 
+// True when the fetched project tree assigns this session to a real project.
+// The synthetic Home bucket also lists unclaimed sessions, so it cannot
+// invalidate a local `session.create` project tag; otherwise a fresh chat would
+// vanish from its project until the backend finished claiming it.
+bool ProjectTreeContainsSession(const std::vector<ProjectNode>& tree,
+                                const QString& session_id);
+
+// What entering a project should do to the active conversation.
+enum class ProjectEntryAction {
+  kKeepCurrent,
+  kSelectSession,
+  kStartSession,
+};
+
+struct ProjectEntryDecision {
+  ProjectEntryAction action = ProjectEntryAction::kKeepCurrent;
+  QString session_id;
+};
+
+// Decide how project entry should change the active conversation. The current
+// session stays when the project already owns it (including a local placeholder
+// tagged with `current_project_id`). Otherwise the first matching row in
+// `sessions_by_recency` is selected, then the tree's own id order. A project
+// with no known sessions asks the caller to start a fresh chat; a tree row that
+// claims history but publishes no ids keeps the current chat rather than
+// inventing a replacement.
+ProjectEntryDecision ResolveProjectEntry(const ProjectsState& state,
+                                         const QString& project_id,
+                                         const QStringList& sessions_by_recency,
+                                         const QString& current_session_id,
+                                         const QString& current_project_id);
+
 // Default folder for the workspace file browser: the active project's
 // working directory, or the user's home when no project is selected.
 QString ArtifactsWorkingDirectory(const ProjectsState& state,

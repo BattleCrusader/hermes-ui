@@ -204,8 +204,9 @@ bool SessionsEqual(const std::vector<SessionSummary>& left,
     const SessionSummary& a = left[index];
     const SessionSummary& b = right[index];
     if (a.id != b.id || a.title != b.title || a.preview != b.preview ||
-        a.source != b.source || a.model != b.model ||
-        a.provider != b.provider || a.reasoning_effort != b.reasoning_effort ||
+        a.source != b.source || a.project_id != b.project_id ||
+        a.model != b.model || a.provider != b.provider ||
+        a.reasoning_effort != b.reasoning_effort ||
         a.started_at_secs != b.started_at_secs ||
         a.last_active_secs != b.last_active_secs ||
         a.message_count != b.message_count || a.pinned != b.pinned ||
@@ -630,19 +631,23 @@ void ProfileWorker::SendPromptInternal(const QString& text,
 
 void ProfileWorker::NewSession() { NewSessionInDir(QString()); }
 
-void ProfileWorker::NewSessionInDir(const QString& cwd) {
+void ProfileWorker::NewSessionInDir(const QString& cwd,
+                                    const QString& project_id) {
   if (socket_ == nullptr || !socket_->IsConnected()) {
     // A New chat pressed while the socket is still dialing waits for the
     // connection instead of failing the gesture.
     pending_new_session_ = true;
     pending_new_session_cwd_ = cwd;
+    pending_new_session_project_id_ = project_id;
     std::lock_guard<std::mutex> lock(mutex_);
     state_.status_text = QStringLiteral("waiting for gateway");
     PublishLocked();
     return;
   }
+  pending_create_project_id_ = project_id;
   pending_create_id_ = socket_->CreateSession(QString(), cwd);
   if (pending_create_id_ < 0) {
+    pending_create_project_id_.clear();
     PublishError(QStringLiteral("Could not request a new session"));
     pending_prompt_.clear();
     return;
@@ -810,6 +815,9 @@ void ProfileWorker::FetchSessions() {
       }
       if (session.reasoning_effort.isEmpty()) {
         session.reasoning_effort = previous->second.reasoning_effort;
+      }
+      if (session.project_id.isEmpty()) {
+        session.project_id = previous->second.project_id;
       }
     }
     // The worker polls sessions every 10 s. Publishing an identical list used
@@ -2202,8 +2210,10 @@ void ProfileWorker::OnSocketConnected(const QString& subprotocol) {
   if (pending_new_session_) {
     pending_new_session_ = false;
     const QString cwd = pending_new_session_cwd_;
+    const QString project_id = pending_new_session_project_id_;
     pending_new_session_cwd_.clear();
-    NewSessionInDir(cwd);
+    pending_new_session_project_id_.clear();
+    NewSessionInDir(cwd, project_id);
     return;
   }
   AttachIfForeground();
@@ -2746,8 +2756,10 @@ void ProfileWorker::OnSocketEvent(const QString& type,
     if (pending_new_session_) {
       pending_new_session_ = false;
       const QString cwd = pending_new_session_cwd_;
+      const QString project_id = pending_new_session_project_id_;
       pending_new_session_cwd_.clear();
-      NewSessionInDir(cwd);
+      pending_new_session_project_id_.clear();
+      NewSessionInDir(cwd, project_id);
       return;
     }
     AttachIfForeground();
@@ -3411,6 +3423,8 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
   }
   if (id == pending_create_id_) {
     pending_create_id_ = -1;
+    const QString project_id =
+        std::exchange(pending_create_project_id_, QString());
     if (!error.isEmpty()) {
       pending_prompt_.clear();
       PublishError(error);
@@ -3453,6 +3467,7 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
       placeholder.id = session_id;
       placeholder.title = QStringLiteral("New chat");
       placeholder.source = QStringLiteral("local");
+      placeholder.project_id = project_id;
       placeholder.model = state_.model;
       placeholder.started_at_secs = QDateTime::currentSecsSinceEpoch();
       placeholder.last_active_secs = placeholder.started_at_secs;

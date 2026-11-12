@@ -154,7 +154,8 @@ class MainWindow : public QWidget {
   void ApplyPaneLayout(bool restore_widths);
   void PersistPaneLayout();
   void OnPaneSplitterMoved();
-  void SetProjectScope(const QString& project_id);
+  void SetProjectScope(const QString& project_id, bool ensure_session = true);
+  void EnsureSessionForProjectScope();
   void HandleProjectAction(const QString& project_id, const QString& action);
   void ShowProjectAppearance(const QString& project_id);
   void DismissAutoProject(const QString& project_id);
@@ -235,6 +236,10 @@ class MainWindow : public QWidget {
   QStringList steered_prompts_;
   ProjectsState project_state_;
   QString project_scope_ = AllProjectsId();
+  // Guards a project entry that is already waiting on `session.create`, so a
+  // repeated row click cannot mint a second blank chat.
+  QString pending_auto_project_session_;
+  qint64 pending_auto_project_session_ms_ = 0;
   QStringList dismissed_auto_project_ids_;
   bool project_list_pending_ = false;
   bool project_tree_pending_ = false;

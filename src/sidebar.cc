@@ -516,7 +516,8 @@ void Sidebar::RebuildHitRects() {
     // `session.create` mints the session before the backend writes its first
     // row, so a brand-new chat is not in `projects.tree` yet. Keep the local
     // placeholder visible under the project that started it; membership still
-    // comes from the backend once the row is persisted.
+    // comes from the backend once the row is persisted. A selected chat from
+    // another project must not leak into this scope just because it is local.
     if (!snapshot_.selected_session_id.isEmpty() &&
         !scoped_session_ids.contains(snapshot_.selected_session_id)) {
       const auto selected =
@@ -525,7 +526,8 @@ void Sidebar::RebuildHitRects() {
                          return session.id == snapshot_.selected_session_id;
                        });
       if (selected != snapshot_.sessions.end() &&
-          selected->source == QStringLiteral("local")) {
+          selected->project_id == project_scope_ &&
+          !ProjectTreeContainsSession(projects_, selected->id)) {
         scoped_session_ids.insert(selected->id);
       }
     }
@@ -588,7 +590,8 @@ void Sidebar::RebuildHitRects() {
                            return session.id == snapshot_.selected_session_id;
                          });
         if (selected != snapshot_.sessions.end() &&
-            selected->source == QStringLiteral("local")) {
+            selected->project_id == project_scope_ &&
+            !ProjectTreeContainsSession(projects_, selected->id)) {
           project_sessions.insert(selected->id);
         }
       }

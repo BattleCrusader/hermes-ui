@@ -45,6 +45,7 @@ class SidebarTest : public QObject {
   void sessionRowSelectsSession();
   void projectRowsScopeSessionsAndAdd();
   void scopedProjectKeepsNewLocalChatVisible();
+  void scopedProjectHidesChatFromAnotherProject();
   void emptyProjectStateStillOffersCreate();
   void projectScrollSurvivesSnapshotsAndHomeLeads();
   void sessionDensityChangesRowHeightAndContext();
@@ -409,6 +410,7 @@ void SidebarTest::scopedProjectKeepsNewLocalChatVisible() {
   fresh.id = QStringLiteral("s3");
   fresh.title = QStringLiteral("New chat");
   fresh.source = QStringLiteral("local");
+  fresh.project_id = QStringLiteral("p1");
   fresh.last_active_secs = 1762750003;
   snapshot.sessions.push_back(fresh);
   snapshot.selected_session_id = fresh.id;
@@ -431,6 +433,74 @@ void SidebarTest::scopedProjectKeepsNewLocalChatVisible() {
   QCOMPARE(scoped_sessions,
            (QStringList{QStringLiteral("s0"), QStringLiteral("s1"),
                         QStringLiteral("s3")}));
+}
+
+void SidebarTest::scopedProjectHidesChatFromAnotherProject() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::Sidebar sidebar(theme);
+  sidebar.resize(theme.sidebar_width, 720);
+  sidebar.show();
+
+  hermes::ui::ProfileSnapshot snapshot = SnapshotWithSessions();
+  hermes::ui::SessionSummary other;
+  other.id = QStringLiteral("s3");
+  other.title = QStringLiteral("Other project chat");
+  other.source = QStringLiteral("local");
+  other.project_id = QStringLiteral("p2");
+  other.last_active_secs = 1762750003;
+  snapshot.sessions.push_back(other);
+  snapshot.selected_session_id = other.id;
+  sidebar.SetSnapshot(snapshot);
+
+  hermes::ui::ProjectNode project;
+  project.id = QStringLiteral("p1");
+  project.label = QStringLiteral("Project One");
+  project.session_ids = {QStringLiteral("s0"), QStringLiteral("s1")};
+  project.session_count = 2;
+  sidebar.SetProjects({project}, project.id, project.id);
+
+  const auto scoped_sessions = [&sidebar]() {
+    QStringList ids;
+    for (const hermes::ui::ClickTarget& target : sidebar.ClickTargets()) {
+      if (target.name.startsWith(QStringLiteral("sidebar:session:"))) {
+        ids.push_back(
+            target.name.mid(QStringLiteral("sidebar:session:").size()));
+      }
+    }
+    return ids;
+  };
+  QCOMPARE(scoped_sessions(),
+           (QStringList{QStringLiteral("s0"), QStringLiteral("s1")}));
+
+  // Empty projects must not inherit the selected local chat either; the main
+  // window starts a blank session tagged with the project instead.
+  project.session_ids.clear();
+  project.session_count = 0;
+  snapshot.sessions.back().project_id = QStringLiteral("p1");
+  sidebar.SetSnapshot(snapshot);
+  sidebar.SetProjects({project}, project.id, project.id);
+  QCOMPARE(scoped_sessions(), (QStringList{QStringLiteral("s3")}));
+
+  // The tag only covers a session the backend tree has not placed yet. Once the
+  // tree assigns it elsewhere, project membership wins over the stale tag.
+  hermes::ui::ProjectNode other_project;
+  other_project.id = QStringLiteral("p2");
+  other_project.label = QStringLiteral("Project Two");
+  other_project.session_ids = {other.id};
+  other_project.session_count = 1;
+  sidebar.SetProjects({project, other_project}, project.id, project.id);
+  QVERIFY(scoped_sessions().isEmpty());
+
+  // Home is the backend's catch-all for unclaimed sessions. It must not
+  // override the project tag before the real project picks the chat up.
+  hermes::ui::ProjectNode home;
+  home.id = QStringLiteral("__no_project__");
+  home.label = QStringLiteral("Home");
+  home.is_no_project = true;
+  home.session_ids = {other.id};
+  home.session_count = 1;
+  sidebar.SetProjects({home, project}, project.id, project.id);
+  QCOMPARE(scoped_sessions(), (QStringList{QStringLiteral("s3")}));
 }
 
 void SidebarTest::emptyProjectStateStillOffersCreate() {

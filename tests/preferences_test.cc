@@ -1932,9 +1932,11 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
   using hermes::ui::BuildProjectUpdateParams;
   using hermes::ui::ParseProjectsList;
   using hermes::ui::ParseProjectsTree;
+  using hermes::ui::ProjectEntryAction;
   using hermes::ui::ProjectGitRepositories;
   using hermes::ui::ProjectsState;
   using hermes::ui::ProjectWorkingDirectory;
+  using hermes::ui::ResolveProjectEntry;
 
   const QJsonObject list{
       {QStringLiteral("active_id"), QStringLiteral("p1")},
@@ -2003,6 +2005,67 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
            (QStringList{QStringLiteral("s1"), QStringLiteral("s2"),
                         QStringLiteral("s3")}));
   QVERIFY(state.tree[1].is_no_project);
+  const auto p1_entry = ResolveProjectEntry(
+      state, QStringLiteral("p1"),
+      {QStringLiteral("s3"), QStringLiteral("s2"), QStringLiteral("s1")},
+      QString(), QString());
+  QVERIFY(p1_entry.action == ProjectEntryAction::kSelectSession);
+  QCOMPARE(p1_entry.session_id, QStringLiteral("s3"));
+  const auto p1_owned = ResolveProjectEntry(
+      state, QStringLiteral("p1"),
+      {QStringLiteral("s3"), QStringLiteral("s2"), QStringLiteral("s1")},
+      QStringLiteral("s2"), QString());
+  QVERIFY(p1_owned.action == ProjectEntryAction::kKeepCurrent);
+  const auto p1_placeholder = ResolveProjectEntry(
+      state, QStringLiteral("p1"),
+      {QStringLiteral("s3"), QStringLiteral("s2"), QStringLiteral("s1")},
+      QStringLiteral("local-new"), QStringLiteral("p1"));
+  QVERIFY(p1_placeholder.action == ProjectEntryAction::kKeepCurrent);
+  const auto home_entry = ResolveProjectEntry(state, QStringLiteral("home"), {},
+                                              QString(), QString());
+  QVERIFY(home_entry.action == ProjectEntryAction::kStartSession);
+  const auto all_entry =
+      ResolveProjectEntry(state, hermes::ui::AllProjectsId(),
+                          {QStringLiteral("s1")}, QString(), QString());
+  QVERIFY(all_entry.action == ProjectEntryAction::kKeepCurrent);
+  hermes::ui::ProjectsState orphan_state;
+  hermes::ui::ProjectNode orphan;
+  orphan.id = QStringLiteral("orphan");
+  orphan.session_count = 2;
+  orphan_state.tree.push_back(orphan);
+  const auto orphan_entry =
+      ResolveProjectEntry(orphan_state, orphan.id, {}, QString(), QString());
+  QVERIFY(orphan_entry.action == ProjectEntryAction::kKeepCurrent);
+  hermes::ui::ProjectsState stale_state;
+  hermes::ui::ProjectNode stale_target;
+  stale_target.id = QStringLiteral("p1");
+  stale_target.session_ids = {QStringLiteral("s1")};
+  stale_target.session_count = 1;
+  hermes::ui::ProjectNode stale_owner;
+  stale_owner.id = QStringLiteral("p2");
+  stale_owner.session_ids = {QStringLiteral("s9")};
+  stale_owner.session_count = 1;
+  stale_state.tree = {stale_target, stale_owner};
+  const auto stale_entry =
+      ResolveProjectEntry(stale_state, stale_target.id, {QStringLiteral("s9")},
+                          QStringLiteral("s9"), stale_target.id);
+  QVERIFY(stale_entry.action == ProjectEntryAction::kSelectSession);
+  QCOMPARE(stale_entry.session_id, QStringLiteral("s1"));
+  hermes::ui::ProjectsState home_state;
+  hermes::ui::ProjectNode home_target;
+  home_target.id = QStringLiteral("p1");
+  home_target.session_ids = {QStringLiteral("s1")};
+  home_target.session_count = 1;
+  hermes::ui::ProjectNode home_bucket;
+  home_bucket.id = QStringLiteral("__no_project__");
+  home_bucket.is_no_project = true;
+  home_bucket.session_ids = {QStringLiteral("s9")};
+  home_bucket.session_count = 1;
+  home_state.tree = {home_target, home_bucket};
+  const auto home_placeholder =
+      ResolveProjectEntry(home_state, home_target.id, {QStringLiteral("s9")},
+                          QStringLiteral("s9"), home_target.id);
+  QVERIFY(home_placeholder.action == ProjectEntryAction::kKeepCurrent);
   QCOMPARE(ProjectWorkingDirectory(state, QStringLiteral("p1")),
            QStringLiteral("/tree/alpha"));
   QCOMPARE(ProjectWorkingDirectory(state, QStringLiteral("p2")), QString());
@@ -2487,6 +2550,7 @@ void PreferencesTest::uiCacheRoundTripsSessionsAndProjects() {
   session.model = QStringLiteral("m1");
   session.provider = QStringLiteral("p1");
   session.reasoning_effort = QStringLiteral("high");
+  session.project_id = QStringLiteral("p1");
   session.started_at_secs = 100;
   session.last_active_secs = 200;
   session.message_count = 2;
@@ -2527,6 +2591,7 @@ void PreferencesTest::uiCacheRoundTripsSessionsAndProjects() {
   QCOMPARE(loaded_session.sessions[0].title, QStringLiteral("Cached chat"));
   QCOMPARE(loaded_session.sessions[0].revision, 4);
   QCOMPARE(loaded_session.sessions[0].reasoning_effort, QStringLiteral("high"));
+  QCOMPARE(loaded_session.sessions[0].project_id, QStringLiteral("p1"));
   QCOMPARE(static_cast<int>(loaded_session.messages.size()), 1);
   QCOMPARE(loaded_session.messages[0].row_id, static_cast<qint64>(42));
   QCOMPARE(loaded_session.messages[0].blocks[0].kind,

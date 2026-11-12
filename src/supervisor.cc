@@ -520,7 +520,8 @@ void Supervisor::SendPromptAt(int index, const QString& text,
   }
 }
 
-void Supervisor::NewSession(int index, const QString& cwd) {
+void Supervisor::NewSession(int index, const QString& cwd,
+                            const QString& project_id) {
   if (index < 0 || index >= profile_count()) {
     return;
   }
@@ -528,12 +529,10 @@ void Supervisor::NewSession(int index, const QString& cwd) {
   if (worker == nullptr) {
     return;
   }
-  if (cwd.trimmed().isEmpty()) {
-    QMetaObject::invokeMethod(worker, "NewSession", Qt::QueuedConnection);
-    return;
-  }
+  // Always use the project-aware entry point: it treats an empty cwd the same
+  // as NewSession and carries the sidebar's project tag for the placeholder.
   QMetaObject::invokeMethod(worker, "NewSessionInDir", Qt::QueuedConnection,
-                            Q_ARG(QString, cwd));
+                            Q_ARG(QString, cwd), Q_ARG(QString, project_id));
 }
 
 void Supervisor::Interrupt(int index) {
