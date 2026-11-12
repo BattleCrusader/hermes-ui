@@ -1,20 +1,20 @@
 {
-  "generated_at": "2026-11-11T06:50:16Z",
+  "generated_at": "2026-11-12T03:45:18Z",
   "desktop_tests": {
     "passed": true,
     "tests": 54,
     "files": 3,
-    "summary": "   Duration  12.25s (transform 12.43s, setup 801ms, import 20.26s, tests 5.11s, environment 2.05s)"
+    "summary": "   Duration  15.67s (transform 16.49s, setup 1.30s, import 26.36s, tests 5.90s, environment 3.61s)"
   },
-  "native_inventory": "112 named widgets",
+  "native_inventory": "159 named widgets",
   "desktop_e2e": "passed",
   "rest_routes": {
     "backend_routes": 307,
-    "native_routes": 135,
-    "matched": 146,
-    "gaps": 161,
+    "native_routes": 137,
+    "matched": 148,
+    "gaps": 159,
     "native_only": 3,
-    "test_references": 12
+    "test_references": 13
   },
   "features": [
     {

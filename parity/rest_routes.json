@@ -1,11 +1,11 @@
 {
   "summary": {
     "backend_routes": 307,
-    "native_routes": 135,
-    "matched": 146,
-    "gaps": 161,
+    "native_routes": 137,
+    "matched": 148,
+    "gaps": 159,
     "native_only": 3,
-    "test_references": 12
+    "test_references": 13
   },
   "routes": [
     {
@@ -342,7 +342,7 @@
       "method": "GET",
       "path": "/api/fs/default-cwd",
       "normalized": "/api/fs/default-cwd",
-      "native": true
+      "native": false
     },
     {
       "method": "GET",
@@ -576,13 +576,13 @@
       "method": "GET",
       "path": "/api/memory",
       "normalized": "/api/memory",
-      "native": false
+      "native": true
     },
     {
       "method": "GET",
       "path": "/api/memory/providers/{name}/config",
       "normalized": "/api/memory/providers/{}/config",
-      "native": false
+      "native": true
     },
     {
       "method": "GET",
@@ -1758,7 +1758,7 @@
       "method": "PUT",
       "path": "/api/memory/providers/{name}/config",
       "normalized": "/api/memory/providers/{}/config",
-      "native": false
+      "native": true
     },
     {
       "method": "PUT",

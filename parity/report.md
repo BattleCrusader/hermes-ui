@@ -5,17 +5,17 @@
 > LOC. This report covers only the rows below. See `TODO.md` for the
 > full parity queue.
 
-Generated: `2026-11-11T06:50:16Z`
+Generated: `2026-11-12T03:45:18Z`
 
 - Desktop tests: **54 passed / 3 files** (`PASS`)
 - Desktop e2e preferences journey: **passed**
-- Native inventory: 112 named widgets
+- Native inventory: 159 named widgets
 
 ## Gateway REST route audit (non-blocking)
 
 - Gateway routes: **307**
-- Seen in the native client: **146**
-- Not yet used: **161**
+- Seen in the native client: **148**
+- Not yet used: **159**
 - Native-only `/api` paths: **3**
 
 Path-level only (HTTP verbs are not inferred from C++ call sites). See `parity/rest_routes.md`.
