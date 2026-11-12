@@ -130,6 +130,7 @@ class PreferencesTest : public QObject {
   void rightRailPreviewsArtifactText();
   void rightRailKeepsArtifactScrollAcrossSnapshots();
   void rightRailProjectGitTerminalPanes();
+  void rightRailMultipleProjectGitPanes();
   void flowLayoutWrapsRowsAtNarrowWidths();
   void artifactDetectionAndNamingMatchDesktop();
   void rightRailBrowsesGeneratedArtifactVersions();
@@ -1914,6 +1915,7 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
   using hermes::ui::BuildProjectUpdateParams;
   using hermes::ui::ParseProjectsList;
   using hermes::ui::ParseProjectsTree;
+  using hermes::ui::ProjectGitRepositories;
   using hermes::ui::ProjectsState;
   using hermes::ui::ProjectWorkingDirectory;
 
@@ -1959,6 +1961,9 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
                {QStringLiteral("repos"),
                 QJsonArray{QJsonObject{
                     {QStringLiteral("id"), QStringLiteral("r1")},
+                    {QStringLiteral("label"), QStringLiteral("Alpha Repo")},
+                    {QStringLiteral("path"),
+                     QStringLiteral("/tree/alpha-repo")},
                     {QStringLiteral("groups"),
                      QJsonArray{QJsonObject{
                          {QStringLiteral("id"), QStringLiteral("main")},
@@ -1974,6 +1979,9 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
   QCOMPARE(static_cast<int>(state.tree.size()), 2);
   QCOMPARE(state.tree[0].session_count, 3);
   QCOMPARE(state.tree[0].repo_count, 1);
+  QCOMPARE(static_cast<int>(state.tree[0].repos.size()), 1);
+  QCOMPARE(state.tree[0].repos[0].label, QStringLiteral("Alpha Repo"));
+  QCOMPARE(state.tree[0].repos[0].path, QStringLiteral("/tree/alpha-repo"));
   QCOMPARE(state.tree[0].session_ids,
            (QStringList{QStringLiteral("s1"), QStringLiteral("s2"),
                         QStringLiteral("s3")}));
@@ -1989,6 +1997,13 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
            QDir::homePath());
   QCOMPARE(ArtifactsWorkingDirectory(state, QStringLiteral("p2")),
            QDir::homePath());
+  const std::vector<hermes::ui::ProjectRepoInfo> repositories =
+      ProjectGitRepositories(state, QStringLiteral("p1"));
+  QCOMPARE(static_cast<int>(repositories.size()), 1);
+  QCOMPARE(repositories[0].label, QStringLiteral("Alpha Repo"));
+  QCOMPARE(repositories[0].path, QStringLiteral("/tree/alpha-repo"));
+  QVERIFY(ProjectGitRepositories(state, QStringLiteral("p2")).empty());
+  QVERIFY(ProjectGitRepositories(state, hermes::ui::AllProjectsId()).empty());
 
   const QJsonObject create = BuildProjectCreateParams(
       QStringLiteral("Alpha"),
@@ -3154,4 +3169,146 @@ void PreferencesTest::notificationPolicyMatchesDesktopAttentionRules() {
   QVERIFY(!throttle.Allow(QStringLiteral("turnDone:s1"), 10500));
   QVERIFY(throttle.Allow(QStringLiteral("turnDone:s2"), 10500));
   QVERIFY(throttle.Allow(QStringLiteral("turnDone:s1"), 11000));
+}
+
+void PreferencesTest::rightRailMultipleProjectGitPanes() {
+  if (QStandardPaths::findExecutable(QStringLiteral("git")).isEmpty()) {
+    QSKIP("git is not installed");
+  }
+  QTemporaryDir first;
+  QTemporaryDir second;
+  QVERIFY(first.isValid());
+  QVERIFY(second.isValid());
+  const auto write_file = [](const QString& root, const QString& name,
+                             const QString& contents) {
+    QFile file(QDir(root).filePath(name));
+    if (!file.open(QIODevice::WriteOnly)) {
+      return false;
+    }
+    return file.write(contents.toUtf8()) >= 0;
+  };
+  const auto run_git = [](const QString& root, const QStringList& arguments) {
+    QProcess process;
+    process.setWorkingDirectory(root);
+    process.start(QStringLiteral("git"), arguments);
+    if (!process.waitForFinished(5000) || process.exitCode() != 0) {
+      qWarning() << process.readAllStandardError();
+      return false;
+    }
+    return true;
+  };
+  const auto init_repo = [&](const QString& root, const QString& file) {
+    if (!write_file(root, file, QStringLiteral("initial content"))) {
+      return false;
+    }
+    return run_git(root, {QStringLiteral("init")}) &&
+           run_git(root,
+                   {QStringLiteral("config"), QStringLiteral("user.email"),
+                    QStringLiteral("test@example.com")}) &&
+           run_git(root, {QStringLiteral("config"), QStringLiteral("user.name"),
+                          QStringLiteral("Hermes Test")}) &&
+           run_git(root, {QStringLiteral("add"), file}) &&
+           run_git(root, {QStringLiteral("commit"), QStringLiteral("-m"),
+                          QStringLiteral("initial")});
+  };
+  QVERIFY(init_repo(first.path(), QStringLiteral("first.txt")));
+  QVERIFY(init_repo(second.path(), QStringLiteral("second-root.txt")));
+
+  std::vector<hermes::ui::ProjectRepoInfo> repositories;
+  repositories.push_back(
+      {QStringLiteral("repo-one"), QStringLiteral("One"), first.path()});
+  repositories.push_back(
+      {QStringLiteral("repo-two"), QStringLiteral("Two"), second.path()});
+
+  hermes::ui::RightRail rail(hermes::ui::Theme::Light());
+  rail.resize(360, 900);
+  rail.show();
+  rail.SetProjectContext(QStringLiteral("multi"), QStringLiteral("Multi"),
+                         first.path(), repositories);
+
+  auto* first_status =
+      rail.findChild<QPlainTextEdit*>(QStringLiteral("rightRailGitStatus"));
+  auto* second_status =
+      rail.findChild<QPlainTextEdit*>(QStringLiteral("rightRailGitStatus_1"));
+  auto* first_message =
+      rail.findChild<QPlainTextEdit*>(QStringLiteral("rightRailGitMessage"));
+  auto* second_message =
+      rail.findChild<QPlainTextEdit*>(QStringLiteral("rightRailGitMessage_1"));
+  auto* first_message_status =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitMessageStatus"));
+  auto* second_message_status =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitMessageStatus_1"));
+  auto* first_refresh =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailGitRefresh"));
+  auto* second_refresh =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailGitRefresh_1"));
+  auto* first_commit =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailGitCommit"));
+  auto* second_generate =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailGitGenerate_1"));
+  auto* first_root =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitRepoRoot"));
+  auto* second_root =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitRepoRoot_1"));
+  QVERIFY(first_status != nullptr);
+  QVERIFY(second_status != nullptr);
+  QVERIFY(first_message != nullptr);
+  QVERIFY(second_message != nullptr);
+  QVERIFY(first_message_status != nullptr);
+  QVERIFY(second_message_status != nullptr);
+  QVERIFY(first_refresh != nullptr);
+  QVERIFY(second_refresh != nullptr);
+  QVERIFY(first_commit != nullptr);
+  QVERIFY(second_generate != nullptr);
+  QVERIFY(first_root != nullptr);
+  QVERIFY(second_root != nullptr);
+  QVERIFY(first_root->text().contains(QStringLiteral("One")));
+  QVERIFY(first_root->text().contains(first.path()));
+  QVERIFY(second_root->text().contains(QStringLiteral("Two")));
+  QVERIFY(second_root->text().contains(second.path()));
+  QVERIFY(rail.findChild<QWidget*>(QStringLiteral("rightRailGitRepo_0")) !=
+          nullptr);
+  QVERIFY(rail.findChild<QWidget*>(QStringLiteral("rightRailGitRepo_1")) !=
+          nullptr);
+
+  QTRY_VERIFY(first_status->toPlainText().contains(QStringLiteral("##")));
+  QTRY_VERIFY(second_status->toPlainText().contains(QStringLiteral("##")));
+  QCOMPARE(first_message_status->text(), QString());
+  QCOMPARE(second_message_status->text(), QString());
+
+  QVERIFY(write_file(first.path(), QStringLiteral("first-change.txt"),
+                     QStringLiteral("first change")));
+  first_refresh->click();
+  QTRY_VERIFY(
+      first_status->toPlainText().contains(QStringLiteral("first-change.txt")));
+  QVERIFY(!second_status->toPlainText().contains(
+      QStringLiteral("first-change.txt")));
+  first_message->setPlainText(QStringLiteral("commit first repo"));
+  first_commit->click();
+  QTRY_VERIFY(first_message->toPlainText().isEmpty());
+  QTRY_COMPARE(first_message_status->text(), QStringLiteral("Committed."));
+  QCOMPARE(second_message->toPlainText(), QString());
+  QCOMPARE(second_message_status->text(), QString());
+
+  QString generated_diff;
+  rail.on_generate_commit_message =
+      [&generated_diff](
+          const QString& diff, const QString&, const QString&,
+          std::function<void(const QString&, const QString&)> done) {
+        generated_diff = diff;
+        done(QStringLiteral("feat: commit the second repo"), QString());
+      };
+  QVERIFY(write_file(second.path(), QStringLiteral("repo-two.txt"),
+                     QStringLiteral("second repo change")));
+  second_refresh->click();
+  QTRY_VERIFY(
+      second_status->toPlainText().contains(QStringLiteral("repo-two.txt")));
+  QTRY_VERIFY(second_generate->isEnabled());
+  second_generate->click();
+  QTRY_VERIFY(generated_diff.contains(QStringLiteral("repo-two.txt")));
+  QTRY_COMPARE(second_message->toPlainText(),
+               QStringLiteral("feat: commit the second repo"));
+  QCOMPARE(second_message_status->text(),
+           QStringLiteral("Generated · review and commit."));
+  QCOMPARE(first_message->toPlainText(), QString());
 }

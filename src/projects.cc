@@ -3,9 +3,11 @@
 #include "src/projects.h"
 
 #include <QDir>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonValue>
+#include <QSet>
 #include <algorithm>
 
 namespace hermes::ui {
@@ -153,8 +155,20 @@ void ParseProjectNode(const QJsonObject& row, ProjectNode* node) {
       row.value(QStringLiteral("previewSessions")).toArray(), &ids);
   const QJsonArray repos = row.value(QStringLiteral("repos")).toArray();
   node->repo_count = repos.size();
+  node->repos.clear();
+  node->repos.reserve(static_cast<std::size_t>(repos.size()));
   for (const QJsonValue& repo_value : repos) {
     const QJsonObject repo = repo_value.toObject();
+    ProjectRepoInfo info;
+    info.id = repo.value(QStringLiteral("id")).toString();
+    info.label = repo.value(QStringLiteral("label")).toString();
+    info.path = repo.value(QStringLiteral("path")).toString();
+    if (info.path.isEmpty()) {
+      info.path = info.id;
+    }
+    if (!info.path.isEmpty()) {
+      node->repos.push_back(std::move(info));
+    }
     AppendSessionIdsFromRows(repo.value(QStringLiteral("sessions")).toArray(),
                              &ids);
     for (const QJsonValue& group_value :
@@ -321,6 +335,96 @@ QString ArtifactsWorkingDirectory(const ProjectsState& state,
                                   const QString& project_id) {
   const QString project_path = ProjectWorkingDirectory(state, project_id);
   return project_path.isEmpty() ? QDir::homePath() : project_path;
+}
+
+namespace {
+
+QString RepoPathKey(const QString& path) {
+  return QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+}
+
+QString RepoLabelForPath(const QString& path) {
+  const QString name = QFileInfo(path).fileName();
+  return name.isEmpty() ? path : name;
+}
+
+void AppendRepo(std::vector<ProjectRepoInfo>* repos, QSet<QString>* seen,
+                const ProjectRepoInfo& repo) {
+  const QString trimmed = repo.path.trimmed();
+  if (trimmed.isEmpty()) {
+    return;
+  }
+  const QString key = RepoPathKey(trimmed);
+  if (key.isEmpty() || seen->contains(key)) {
+    return;
+  }
+  seen->insert(key);
+  ProjectRepoInfo resolved = repo;
+  resolved.path = trimmed;
+  if (resolved.label.trimmed().isEmpty()) {
+    resolved.label = RepoLabelForPath(trimmed);
+  }
+  repos->push_back(std::move(resolved));
+}
+
+}  // namespace
+
+std::vector<ProjectRepoInfo> ProjectGitRepositories(const ProjectsState& state,
+                                                    const QString& project_id) {
+  std::vector<ProjectRepoInfo> repos;
+  QSet<QString> seen;
+  if (project_id.isEmpty() || project_id == AllProjectsId()) {
+    return repos;
+  }
+
+  const auto node = std::find_if(
+      state.tree.begin(), state.tree.end(),
+      [&project_id](const ProjectNode& row) { return row.id == project_id; });
+  if (node != state.tree.end()) {
+    for (const ProjectRepoInfo& repo : node->repos) {
+      AppendRepo(&repos, &seen, repo);
+    }
+    if (!repos.empty()) {
+      return repos;
+    }
+  }
+
+  const auto project = std::find_if(
+      state.projects.begin(), state.projects.end(),
+      [&project_id](const ProjectInfo& row) { return row.id == project_id; });
+  if (project != state.projects.end()) {
+    for (const ProjectFolderInfo& folder : project->folders) {
+      const QString path = folder.path.trimmed();
+      if (path.isEmpty() ||
+          !QFileInfo(QDir(path).filePath(QStringLiteral(".git"))).exists()) {
+        continue;
+      }
+      ProjectRepoInfo repo;
+      repo.id = path;
+      repo.label = ProjectFolderLabel(folder);
+      repo.path = path;
+      AppendRepo(&repos, &seen, repo);
+    }
+    if (!repos.empty()) {
+      return repos;
+    }
+  }
+
+  // Before the tree/list has loaded, the selected project's working directory
+  // is still a useful single-repository fallback when it is a worktree.
+  QString fallback = node != state.tree.end() ? node->path : QString();
+  if (fallback.isEmpty() && project != state.projects.end()) {
+    fallback = project->primary_path;
+  }
+  if (!fallback.isEmpty() &&
+      QFileInfo(QDir(fallback).filePath(QStringLiteral(".git"))).exists()) {
+    ProjectRepoInfo repo;
+    repo.id = fallback;
+    repo.label = RepoLabelForPath(fallback);
+    repo.path = fallback;
+    AppendRepo(&repos, &seen, repo);
+  }
+  return repos;
 }
 
 }  // namespace hermes::ui

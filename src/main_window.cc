@@ -3952,7 +3952,8 @@ void MainWindow::SyncRightRailProject() {
     }
   }
   right_rail_->SetProjectContext(
-      project_id, label, ArtifactsWorkingDirectory(project_state_, project_id));
+      project_id, label, ArtifactsWorkingDirectory(project_state_, project_id),
+      ProjectGitRepositories(project_state_, project_id));
 }
 
 void MainWindow::SetSidebarCollapsed(bool collapsed) {

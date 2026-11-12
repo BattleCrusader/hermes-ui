@@ -12,6 +12,7 @@
 
 #include "src/artifacts.h"
 #include "src/model.h"
+#include "src/projects.h"
 #include "src/terminal_widget.h"
 #include "src/theme.h"
 
@@ -81,8 +82,11 @@ class RightRail : public QWidget {
   bool IsCollapsed() const { return collapsed_; }
   // The project rail follows the active project scope. `root` is a local
   // directory; the project and git panes never infer it from chat messages.
+  // `repositories` is the project's full resolved repo list from
+  // `projects.tree`; an empty list falls back to `root` when it is a worktree.
   void SetProjectContext(const QString& project_id, const QString& label,
-                         const QString& root);
+                         const QString& root,
+                         const std::vector<ProjectRepoInfo>& repositories = {});
   void SetVisibleForTest(bool visible) { setVisible(visible); }
   // Accordion sections replace the old tab strip. Expanding is idempotent and
   // scrolls the section into view; the collapsed bar uses the same path.
@@ -120,21 +124,41 @@ class RightRail : public QWidget {
   void RenderArtifactPreview();
   void CloseArtifactPreview();
   void SyncProjectViews();
-  void ShowProjectPreview(const QString& path);
-  void RefreshGitStatus();
-  void RunGit(const QStringList& arguments,
+  void RebuildGitRepositories(const std::vector<ProjectRepoInfo>& repositories);
+  void RefreshGitStatuses();
+  void RefreshGitStatus(const QString& path, quint64 serial);
+  void RunGit(const QString& root, const QStringList& arguments,
               std::function<void(bool ok, const QString& output)> done);
-  void CommitGit();
-  void PushGit();
-  void GenerateCommitMessage();
+  void CommitGit(const QString& path, quint64 serial);
+  void PushGit(const QString& path, quint64 serial);
+  void GenerateCommitMessage(const QString& path, quint64 serial);
   void GatherCommitContext(
       const QString& root,
       std::function<void(bool ok, const QString& diff,
                          const QString& recent_commits, const QString& error)>
           done);
-  void FinishCommitGeneration();
+  void FinishCommitGeneration(const QString& path, quint64 serial);
+  struct GitRepoPane {
+    QString id;
+    QString label;
+    QString path;
+    quint64 serial = 0;
+    QWidget* card = nullptr;
+    QLabel* root = nullptr;
+    QPlainTextEdit* status = nullptr;
+    QPlainTextEdit* message = nullptr;
+    QLabel* message_status = nullptr;
+    QPushButton* refresh = nullptr;
+    QPushButton* generate = nullptr;
+    QPushButton* commit = nullptr;
+    QPushButton* push = nullptr;
+    bool ai_generating = false;
+    quint64 ai_generation = 0;
+  };
+  GitRepoPane* FindGitRepository(const QString& path, quint64 serial = 0);
   void EnsureTerminal();
   void RestartTerminal();
+  void ShowProjectPreview(const QString& path);
 
   struct Section {
     QString id;
@@ -161,13 +185,10 @@ class RightRail : public QWidget {
   QString project_preview_path_;
   QWidget* git_pane_ = nullptr;
   QLabel* git_root_label_ = nullptr;
-  QPlainTextEdit* git_status_ = nullptr;
-  QPlainTextEdit* git_message_ = nullptr;
-  QLabel* git_message_status_ = nullptr;
-  QPushButton* git_commit_ = nullptr;
-  QPushButton* git_push_ = nullptr;
-  QPushButton* git_refresh_ = nullptr;
-  QPushButton* git_generate_ = nullptr;
+  QWidget* git_repositories_host_ = nullptr;
+  QVBoxLayout* git_repositories_layout_ = nullptr;
+  QLabel* git_empty_ = nullptr;
+  std::vector<GitRepoPane> git_repositories_;
   QWidget* terminal_pane_ = nullptr;
   TerminalWidget* terminal_ = nullptr;
   QPushButton* terminal_copy_ = nullptr;
@@ -177,9 +198,9 @@ class RightRail : public QWidget {
   QString project_id_;
   QString project_label_;
   QString project_root_;
+  std::vector<ProjectRepoInfo> project_repositories_;
+  quint64 git_repository_serial_ = 0;
   bool collapsed_ = false;
-  bool ai_generating_ = false;
-  quint64 ai_generation_ = 0;
   QWidget* context_pane_ = nullptr;
   QWidget* agents_pane_ = nullptr;
   QWidget* todos_pane_ = nullptr;

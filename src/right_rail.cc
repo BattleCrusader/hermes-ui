@@ -594,54 +594,20 @@ RightRail::RightRail(const Theme& theme, QWidget* parent)
                               theme_.text_secondary);
   git_root_label_->setObjectName(QStringLiteral("rightRailGitRoot"));
   git_layout->addWidget(git_root_label_);
-  git_status_ = new QPlainTextEdit(git_pane_);
-  git_status_->setObjectName(QStringLiteral("rightRailGitStatus"));
-  git_status_->setReadOnly(true);
-  git_status_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
-  git_status_->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-  git_status_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-  git_status_->setFont(theme_.MonoFont(10, QFont::Normal));
-  git_status_->setMinimumHeight(120);
-  git_layout->addWidget(git_status_, 1);
-  git_message_ = new QPlainTextEdit(git_pane_);
-  git_message_->setObjectName(QStringLiteral("rightRailGitMessage"));
-  git_message_->setPlaceholderText(QStringLiteral("Commit message"));
-  git_message_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
-  git_message_->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-  git_message_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-  git_message_->setFont(theme_.UiFont(11, QFont::Normal));
-  git_message_->setFixedHeight(64);
-  git_layout->addWidget(git_message_);
-  git_message_status_ = RailLabel(git_pane_, theme_, QString(), 10,
-                                  QFont::Normal, theme_.text_secondary);
-  git_message_status_->setObjectName(
-      QStringLiteral("rightRailGitMessageStatus"));
-  git_layout->addWidget(git_message_status_);
-  auto* git_actions = new FlowLayout(0, 4, 4);
-  git_refresh_ = PreviewAction(git_pane_, QStringLiteral("Refresh"),
-                               QStringLiteral("rightRailGitRefresh"));
-  git_actions->addWidget(git_refresh_);
-  git_generate_ = PreviewAction(git_pane_, QStringLiteral("AI Generate"),
-                                QStringLiteral("rightRailGitGenerate"));
-  git_generate_->setToolTip(
-      QStringLiteral("Draft a commit message from the staged changes"));
-  git_actions->addWidget(git_generate_);
-  git_commit_ = PreviewAction(git_pane_, QStringLiteral("Commit"),
-                              QStringLiteral("rightRailGitCommit"));
-  git_actions->addWidget(git_commit_);
-  git_push_ = PreviewAction(git_pane_, QStringLiteral("Commit & Push"),
-                            QStringLiteral("rightRailGitPush"));
-  git_actions->addWidget(git_push_);
-  git_layout->addLayout(git_actions);
-  QObject::connect(git_refresh_, &QPushButton::clicked, git_refresh_,
-                   [this]() { RefreshGitStatus(); });
-  QObject::connect(git_generate_, &QPushButton::clicked, git_generate_,
-                   [this]() { GenerateCommitMessage(); });
-  QObject::connect(git_commit_, &QPushButton::clicked, git_commit_,
-                   [this]() { CommitGit(); });
-  QObject::connect(git_push_, &QPushButton::clicked, git_push_,
-                   [this]() { PushGit(); });
-  git_pane_->setMinimumHeight(340);
+  git_repositories_host_ = new QWidget(git_pane_);
+  git_repositories_host_->setObjectName(
+      QStringLiteral("rightRailGitRepositories"));
+  git_repositories_layout_ = new QVBoxLayout(git_repositories_host_);
+  git_repositories_layout_->setContentsMargins(0, 0, 0, 0);
+  git_repositories_layout_->setSpacing(10);
+  git_layout->addWidget(git_repositories_host_, 1);
+  git_repositories_host_->setVisible(false);
+  git_empty_ =
+      RailLabel(git_pane_, theme_, QStringLiteral("No git repositories found."),
+                11, QFont::Normal, theme_.text_tertiary);
+  git_empty_->setObjectName(QStringLiteral("rightRailGitEmpty"));
+  git_layout->addWidget(git_empty_);
+  git_pane_->setMinimumHeight(240);
   AddSection(QStringLiteral("git"), QStringLiteral("Git"), git_pane_);
 
   terminal_pane_ = new QWidget(sections_host_);
@@ -1158,6 +1124,8 @@ void RightRail::SetTheme(const Theme& theme) {
           "{ color: %4; background: %6; }"
           "QWidget[rightRailSectionContent=\"true\"] { background: %1; "
           "border-bottom: 1px solid %2; }"
+          "QWidget[gitRepoCard=\"true\"] { background: %6; "
+          "border: 1px solid %2; border-radius: 6px; }"
           "QPushButton[railAction=\"true\"] { background: transparent; "
           "color: %3; border: 1px solid %2; border-radius: 5px; "
           "padding: 4px 7px; }"
@@ -1194,6 +1162,7 @@ void RightRail::SetTheme(const Theme& theme) {
           "border: 1px solid %2; border-radius: 5px; padding: 4px 6px; }"
           "QPlainTextEdit#rightRailGitStatus, "
           "QPlainTextEdit#rightRailGitMessage, "
+          "QPlainTextEdit[gitRepoField=\"true\"], "
           "QTextBrowser#rightRailProjectPreview, "
           "QTreeView#rightRailProjectTree { background: %6; color: %4; "
           "border: 1px solid %2; border-radius: 5px; }"
@@ -1235,11 +1204,13 @@ void RightRail::SetTheme(const Theme& theme) {
       button->setFont(theme_.UiFont(11, QFont::Normal));
     }
   }
-  if (git_status_ != nullptr) {
-    git_status_->setFont(theme_.MonoFont(10, QFont::Normal));
-  }
-  if (git_message_ != nullptr) {
-    git_message_->setFont(theme_.UiFont(11, QFont::Normal));
+  for (const GitRepoPane& repo : git_repositories_) {
+    if (repo.status != nullptr) {
+      repo.status->setFont(theme_.MonoFont(10, QFont::Normal));
+    }
+    if (repo.message != nullptr) {
+      repo.message->setFont(theme_.UiFont(11, QFont::Normal));
+    }
   }
   if (terminal_ != nullptr) {
     terminal_->SetTheme(theme_);
@@ -1274,17 +1245,33 @@ void RightRail::SetCollapsed(bool collapsed) {
   updateGeometry();
 }
 
-void RightRail::SetProjectContext(const QString& project_id,
-                                  const QString& label, const QString& root) {
+void RightRail::SetProjectContext(
+    const QString& project_id, const QString& label, const QString& root,
+    const std::vector<ProjectRepoInfo>& repositories) {
   QString resolved = root.trimmed();
   if (resolved.isEmpty() || !QFileInfo(resolved).isDir()) {
     resolved = QDir::homePath();
   }
   resolved = QFileInfo(resolved).absoluteFilePath();
+  bool repositories_equal = repositories.size() == project_repositories_.size();
+  if (repositories_equal) {
+    for (std::size_t i = 0; i < repositories.size(); ++i) {
+      const ProjectRepoInfo& left = repositories[i];
+      const ProjectRepoInfo& right = project_repositories_[i];
+      if (left.id != right.id || left.label != right.label ||
+          left.path != right.path) {
+        repositories_equal = false;
+        break;
+      }
+    }
+  }
   if (project_id == project_id_ && label == project_label_ &&
-      resolved == project_root_) {
-    if (git_status_ != nullptr && git_status_->toPlainText().isEmpty()) {
-      RefreshGitStatus();
+      resolved == project_root_ && repositories_equal) {
+    for (const GitRepoPane& repository : git_repositories_) {
+      if (repository.status != nullptr &&
+          repository.status->toPlainText().isEmpty()) {
+        RefreshGitStatus(repository.path, repository.serial);
+      }
     }
     return;
   }
@@ -1292,19 +1279,200 @@ void RightRail::SetProjectContext(const QString& project_id,
   project_id_ = project_id;
   project_label_ = label;
   project_root_ = resolved;
-  if (root_changed) {
-    ++ai_generation_;
-    ai_generating_ = false;
-    if (git_generate_ != nullptr) {
-      git_generate_->setEnabled(true);
-    }
-  }
+  project_repositories_ = repositories;
   SyncProjectViews();
   if (root_changed && terminal_ != nullptr) {
     terminal_->SetWorkingDirectory(project_root_);
     if (terminal_->IsRunning()) {
       RestartTerminal();
     }
+  }
+}
+
+void RightRail::RebuildGitRepositories(
+    const std::vector<ProjectRepoInfo>& repositories) {
+  std::vector<ProjectRepoInfo> resolved;
+  QSet<QString> seen;
+  const auto append = [&resolved, &seen](const ProjectRepoInfo& repo) {
+    const QString path = repo.path.trimmed();
+    if (path.isEmpty()) {
+      return;
+    }
+    const QString key = QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+    if (key.isEmpty() || seen.contains(key)) {
+      return;
+    }
+    seen.insert(key);
+    ProjectRepoInfo next = repo;
+    next.path = path;
+    if (next.label.trimmed().isEmpty()) {
+      next.label = QFileInfo(path).fileName();
+      if (next.label.isEmpty()) {
+        next.label = path;
+      }
+    }
+    resolved.push_back(std::move(next));
+  };
+  for (const ProjectRepoInfo& repository : repositories) {
+    append(repository);
+  }
+  if (resolved.empty() && !project_root_.isEmpty() &&
+      QFileInfo(QDir(project_root_).filePath(QStringLiteral(".git")))
+          .exists()) {
+    ProjectRepoInfo repository;
+    repository.id = project_root_;
+    repository.path = project_root_;
+    repository.label = project_label_.trimmed().isEmpty()
+                           ? QFileInfo(project_root_).fileName()
+                           : project_label_;
+    append(repository);
+  }
+
+  bool unchanged = resolved.size() == git_repositories_.size();
+  if (unchanged) {
+    for (std::size_t i = 0; i < resolved.size(); ++i) {
+      if (resolved[i].id != git_repositories_[i].id ||
+          resolved[i].label != git_repositories_[i].label ||
+          resolved[i].path != git_repositories_[i].path) {
+        unchanged = false;
+        break;
+      }
+    }
+  }
+  if (unchanged) {
+    for (std::size_t i = 0; i < resolved.size() && i < git_repositories_.size();
+         ++i) {
+      GitRepoPane& pane = git_repositories_[i];
+      pane.id = resolved[i].id;
+      pane.label = resolved[i].label;
+      if (pane.root != nullptr) {
+        pane.root->setText(QStringLiteral("%1\n%2").arg(
+            pane.label, QDir::toNativeSeparators(pane.path)));
+      }
+    }
+    if (git_empty_ != nullptr) {
+      git_empty_->setVisible(resolved.empty());
+    }
+    if (git_repositories_host_ != nullptr) {
+      git_repositories_host_->setVisible(!resolved.empty());
+    }
+    return;
+  }
+
+  ClearLayout(git_repositories_layout_);
+  git_repositories_.clear();
+  if (git_empty_ != nullptr) {
+    git_empty_->setVisible(resolved.empty());
+  }
+  if (git_repositories_host_ != nullptr) {
+    git_repositories_host_->setVisible(!resolved.empty());
+  }
+
+  const bool multiple = resolved.size() > 1;
+  for (std::size_t index = 0; index < resolved.size(); ++index) {
+    const ProjectRepoInfo& repository = resolved[index];
+    const int ordinal = static_cast<int>(index);
+    const QString suffix =
+        ordinal == 0 ? QString() : QStringLiteral("_%1").arg(ordinal);
+
+    GitRepoPane pane;
+    pane.id = repository.id;
+    pane.label = repository.label;
+    pane.path = repository.path;
+    pane.serial = ++git_repository_serial_;
+
+    auto* card = new QWidget(git_repositories_host_);
+    card->setObjectName(QStringLiteral("rightRailGitRepo_%1").arg(ordinal));
+    card->setProperty("gitRepoCard", true);
+    card->setAttribute(Qt::WA_StyledBackground, true);
+    auto* card_layout = new QVBoxLayout(card);
+    card_layout->setContentsMargins(8, 8, 8, 8);
+    card_layout->setSpacing(6);
+
+    pane.card = card;
+    pane.root = RailLabel(
+        card, theme_,
+        QStringLiteral("%1\n%2").arg(repository.label,
+                                     QDir::toNativeSeparators(repository.path)),
+        11, QFont::DemiBold, theme_.text_secondary);
+    pane.root->setObjectName(
+        QStringLiteral("rightRailGitRepoRoot%1").arg(suffix));
+    pane.root->setToolTip(repository.path);
+    card_layout->addWidget(pane.root);
+
+    pane.status = new QPlainTextEdit(card);
+    pane.status->setObjectName(
+        QStringLiteral("rightRailGitStatus%1").arg(suffix));
+    pane.status->setProperty("gitRepoField", true);
+    pane.status->setReadOnly(true);
+    pane.status->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    pane.status->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    pane.status->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    pane.status->setFont(theme_.MonoFont(10, QFont::Normal));
+    pane.status->setMinimumHeight(multiple ? 86 : 120);
+    card_layout->addWidget(pane.status, 1);
+
+    pane.message = new QPlainTextEdit(card);
+    pane.message->setObjectName(
+        QStringLiteral("rightRailGitMessage%1").arg(suffix));
+    pane.message->setProperty("gitRepoField", true);
+    pane.message->setPlaceholderText(QStringLiteral("Commit message"));
+    pane.message->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    pane.message->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    pane.message->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    pane.message->setFont(theme_.UiFont(11, QFont::Normal));
+    pane.message->setFixedHeight(64);
+    card_layout->addWidget(pane.message);
+
+    pane.message_status = RailLabel(card, theme_, QString(), 10, QFont::Normal,
+                                    theme_.text_secondary);
+    pane.message_status->setObjectName(
+        QStringLiteral("rightRailGitMessageStatus%1").arg(suffix));
+    card_layout->addWidget(pane.message_status);
+
+    auto* actions = new FlowLayout(0, 4, 4);
+    pane.refresh =
+        PreviewAction(card, QStringLiteral("Refresh"),
+                      QStringLiteral("rightRailGitRefresh%1").arg(suffix));
+    actions->addWidget(pane.refresh);
+    pane.generate =
+        PreviewAction(card, QStringLiteral("AI Generate"),
+                      QStringLiteral("rightRailGitGenerate%1").arg(suffix));
+    pane.generate->setToolTip(
+        QStringLiteral("Draft a commit message from this repository's staged "
+                       "changes"));
+    actions->addWidget(pane.generate);
+    pane.commit =
+        PreviewAction(card, QStringLiteral("Commit"),
+                      QStringLiteral("rightRailGitCommit%1").arg(suffix));
+    actions->addWidget(pane.commit);
+    pane.push = PreviewAction(card, QStringLiteral("Commit & Push"),
+                              QStringLiteral("rightRailGitPush%1").arg(suffix));
+    actions->addWidget(pane.push);
+    card_layout->addLayout(actions);
+
+    const QString path = pane.path;
+    const quint64 serial = pane.serial;
+    QObject::connect(
+        pane.refresh, &QPushButton::clicked, pane.refresh,
+        [this, path, serial]() { RefreshGitStatus(path, serial); });
+    QObject::connect(
+        pane.generate, &QPushButton::clicked, pane.generate,
+        [this, path, serial]() { GenerateCommitMessage(path, serial); });
+    QObject::connect(pane.commit, &QPushButton::clicked, pane.commit,
+                     [this, path, serial]() { CommitGit(path, serial); });
+    QObject::connect(pane.push, &QPushButton::clicked, pane.push,
+                     [this, path, serial]() { PushGit(path, serial); });
+
+    git_repositories_.push_back(pane);
+    git_repositories_layout_->addWidget(card);
+  }
+  git_repositories_layout_->addStretch(1);
+}
+
+void RightRail::RefreshGitStatuses() {
+  for (const GitRepoPane& repository : git_repositories_) {
+    RefreshGitStatus(repository.path, repository.serial);
   }
 }
 
@@ -1316,8 +1484,13 @@ void RightRail::SyncProjectViews() {
     project_root_label_->setText(QStringLiteral("%1\n%2").arg(label, path));
     project_root_label_->setToolTip(project_root_);
   }
+  RebuildGitRepositories(project_repositories_);
   if (git_root_label_ != nullptr) {
-    git_root_label_->setText(QStringLiteral("%1\n%2").arg(label, path));
+    QString text = QStringLiteral("%1\n%2").arg(label, path);
+    if (git_repositories_.size() > 1) {
+      text += QStringLiteral("\n%1 repositories").arg(git_repositories_.size());
+    }
+    git_root_label_->setText(text);
     git_root_label_->setToolTip(project_root_);
   }
   if (project_model_ != nullptr && project_tree_ != nullptr) {
@@ -1328,7 +1501,18 @@ void RightRail::SyncProjectViews() {
     project_preview_->clear();
     project_preview_path_.clear();
   }
-  RefreshGitStatus();
+  RefreshGitStatuses();
+}
+
+RightRail::GitRepoPane* RightRail::FindGitRepository(const QString& path,
+                                                     quint64 serial) {
+  for (GitRepoPane& repository : git_repositories_) {
+    if (repository.path == path &&
+        (serial == 0 || repository.serial == serial)) {
+      return &repository;
+    }
+  }
+  return nullptr;
 }
 
 void RightRail::ShowProjectPreview(const QString& path) {
@@ -1418,58 +1602,59 @@ void RightRail::ShowProjectPreview(const QString& path) {
   project_preview_->moveCursor(QTextCursor::Start);
 }
 
-void RightRail::RefreshGitStatus() {
-  if (git_status_ == nullptr) {
+void RightRail::RefreshGitStatus(const QString& path, quint64 serial) {
+  GitRepoPane* repository = FindGitRepository(path, serial);
+  if (repository == nullptr || repository->status == nullptr) {
     return;
   }
-  if (project_root_.isEmpty()) {
-    git_status_->setPlainText(QStringLiteral("No project selected."));
-    return;
-  }
-  const QString root = project_root_;
-  git_status_->setPlainText(QStringLiteral("Checking git status…"));
-  RunGit({QStringLiteral("status"), QStringLiteral("--short"),
-          QStringLiteral("--branch")},
-         [this, root](bool ok, const QString& output) {
-           if (project_root_ != root || git_status_ == nullptr) {
-             return;
-           }
-           if (!ok) {
-             git_status_->setPlainText(
-                 output.isEmpty() ? QStringLiteral("Not a git repository.")
-                                  : output);
-             if (git_commit_ != nullptr) {
-               git_commit_->setEnabled(false);
-             }
-             if (git_push_ != nullptr) {
-               git_push_->setEnabled(false);
-             }
-             return;
-           }
-           git_status_->setPlainText(output.isEmpty()
-                                         ? QStringLiteral("Working tree clean.")
-                                         : output);
-           if (git_commit_ != nullptr) {
-             git_commit_->setEnabled(true);
-           }
-           if (git_push_ != nullptr) {
-             git_push_->setEnabled(true);
-           }
-           if (git_generate_ != nullptr && !ai_generating_) {
-             git_generate_->setEnabled(true);
-           }
-         });
+  repository->status->setPlainText(QStringLiteral("Checking git status…"));
+  RunGit(
+      path,
+      {QStringLiteral("status"), QStringLiteral("--short"),
+       QStringLiteral("--branch")},
+      [this, path, serial](bool ok, const QString& output) {
+        GitRepoPane* current = FindGitRepository(path, serial);
+        if (current == nullptr || current->status == nullptr) {
+          return;
+        }
+        if (!ok) {
+          current->status->setPlainText(
+              output.isEmpty() ? QStringLiteral("Not a git repository.")
+                               : output);
+          if (current->commit != nullptr) {
+            current->commit->setEnabled(false);
+          }
+          if (current->push != nullptr) {
+            current->push->setEnabled(false);
+          }
+          if (current->generate != nullptr) {
+            current->generate->setEnabled(false);
+          }
+          return;
+        }
+        current->status->setPlainText(
+            output.isEmpty() ? QStringLiteral("Working tree clean.") : output);
+        if (current->commit != nullptr) {
+          current->commit->setEnabled(true);
+        }
+        if (current->push != nullptr) {
+          current->push->setEnabled(true);
+        }
+        if (current->generate != nullptr && !current->ai_generating) {
+          current->generate->setEnabled(true);
+        }
+      });
 }
 
 void RightRail::RunGit(
-    const QStringList& arguments,
+    const QString& root, const QStringList& arguments,
     std::function<void(bool ok, const QString& output)> done) {
-  if (project_root_.isEmpty()) {
+  if (root.isEmpty() || !QFileInfo(root).isDir()) {
     done(false, QStringLiteral("No project selected."));
     return;
   }
   auto* process = new QProcess(this);
-  process->setWorkingDirectory(project_root_);
+  process->setWorkingDirectory(root);
   process->setProcessChannelMode(QProcess::MergedChannels);
   auto completed = std::make_shared<bool>(false);
   auto finish = [process, done, completed](bool ok, const QString& output) {
@@ -1498,124 +1683,140 @@ void RightRail::RunGit(
   process->start(QStringLiteral("git"), arguments);
 }
 
-void RightRail::CommitGit() {
-  if (git_message_ == nullptr || git_message_status_ == nullptr) {
+void RightRail::CommitGit(const QString& path, quint64 serial) {
+  GitRepoPane* repository = FindGitRepository(path, serial);
+  if (repository == nullptr || repository->message == nullptr ||
+      repository->message_status == nullptr) {
     return;
   }
-  const QString message = git_message_->toPlainText().trimmed();
+  const QString message = repository->message->toPlainText().trimmed();
   if (message.isEmpty()) {
-    git_message_status_->setText(QStringLiteral("Enter a commit message."));
+    repository->message_status->setText(
+        QStringLiteral("Enter a commit message."));
     return;
   }
-  const QString root = project_root_;
-  git_message_status_->setText(QStringLiteral("Staging…"));
-  RunGit({QStringLiteral("add"), QStringLiteral("-A")},
-         [this, message, root](bool staged, const QString& stage_output) {
-           if (project_root_ != root || git_message_status_ == nullptr) {
-             return;
-           }
-           if (!staged) {
-             git_message_status_->setText(stage_output);
-             return;
-           }
-           git_message_status_->setText(QStringLiteral("Committing…"));
-           RunGit(
-               {QStringLiteral("commit"), QStringLiteral("-m"), message},
-               [this, root](bool committed, const QString& output) {
-                 if (project_root_ != root || git_message_status_ == nullptr) {
-                   return;
-                 }
-                 if (!committed) {
-                   git_message_status_->setText(output);
-                   return;
-                 }
-                 git_message_->clear();
-                 git_message_status_->setText(QStringLiteral("Committed."));
-                 RefreshGitStatus();
-               });
-         });
+  repository->message_status->setText(QStringLiteral("Staging…"));
+  RunGit(
+      path, {QStringLiteral("add"), QStringLiteral("-A")},
+      [this, path, serial, message](bool staged, const QString& output) {
+        GitRepoPane* current = FindGitRepository(path, serial);
+        if (current == nullptr || current->message_status == nullptr) {
+          return;
+        }
+        if (!staged) {
+          current->message_status->setText(output);
+          return;
+        }
+        current->message_status->setText(QStringLiteral("Committing…"));
+        RunGit(
+            path, {QStringLiteral("commit"), QStringLiteral("-m"), message},
+            [this, path, serial](bool committed, const QString& commit_output) {
+              GitRepoPane* done = FindGitRepository(path, serial);
+              if (done == nullptr || done->message_status == nullptr) {
+                return;
+              }
+              if (!committed) {
+                done->message_status->setText(commit_output);
+                return;
+              }
+              if (done->message != nullptr) {
+                done->message->clear();
+              }
+              done->message_status->setText(QStringLiteral("Committed."));
+              RefreshGitStatus(path, serial);
+            });
+      });
 }
 
-void RightRail::GenerateCommitMessage() {
-  if (git_message_status_ == nullptr || git_generate_ == nullptr) {
+void RightRail::GenerateCommitMessage(const QString& path, quint64 serial) {
+  GitRepoPane* repository = FindGitRepository(path, serial);
+  if (repository == nullptr || repository->message_status == nullptr ||
+      repository->generate == nullptr) {
     return;
   }
-  if (ai_generating_) {
+  if (repository->ai_generating) {
     return;
   }
   if (!on_generate_commit_message) {
-    git_message_status_->setText(
+    repository->message_status->setText(
         QStringLiteral("AI generation is unavailable."));
     return;
   }
-  const QString root = project_root_;
-  if (root.isEmpty()) {
-    git_message_status_->setText(QStringLiteral("No project selected."));
+  if (repository->path.isEmpty()) {
+    repository->message_status->setText(
+        QStringLiteral("No repository selected."));
     return;
   }
-  const QString avoid = git_message_ == nullptr
+  const QString avoid = repository->message == nullptr
                             ? QString()
-                            : git_message_->toPlainText().trimmed();
-  const quint64 generation = ++ai_generation_;
-  ai_generating_ = true;
-  git_generate_->setEnabled(false);
-  git_message_status_->setText(QStringLiteral("Reading staged changes…"));
-  GatherCommitContext(root, [this, root, generation, avoid](
-                                bool ok, const QString& diff,
-                                const QString& recent_commits,
-                                const QString& error) {
-    if (project_root_ != root || generation != ai_generation_) {
-      return;
-    }
-    if (!ok) {
-      FinishCommitGeneration();
-      if (git_message_status_ != nullptr) {
-        git_message_status_->setText(
-            error.isEmpty() ? QStringLiteral("Unable to read git diff.")
-                            : error);
-      }
-      return;
-    }
-    if (diff.trimmed().isEmpty()) {
-      FinishCommitGeneration();
-      if (git_message_status_ != nullptr) {
-        git_message_status_->setText(QStringLiteral("No changes to describe."));
-      }
-      return;
-    }
-    if (git_message_status_ != nullptr) {
-      git_message_status_->setText(QStringLiteral("Generating…"));
-    }
-    on_generate_commit_message(
-        diff, recent_commits, avoid,
-        [this, root, generation](const QString& text_in,
-                                 const QString& error_in) {
-          if (project_root_ != root || generation != ai_generation_) {
-            return;
+                            : repository->message->toPlainText().trimmed();
+  const quint64 generation = ++repository->ai_generation;
+  repository->ai_generating = true;
+  repository->generate->setEnabled(false);
+  repository->message_status->setText(
+      QStringLiteral("Reading staged changes…"));
+  GatherCommitContext(
+      path, [this, path, serial, generation, avoid](
+                bool ok, const QString& diff, const QString& recent_commits,
+                const QString& error) {
+        GitRepoPane* current = FindGitRepository(path, serial);
+        if (current == nullptr || current->ai_generation != generation) {
+          return;
+        }
+        if (!ok) {
+          FinishCommitGeneration(path, serial);
+          current = FindGitRepository(path, serial);
+          if (current != nullptr && current->message_status != nullptr) {
+            current->message_status->setText(
+                error.isEmpty() ? QStringLiteral("Unable to read git diff.")
+                                : error);
           }
-          FinishCommitGeneration();
-          const QString text = text_in.trimmed();
-          const QString error = error_in.trimmed();
-          if (git_message_status_ == nullptr) {
-            return;
+          return;
+        }
+        if (diff.trimmed().isEmpty()) {
+          FinishCommitGeneration(path, serial);
+          current = FindGitRepository(path, serial);
+          if (current != nullptr && current->message_status != nullptr) {
+            current->message_status->setText(
+                QStringLiteral("No changes to describe."));
           }
-          if (!error.isEmpty()) {
-            git_message_status_->setText(
-                QStringLiteral("AI generation failed: %1").arg(error));
-            return;
-          }
-          if (text.isEmpty()) {
-            git_message_status_->setText(
-                QStringLiteral("No commit message returned."));
-            return;
-          }
-          if (git_message_ != nullptr) {
-            git_message_->setPlainText(text);
-          }
-          git_message_status_->setText(
-              QStringLiteral("Generated · review and commit."));
-        });
-  });
+          return;
+        }
+        if (current->message_status != nullptr) {
+          current->message_status->setText(QStringLiteral("Generating…"));
+        }
+        on_generate_commit_message(
+            diff, recent_commits, avoid,
+            [this, path, serial, generation](const QString& text_in,
+                                             const QString& error_in) {
+              GitRepoPane* done = FindGitRepository(path, serial);
+              if (done == nullptr || done->ai_generation != generation) {
+                return;
+              }
+              FinishCommitGeneration(path, serial);
+              done = FindGitRepository(path, serial);
+              if (done == nullptr || done->message_status == nullptr) {
+                return;
+              }
+              const QString text = text_in.trimmed();
+              const QString error = error_in.trimmed();
+              if (!error.isEmpty()) {
+                done->message_status->setText(
+                    QStringLiteral("AI generation failed: %1").arg(error));
+                return;
+              }
+              if (text.isEmpty()) {
+                done->message_status->setText(
+                    QStringLiteral("No commit message returned."));
+                return;
+              }
+              if (done->message != nullptr) {
+                done->message->setPlainText(text);
+              }
+              done->message_status->setText(
+                  QStringLiteral("Generated · review and commit."));
+            });
+      });
 }
 
 void RightRail::GatherCommitContext(
@@ -1624,132 +1825,132 @@ void RightRail::GatherCommitContext(
                        const QString& recent_commits, const QString& error)>
         done) {
   auto after_diff = [this, root, done](bool ok, const QString& diff) {
-    if (project_root_ != root) {
-      return;
-    }
     if (!ok) {
       done(false, QString(), QString(),
            diff.isEmpty() ? QStringLiteral("Unable to read git diff.") : diff);
       return;
     }
     QString context = diff;
-    RunGit(
-        {QStringLiteral("ls-files"), QStringLiteral("--others"),
-         QStringLiteral("--exclude-standard")},
-        [this, root, done, context](bool, const QString& untracked) mutable {
-          if (project_root_ != root) {
-            return;
-          }
-          if (!untracked.trimmed().isEmpty()) {
-            context += QStringLiteral("\n# Untracked files:\n");
-            context += untracked;
-            context += QChar('\n');
-          }
-          RunGit(
-              {QStringLiteral("log"), QStringLiteral("-n"),
-               QStringLiteral("10"), QStringLiteral("--pretty=format:%s")},
-              [this, root, done, context](bool, const QString& recent) mutable {
-                if (project_root_ != root) {
-                  return;
-                }
-                constexpr int kDiffMaxChars = 120000;
-                if (context.size() > kDiffMaxChars) {
-                  const int omitted =
-                      static_cast<int>(context.size()) - kDiffMaxChars;
-                  context = context.left(kDiffMaxChars);
-                  context +=
-                      QStringLiteral("\n# diff truncated (%1 chars omitted)\n")
-                          .arg(omitted);
-                }
-                done(true, context, recent.trimmed(), QString());
-              });
-        });
+    RunGit(root,
+           {QStringLiteral("ls-files"), QStringLiteral("--others"),
+            QStringLiteral("--exclude-standard")},
+           [this, root, done, context](bool, const QString& untracked) mutable {
+             if (!untracked.trimmed().isEmpty()) {
+               context += QStringLiteral("\n# Untracked files:\n");
+               context += untracked;
+               context += QChar('\n');
+             }
+             RunGit(
+                 root,
+                 {QStringLiteral("log"), QStringLiteral("-n"),
+                  QStringLiteral("10"), QStringLiteral("--pretty=format:%s")},
+                 [done, context](bool, const QString& recent) mutable {
+                   constexpr int kDiffMaxChars = 120000;
+                   if (context.size() > kDiffMaxChars) {
+                     const int omitted =
+                         static_cast<int>(context.size()) - kDiffMaxChars;
+                     context = context.left(kDiffMaxChars);
+                     context += QStringLiteral(
+                                    "\n# diff truncated (%1 chars omitted)\n")
+                                    .arg(omitted);
+                   }
+                   done(true, context, recent.trimmed(), QString());
+                 });
+           });
   };
-  RunGit({QStringLiteral("diff"), QStringLiteral("--cached"),
+  RunGit(root,
+         {QStringLiteral("diff"), QStringLiteral("--cached"),
           QStringLiteral("--name-only")},
          [this, root, done, after_diff](bool listed,
                                         const QString& staged) mutable {
-           if (project_root_ != root) {
-             return;
-           }
            if (listed && !staged.trimmed().isEmpty()) {
-             RunGit({QStringLiteral("diff"), QStringLiteral("--cached")},
+             RunGit(root, {QStringLiteral("diff"), QStringLiteral("--cached")},
                     after_diff);
              return;
            }
-           RunGit({QStringLiteral("diff"), QStringLiteral("HEAD")},
+           RunGit(root, {QStringLiteral("diff"), QStringLiteral("HEAD")},
                   [this, root, done, after_diff](bool ok,
                                                  const QString& diff) mutable {
-                    if (project_root_ != root) {
-                      return;
-                    }
                     if (ok) {
                       after_diff(true, diff);
                       return;
                     }
-                    RunGit({QStringLiteral("diff")}, after_diff);
+                    RunGit(root, {QStringLiteral("diff")}, after_diff);
                   });
          });
 }
 
-void RightRail::FinishCommitGeneration() {
-  ai_generating_ = false;
-  if (git_generate_ != nullptr) {
-    git_generate_->setEnabled(true);
+void RightRail::FinishCommitGeneration(const QString& path, quint64 serial) {
+  GitRepoPane* repository = FindGitRepository(path, serial);
+  if (repository == nullptr) {
+    return;
+  }
+  repository->ai_generating = false;
+  if (repository->generate != nullptr) {
+    repository->generate->setEnabled(true);
   }
 }
 
-void RightRail::PushGit() {
-  if (git_message_status_ == nullptr) {
+void RightRail::PushGit(const QString& path, quint64 serial) {
+  GitRepoPane* repository = FindGitRepository(path, serial);
+  if (repository == nullptr || repository->message_status == nullptr) {
     return;
   }
-  const QString root = project_root_;
-  const QString message = git_message_ == nullptr
+  const QString message = repository->message == nullptr
                               ? QString()
-                              : git_message_->toPlainText().trimmed();
-  const auto push = [this, root]() {
-    git_message_status_->setText(QStringLiteral("Pushing…"));
-    RunGit(
-        {QStringLiteral("push")}, [this, root](bool ok, const QString& output) {
-          if (project_root_ != root || git_message_status_ == nullptr) {
-            return;
-          }
-          git_message_status_->setText(ok ? QStringLiteral("Pushed.") : output);
-          if (ok) {
-            RefreshGitStatus();
-          }
-        });
+                              : repository->message->toPlainText().trimmed();
+  const auto push = [this, path, serial]() {
+    GitRepoPane* current = FindGitRepository(path, serial);
+    if (current == nullptr || current->message_status == nullptr) {
+      return;
+    }
+    current->message_status->setText(QStringLiteral("Pushing…"));
+    RunGit(path, {QStringLiteral("push")},
+           [this, path, serial](bool ok, const QString& output) {
+             GitRepoPane* done = FindGitRepository(path, serial);
+             if (done == nullptr || done->message_status == nullptr) {
+               return;
+             }
+             done->message_status->setText(ok ? QStringLiteral("Pushed.")
+                                              : output);
+             if (ok) {
+               RefreshGitStatus(path, serial);
+             }
+           });
   };
   if (message.isEmpty()) {
     push();
     return;
   }
-  git_message_status_->setText(QStringLiteral("Committing…"));
-  RunGit({QStringLiteral("add"), QStringLiteral("-A")},
-         [this, message, root, push](bool staged, const QString& output) {
-           if (project_root_ != root || git_message_status_ == nullptr) {
-             return;
-           }
-           if (!staged) {
-             git_message_status_->setText(output);
-             return;
-           }
-           RunGit(
-               {QStringLiteral("commit"), QStringLiteral("-m"), message},
-               [this, root, push](bool committed, const QString& text) {
-                 if (project_root_ != root || git_message_status_ == nullptr) {
+  repository->message_status->setText(QStringLiteral("Committing…"));
+  RunGit(
+      path, {QStringLiteral("add"), QStringLiteral("-A")},
+      [this, path, serial, message, push](bool staged, const QString& output) {
+        GitRepoPane* current = FindGitRepository(path, serial);
+        if (current == nullptr || current->message_status == nullptr) {
+          return;
+        }
+        if (!staged) {
+          current->message_status->setText(output);
+          return;
+        }
+        RunGit(path, {QStringLiteral("commit"), QStringLiteral("-m"), message},
+               [this, path, serial, push](bool committed,
+                                          const QString& commit_output) {
+                 GitRepoPane* done = FindGitRepository(path, serial);
+                 if (done == nullptr || done->message_status == nullptr) {
                    return;
                  }
                  if (!committed) {
-                   git_message_status_->setText(text);
+                   done->message_status->setText(commit_output);
                    return;
                  }
-                 if (git_message_ != nullptr) {
-                   git_message_->clear();
+                 if (done->message != nullptr) {
+                   done->message->clear();
                  }
                  push();
                });
-         });
+      });
 }
 
 void RightRail::EnsureTerminal() {

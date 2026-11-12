@@ -21,6 +21,15 @@ struct ProjectFolderInfo {
   bool is_primary = false;
 };
 
+// One `repo` row from `projects.tree`. The gateway resolves declared project
+// folders and session working directories to repository roots before the tree
+// is emitted, so this is the authoritative list of repositories for a project.
+struct ProjectRepoInfo {
+  QString id;
+  QString label;
+  QString path;
+};
+
 struct ProjectInfo {
   QString id;
   QString slug;
@@ -52,6 +61,7 @@ struct ProjectNode {
   qint64 total_tokens = 0;
   double total_cost_usd = 0.0;
   int repo_count = 0;
+  std::vector<ProjectRepoInfo> repos;
   // Every session id the backend assigned to this project. This is the
   // authoritative set the sidebar filters with; previewSessions alone is
   // intentionally truncated.
@@ -111,6 +121,12 @@ QString ProjectWorkingDirectory(const ProjectsState& state,
 // working directory, or the user's home when no project is selected.
 QString ArtifactsWorkingDirectory(const ProjectsState& state,
                                   const QString& project_id);
+
+// Every repository the gateway assigned to a project. Uses the tree's resolved
+// repo roots first, then declared folders/worktree paths as a pre-tree
+// fallback. The right rail renders one Git action group per entry.
+std::vector<ProjectRepoInfo> ProjectGitRepositories(const ProjectsState& state,
+                                                    const QString& project_id);
 
 // Human-friendly one-line detail for a project row/editor.
 QString ProjectSummaryLine(const ProjectInfo& project);
