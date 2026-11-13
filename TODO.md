@@ -145,6 +145,23 @@ REST.**
   headers, child-to-header updates, the second router, and **Show all**.
 - [x] Full native suite: **9/9 passed** in 33.63 s.
 
+## Status update — 2026-11-13 (seventy-second pass)
+
+**Kanban follows light/dark theme switches.**
+
+- [x] **Root cause:** `PagesView` constructs and owns `KanbanView`, but its
+  `SetTheme` only restyled the pages chrome. The custom-painted board kept the
+  palette from construction, so switching to dark left a bright white board
+  inside the dark workspace.
+- [x] **Fix:** `PagesView::SetTheme` now calls `KanbanView::SetTheme`, which
+  restyles the toolbar, canvas, and any open task dialog from the active
+  tokens.
+- [x] **Regression coverage:** the Kanban test target now links `PagesView` and
+  asserts the canvas background tracks `Theme::Light()` → `Theme::Dark()`.
+- [x] **Pixel verification:** live dark screenshot samples changed from
+  `#FFFEFF` (light canvas) to `#494F59` (dark column surface) on the board.
+- [x] Full native suite: **10/10 passed** in 17.94 s.
+
 ## Status update — 2026-11-13 (seventy-first pass)
 
 **Gateway restarts no longer leave the native UI on a stale instance ticket.**
@@ -167,6 +184,23 @@ REST.**
   `GatewayHttp` at a deliberately stale instance id and verifies a normal
   `/api/config` request still succeeds after rediscovery.
 - [x] Full native suite: **9/9 passed** in 33.47 s.
+
+## Status update — 2026-11-13 (seventy-second pass)
+
+**Kanban follows light/dark theme switches.**
+
+- [x] **Root cause:** `PagesView` constructs and owns `KanbanView`, but its
+  `SetTheme` only restyled the pages chrome. The custom-painted board kept the
+  palette from construction, so switching to dark left a bright white board
+  inside the dark workspace.
+- [x] **Fix:** `PagesView::SetTheme` now calls `KanbanView::SetTheme`, which
+  restyles the toolbar, canvas, and any open task dialog from the active
+  tokens.
+- [x] **Regression coverage:** the Kanban test target now links `PagesView` and
+  asserts the canvas background tracks `Theme::Light()` → `Theme::Dark()`.
+- [x] **Pixel verification:** live dark screenshot samples changed from
+  `#FFFEFF` (light canvas) to `#494F59` (dark column surface) on the board.
+- [x] Full native suite: **10/10 passed** in 17.94 s.
 
 ## Status update — 2026-11-13 (seventy-first pass)
 
@@ -212,6 +246,23 @@ REST.**
 - [x] Dark-theme screenshot OCR reads every provider, model, and button; the
   dialog is uniformly dark instead of a dark frame around a white list.
 - [x] Full native suite: **9/9 passed** in 28.20 s.
+
+## Status update — 2026-11-13 (seventy-second pass)
+
+**Kanban follows light/dark theme switches.**
+
+- [x] **Root cause:** `PagesView` constructs and owns `KanbanView`, but its
+  `SetTheme` only restyled the pages chrome. The custom-painted board kept the
+  palette from construction, so switching to dark left a bright white board
+  inside the dark workspace.
+- [x] **Fix:** `PagesView::SetTheme` now calls `KanbanView::SetTheme`, which
+  restyles the toolbar, canvas, and any open task dialog from the active
+  tokens.
+- [x] **Regression coverage:** the Kanban test target now links `PagesView` and
+  asserts the canvas background tracks `Theme::Light()` → `Theme::Dark()`.
+- [x] **Pixel verification:** live dark screenshot samples changed from
+  `#FFFEFF` (light canvas) to `#494F59` (dark column surface) on the board.
+- [x] Full native suite: **10/10 passed** in 17.94 s.
 
 ## Status update — 2026-11-13 (seventy-first pass)
 
