@@ -86,6 +86,101 @@ QString FormatTurnDuration(double seconds) {
       .arg(total % 60, 2, 10, QLatin1Char('0'));
 }
 
+bool IsUrlSelectionChar(QChar ch) {
+  return ch.isLetterOrNumber() || ch == QLatin1Char('_') ||
+         ch == QLatin1Char('-') || ch == QLatin1Char('.') ||
+         ch == QLatin1Char('/') || ch == QLatin1Char(':') ||
+         ch == QLatin1Char('?') || ch == QLatin1Char('#') ||
+         ch == QLatin1Char('%') || ch == QLatin1Char('&') ||
+         ch == QLatin1Char('=') || ch == QLatin1Char('+') ||
+         ch == QLatin1Char('~') || ch == QLatin1Char('@');
+}
+
+// Double-clicking a domain used to select only the label before the dot
+// ("pinderlog" in "pinderlog.com"). Expand a word that looks like a URL or a
+// file name across the punctuation that belongs to it, while leaving normal
+// sentence punctuation behind.
+std::pair<int, int> ExpandUrlWord(const QString& text, int start, int end) {
+  const int size = static_cast<int>(text.size());
+  start = std::clamp(start, 0, size);
+  end = std::clamp(end, 0, size);
+  if (start >= end) {
+    return {start, end};
+  }
+  while (start > 0 && IsUrlSelectionChar(text.at(start - 1))) {
+    --start;
+  }
+  while (end < size && IsUrlSelectionChar(text.at(end))) {
+    ++end;
+  }
+  const QString token = text.mid(start, end - start);
+  bool url_like = token.contains(QStringLiteral("://")) ||
+                  token.startsWith(QStringLiteral("www."));
+  for (int index = 0; index + 1 < token.size() && !url_like; ++index) {
+    if (token.at(index) == QLatin1Char('.') &&
+        token.at(index + 1).isLetter()) {
+      url_like = true;
+    }
+  }
+  if (!url_like) {
+    return {start, end};
+  }
+  static const QString trailing = QStringLiteral(".,;:!?)]}\"'");
+  while (end > start && trailing.contains(text.at(end - 1))) {
+    --end;
+  }
+  return {start, end};
+}
+
+qreal PlainTextOrigin(const QRectF& rect, const QString& text,
+                      const QFont& font, Qt::Alignment alignment) {
+  const QFontMetricsF metrics(font);
+  const qreal advance = metrics.horizontalAdvance(text);
+  if (alignment & Qt::AlignRight) {
+    return rect.right() - advance;
+  }
+  if (alignment & Qt::AlignHCenter) {
+    return rect.center().x() - advance / 2.0;
+  }
+  return rect.left();
+}
+
+// Plain runs are painted with drawText(), which clips anything that does not
+// fit, and tool summaries additionally use DrawElidedText(). Keep the stored
+// selectable string equal to the glyphs the user can actually see so copying
+// a selection can never reach clipped or elided characters.
+QString VisiblePlainText(const QRectF& rect, const QString& text,
+                         const QFont& font, Qt::Alignment alignment,
+                         bool elide) {
+  if (text.isEmpty() || rect.width() <= 0.0) {
+    return {};
+  }
+  const QFontMetrics metrics(font);
+  const int width = std::max(1, static_cast<int>(rect.width()));
+  if (metrics.horizontalAdvance(text) <= width) {
+    return text;
+  }
+  if (elide) {
+    return metrics.elidedText(text, Qt::ElideRight, width);
+  }
+  if (alignment & Qt::AlignRight) {
+    int start = text.size();
+    while (start > 0 &&
+           metrics.horizontalAdvance(text.mid(start - 1)) <= width) {
+      --start;
+    }
+    return text.mid(start);
+  }
+  int length = 0;
+  while (length < text.size() &&
+         metrics.horizontalAdvance(text.left(length + 1)) <= width) {
+    ++length;
+  }
+  // A partially visible glyph is still visible; keep one rather than making
+  // the whole run unselectable on very narrow buttons.
+  return text.left(std::max(1, length));
+}
+
 QString ReactionFooterText(const ChatMessage& message) {
   if (message.reactions.empty()) {
     return QString();
@@ -569,7 +664,14 @@ class TranscriptWidget : public QWidget {
     int run = -1;
     int offset = 0;
   };
+  struct SelectionFragment {
+    int run = -1;
+    int from = 0;
+    int to = 0;
+  };
   std::vector<TextRun> SelectableRuns() const;
+  std::vector<SelectionFragment> SelectionFragments(
+      const std::vector<TextRun>& runs) const;
   TextPosition TextPositionAt(const QPointF& position) const;
   static int DocumentOffsetAt(const QTextDocument& document,
                               const QPointF& local);
@@ -821,13 +923,17 @@ std::vector<TranscriptWidget::TextRun> TranscriptWidget::SelectableRuns()
     const {  // NOLINT(whitespace/indent_namespace)
   std::vector<TextRun> runs;
   const auto add_plain = [&runs](const QRectF& rect, const QString& text,
-                                 const QFont& font, Qt::Alignment alignment) {
+                                 const QFont& font, Qt::Alignment alignment,
+                                 bool elide = false) {
     if (rect.isNull() || text.isEmpty()) {
       return;
     }
     TextRun run;
     run.rect = rect;
-    run.plain = text;
+    run.plain = VisiblePlainText(rect, text, font, alignment, elide);
+    if (run.plain.isEmpty()) {
+      return;
+    }
     run.font = font;
     run.alignment = alignment;
     runs.push_back(std::move(run));
@@ -957,13 +1063,23 @@ std::vector<TranscriptWidget::TextRun> TranscriptWidget::SelectableRuns()
                   Qt::AlignLeft | Qt::AlignVCenter);
       } else if (block.source.kind == BlockKind::kTool) {
         if (block.tool_group) {
+          const QString label =
+              block.tool_count == 1
+                  ? QStringLiteral("1 action")
+                  : QStringLiteral("%1 actions").arg(block.tool_count);
+          const qreal label_width =
+              QFontMetricsF(theme_.UiFont(11, QFont::DemiBold))
+                  .horizontalAdvance(label) +
+              8;
           add_plain(QRectF(block.rect.left() + 28, block.rect.top(),
-                           block.rect.width() - 56, 28),
-                    QStringLiteral("%1 actions: %2")
-                        .arg(block.tool_count)
-                        .arg(block.tool_names),
-                    theme_.UiFont(11, QFont::DemiBold),
+                           label_width, 28),
+                    label, theme_.UiFont(11, QFont::DemiBold),
                     Qt::AlignLeft | Qt::AlignVCenter);
+          add_plain(QRectF(block.rect.left() + 30 + label_width,
+                           block.rect.top(),
+                           block.rect.width() - label_width - 62, 28),
+                    block.tool_names, theme_.UiFont(11, QFont::Normal),
+                    Qt::AlignLeft | Qt::AlignVCenter, true);
         } else {
           add_plain(QRectF(block.rect.left() + 28, block.rect.top(), 90, 28),
                     block.source.text, theme_.UiFont(11, QFont::DemiBold),
@@ -974,7 +1090,7 @@ std::vector<TranscriptWidget::TextRun> TranscriptWidget::SelectableRuns()
             add_plain(QRectF(block.rect.left() + 118, block.rect.top(),
                              block.rect.width() - 150, 28),
                       summary, theme_.UiFont(11, QFont::Normal),
-                      Qt::AlignLeft | Qt::AlignVCenter);
+                      Qt::AlignLeft | Qt::AlignVCenter, true);
           }
           if (block.document && block.rect.height() > 28.5) {
             add_document(QRectF(block.rect.left() + 12, block.rect.top() + 32,
@@ -1039,12 +1155,8 @@ int TranscriptWidget::PlainOffsetAt(const TextRun& run,
   }
   const QFontMetricsF metrics(run.font);
   const qreal advance = metrics.horizontalAdvance(run.plain);
-  qreal start = run.rect.left();
-  if (run.alignment & Qt::AlignRight) {
-    start = run.rect.right() - advance;
-  } else if (run.alignment & Qt::AlignHCenter) {
-    start = run.rect.center().x() - advance / 2.0;
-  }
+  const qreal start =
+      PlainTextOrigin(run.rect, run.plain, run.font, run.alignment);
   const qreal local = position.x() - start;
   if (local <= 0) {
     return 0;
@@ -1052,10 +1164,18 @@ int TranscriptWidget::PlainOffsetAt(const TextRun& run,
   if (local >= advance) {
     return run.plain.size();
   }
-  for (int index = 1; index <= run.plain.size(); ++index) {
-    if (metrics.horizontalAdvance(run.plain.left(index)) >= local) {
-      return index - 1;
+  // Map to the nearest character boundary. The old floor mapping put the
+  // cursor before the character under the pointer until the pointer crossed
+  // its right edge, so selecting a word by dragging over it could either drop
+  // its last glyph or pick up the next word depending on where the release
+  // landed. Document runs already use nearest-boundary hit testing.
+  qreal previous = 0;
+  for (int index = 0; index < run.plain.size(); ++index) {
+    const qreal next = metrics.horizontalAdvance(run.plain.left(index + 1));
+    if (local < (previous + next) / 2.0) {
+      return index;
     }
+    previous = next;
   }
   return run.plain.size();
 }
@@ -1146,9 +1266,11 @@ void TranscriptWidget::SelectAllText() {
   update();
 }
 
-QString TranscriptWidget::SelectedText() const {
+std::vector<TranscriptWidget::SelectionFragment>
+TranscriptWidget::SelectionFragments(const std::vector<TextRun>& runs) const {
+  std::vector<SelectionFragment> fragments;
   if (!HasSelection()) {
-    return {};
+    return fragments;
   }
   TextPosition start = selection_anchor_;
   TextPosition end = selection_cursor_;
@@ -1156,8 +1278,6 @@ QString TranscriptWidget::SelectedText() const {
       (start.run == end.run && start.offset > end.offset)) {
     std::swap(start, end);
   }
-  const std::vector<TextRun> runs = SelectableRuns();
-  QString text;
   for (int index = start.run;
        index <= end.run && index < static_cast<int>(runs.size()); ++index) {
     const TextRun& run = runs[index];
@@ -1168,11 +1288,22 @@ QString TranscriptWidget::SelectedText() const {
     int to = index == end.run ? end.offset : length;
     from = std::clamp(from, 0, length);
     to = std::clamp(to, 0, length);
-    if (to <= from) {
-      continue;
+    if (to > from) {
+      fragments.push_back({index, from, to});
     }
-    const QString piece = run.document ? DocumentRange(*run.document, from, to)
-                                       : run.plain.mid(from, to - from);
+  }
+  return fragments;
+}
+
+QString TranscriptWidget::SelectedText() const {
+  const std::vector<TextRun> runs = SelectableRuns();
+  QString text;
+  for (const SelectionFragment& fragment : SelectionFragments(runs)) {
+    const TextRun& run = runs[fragment.run];
+    const QString piece =
+        run.document
+            ? DocumentRange(*run.document, fragment.from, fragment.to)
+            : run.plain.mid(fragment.from, fragment.to - fragment.from);
     if (piece.isEmpty()) {
       continue;
     }
@@ -1216,36 +1347,16 @@ std::vector<std::pair<QRectF, QRectF>> TranscriptWidget::BlockRectsForTest(
 
 std::vector<QRectF> TranscriptWidget::SelectionRects() const {
   std::vector<QRectF> rects;
-  if (!HasSelection()) {
-    return rects;
-  }
-  TextPosition start = selection_anchor_;
-  TextPosition end = selection_cursor_;
-  if (start.run > end.run ||
-      (start.run == end.run && start.offset > end.offset)) {
-    std::swap(start, end);
-  }
   const std::vector<TextRun> runs = SelectableRuns();
-  for (int index = start.run;
-       index <= end.run && index < static_cast<int>(runs.size()); ++index) {
-    const TextRun& run = runs[index];
-    const int length = run.document
-                           ? std::max(0, run.document->characterCount() - 1)
-                           : run.plain.size();
-    int from = index == start.run ? start.offset : 0;
-    int to = index == end.run ? end.offset : length;
-    from = std::clamp(from, 0, length);
-    to = std::clamp(to, 0, length);
-    if (to <= from) {
-      continue;
-    }
+  for (const SelectionFragment& fragment : SelectionFragments(runs)) {
+    const TextRun& run = runs[fragment.run];
     if (run.document) {
-      QTextBlock block = run.document->findBlock(from);
-      while (block.isValid() && block.position() < to) {
+      QTextBlock block = run.document->findBlock(fragment.from);
+      while (block.isValid() && block.position() < fragment.to) {
         const int block_start = block.position();
         const int block_end = block_start + block.length() - 1;
-        const int line_from = std::max(from, block_start);
-        const int line_to = std::min(to, block_end);
+        const int line_from = std::max(fragment.from, block_start);
+        const int line_to = std::min(fragment.to, block_end);
         const QTextLayout* layout = block.layout();
         if (layout != nullptr && line_from < line_to) {
           const QRectF block_rect =
@@ -1278,15 +1389,12 @@ std::vector<QRectF> TranscriptWidget::SelectionRects() const {
       }
     } else {
       const QFontMetricsF metrics(run.font);
-      const qreal advance = metrics.horizontalAdvance(run.plain);
-      qreal origin = run.rect.left();
-      if (run.alignment & Qt::AlignRight) {
-        origin = run.rect.right() - advance;
-      } else if (run.alignment & Qt::AlignHCenter) {
-        origin = run.rect.center().x() - advance / 2.0;
-      }
-      const qreal x1 = origin + metrics.horizontalAdvance(run.plain.left(from));
-      const qreal x2 = origin + metrics.horizontalAdvance(run.plain.left(to));
+      const qreal origin =
+          PlainTextOrigin(run.rect, run.plain, run.font, run.alignment);
+      const qreal x1 =
+          origin + metrics.horizontalAdvance(run.plain.left(fragment.from));
+      const qreal x2 =
+          origin + metrics.horizontalAdvance(run.plain.left(fragment.to));
       rects.push_back(QRectF(x1, run.rect.top(), std::max<qreal>(1, x2 - x1),
                              run.rect.height()));
     }
@@ -1536,8 +1644,12 @@ void TranscriptWidget::mouseDoubleClickEvent(QMouseEvent* event) {
     cursor.setPosition(hit.offset);
     cursor.select(QTextCursor::WordUnderCursor);
     if (cursor.hasSelection()) {
-      selection_anchor_ = {hit.run, cursor.selectionStart()};
-      selection_cursor_ = {hit.run, cursor.selectionEnd()};
+      const QTextBlock block = cursor.block();
+      const auto expanded =
+          ExpandUrlWord(block.text(), cursor.selectionStart() - block.position(),
+                        cursor.selectionEnd() - block.position());
+      selection_anchor_ = {hit.run, block.position() + expanded.first};
+      selection_cursor_ = {hit.run, block.position() + expanded.second};
     }
   } else {
     auto is_word = [](QChar ch) {
@@ -1552,8 +1664,9 @@ void TranscriptWidget::mouseDoubleClickEvent(QMouseEvent* event) {
     while (end < run.plain.size() && is_word(run.plain.at(end))) {
       ++end;
     }
-    selection_anchor_ = {hit.run, start};
-    selection_cursor_ = {hit.run, end};
+    const auto expanded = ExpandUrlWord(run.plain, start, end);
+    selection_anchor_ = {hit.run, expanded.first};
+    selection_cursor_ = {hit.run, expanded.second};
   }
   selecting_ = false;
   setFocus(Qt::MouseFocusReason);

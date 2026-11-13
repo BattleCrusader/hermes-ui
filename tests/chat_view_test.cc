@@ -82,6 +82,42 @@ std::shared_ptr<hermes::ui::ProfileSnapshot> SnapshotWithDisplayBlocks() {
   return snapshot;
 }
 
+std::shared_ptr<hermes::ui::ProfileSnapshot> SnapshotWithSelectableUrl() {
+  auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
+  snapshot->name = QStringLiteral("default");
+  snapshot->label = QStringLiteral("default");
+  snapshot->revision = 1;
+  hermes::ui::ChatMessage message;
+  message.role = hermes::ui::MessageRole::kAssistant;
+  message.author = QStringLiteral("Hermes");
+  message.timestamp = QDateTime(QDate(2026, 1, 2), QTime(10, 30));
+  hermes::ui::MessageBlock paragraph;
+  paragraph.kind = hermes::ui::BlockKind::kParagraph;
+  paragraph.text = QStringLiteral("Visit pinderlog.com for the sitemap.");
+  message.blocks.push_back(paragraph);
+  snapshot->messages.push_back(message);
+  return snapshot;
+}
+
+std::shared_ptr<hermes::ui::ProfileSnapshot> SnapshotWithClippedHeader() {
+  auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
+  snapshot->name = QStringLiteral("default");
+  snapshot->label = QStringLiteral("default");
+  snapshot->revision = 1;
+  hermes::ui::ChatMessage message;
+  message.role = hermes::ui::MessageRole::kAssistant;
+  message.author = QStringLiteral(
+      "pinderlog.com followed by a long clipped suffix that must never be "
+      "copied from the author header MUST_NOT_COPY");
+  message.timestamp = QDateTime(QDate(2026, 1, 2), QTime(10, 30));
+  hermes::ui::MessageBlock paragraph;
+  paragraph.kind = hermes::ui::BlockKind::kParagraph;
+  paragraph.text = QStringLiteral("Body");
+  message.blocks.push_back(paragraph);
+  snapshot->messages.push_back(message);
+  return snapshot;
+}
+
 std::shared_ptr<hermes::ui::ProfileSnapshot> SnapshotWithLongCodeLine() {
   auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
   snapshot->name = QStringLiteral("default");
@@ -130,6 +166,8 @@ class ChatViewTest : public QObject {
   void hoverActionRowMatchesDesktop();
   void everyMessageItemUsesHoverActionRow();
   void transcriptTextSelectionCopiesToClipboard();
+  void transcriptSelectionMatchesVisibleUrl();
+  void transcriptPlainSelectionMatchesVisibleText();
   void detachedChatWindowSharesSnapshotAndComposer();
 };
 
@@ -1129,6 +1167,92 @@ void ChatViewTest::transcriptTextSelectionCopiesToClipboard() {
   QGuiApplication::clipboard()->clear();
   QTest::keySequence(transcript, QKeySequence::Copy);
   QCOMPARE(QGuiApplication::clipboard()->text(), dragged);
+}
+
+void ChatViewTest::transcriptSelectionMatchesVisibleUrl() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::ChatView view(theme);
+  view.resize(1000, 620);
+  view.show();
+  view.SetContentMaxWidth(600);
+  view.SetSnapshot(SnapshotWithSelectableUrl());
+  QTest::qWait(30);
+
+  const auto rects =
+      view.BlockRectsForTest(hermes::ui::BlockKind::kParagraph);
+  QCOMPARE(rects.size(), std::size_t(1));
+  const QRectF text = rects.front().second;
+  const QFontMetricsF metrics(theme.UiFont(13, QFont::Normal));
+  const QString body = QStringLiteral("Visit pinderlog.com for the sitemap.");
+  const int start = body.indexOf(QStringLiteral("pinderlog.com"));
+  const int end = start + QStringLiteral("pinderlog.com").size();
+  const qreal start_x = text.left() + metrics.horizontalAdvance(body.left(start));
+  const qreal end_x = text.left() + metrics.horizontalAdvance(body.left(end));
+  const qreal y = text.top() + text.height() / 2.0;
+  QWidget* transcript = view.widget();
+  const QPointF from(start_x + 1, y);
+  const QPointF to(end_x, y);
+  QTest::mousePress(transcript, Qt::LeftButton, Qt::NoModifier, from.toPoint());
+  QMouseEvent move(QEvent::MouseMove, to, to, Qt::NoButton, Qt::LeftButton,
+                   Qt::NoModifier);
+  QApplication::sendEvent(transcript, &move);
+  QTest::mouseRelease(transcript, Qt::LeftButton, Qt::NoModifier, to.toPoint());
+  QCOMPARE(view.SelectedTextForTest(), QStringLiteral("pinderlog.com"));
+  const auto highlights = view.SelectionRectsForTest();
+  QCOMPARE(highlights.size(), std::size_t(1));
+  QVERIFY2(qAbs(highlights.front().left() - start_x) < 0.75,
+           "highlight must begin on the first glyph of the URL");
+  QVERIFY2(qAbs(highlights.front().right() - end_x) < 0.75,
+           "highlight must end on the last glyph of the URL");
+
+  // A double-click on a domain selects the whole URL, not just the label
+  // before the dot.
+  const QPointF middle((start_x + end_x) / 2.0, y);
+  QTest::mouseDClick(transcript, Qt::LeftButton, Qt::NoModifier,
+                     middle.toPoint());
+  QCOMPARE(view.SelectedTextForTest(), QStringLiteral("pinderlog.com"));
+}
+
+void ChatViewTest::transcriptPlainSelectionMatchesVisibleText() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::ChatView view(theme);
+  view.resize(760, 500);
+  view.show();
+  view.SetContentMaxWidth(560);
+  view.SetSnapshot(SnapshotWithClippedHeader());
+  QTest::qWait(30);
+
+  const QString author = QStringLiteral(
+      "pinderlog.com followed by a long clipped suffix that must never be "
+      "copied from the author header MUST_NOT_COPY");
+  const QFont font = theme.UiFont(12, QFont::DemiBold);
+  const QFontMetricsF metrics(font);
+  // The header starts at the shared content inset and is one line tall.
+  const QRectF header(56, 0, 560, 18);
+  QString visible;
+  for (const QChar ch : author) {
+    if (metrics.horizontalAdvance(visible + ch) > header.width()) {
+      break;
+    }
+    visible += ch;
+  }
+  QVERIFY2(visible != author, "the fixture must actually be clipped");
+
+  QWidget* transcript = view.widget();
+  const QPointF from(header.left() + 1, header.center().y());
+  const QPointF to(header.right() - 1, header.center().y());
+  QTest::mousePress(transcript, Qt::LeftButton, Qt::NoModifier, from.toPoint());
+  QMouseEvent move(QEvent::MouseMove, to, to, Qt::NoButton, Qt::LeftButton,
+                   Qt::NoModifier);
+  QApplication::sendEvent(transcript, &move);
+  QTest::mouseRelease(transcript, Qt::LeftButton, Qt::NoModifier, to.toPoint());
+  QCOMPARE(view.SelectedTextForTest(), visible);
+  QVERIFY(!view.SelectedTextForTest().contains(QStringLiteral("MUST_NOT_COPY")));
+
+  // Select-all must also stop at the clipped glyphs. The old full-string run
+  // made the invisible suffix copyable even though it was never painted.
+  view.SelectAllTextForTest();
+  QVERIFY(!view.SelectedTextForTest().contains(QStringLiteral("MUST_NOT_COPY")));
 }
 
 void ChatViewTest::promptSubmitTruncationIsExplicit() {

@@ -189,6 +189,34 @@ REST.**
   dialog is uniformly dark instead of a dark frame around a white list.
 - [x] Full native suite: **9/9 passed** in 28.20 s.
 
+## Status update — 2026-11-13 (seventieth pass)
+
+**Copy and highlight now share one selection model, including URLs.**
+
+- [x] **Why a URL selection could copy the next glyph.** Copy and paint used
+  separate inline range loops. Plain runs also stored the full unclipped
+  string even though `drawText`/`DrawElidedText` painted only a prefix or an
+  ellipsized summary. The copy range could therefore include characters that
+  were never highlighted.
+- [x] **Single source of truth.** `TranscriptWidget::SelectionFragments()`
+  computes the clamped per-run `[from,to)` ranges; `SelectedText()` and
+  `SelectionRects()` both consume it, so copy and highlight cannot diverge.
+- [x] **Plain runs contain only visible glyphs.** `VisiblePlainText()` clips
+  left-aligned prefixes, right-aligned suffixes and elided tool summaries to
+  the painted width. `PlainTextOrigin()` is shared by hit testing and paint.
+- [x] **Nearest-boundary hit testing.** `PlainOffsetAt()` now maps the pointer
+  to the nearest character boundary instead of flooring, matching document
+  `hitTest` behavior and avoiding one-character under/over-selection.
+- [x] **Double-click domains as one token.** `ExpandUrlWord()` expands
+  `pinderlog.com`, `www.` URLs, schemes and file names across punctuation while
+  trimming sentence punctuation.
+- [x] **Regression coverage.** `transcriptSelectionMatchesVisibleUrl` asserts
+  selecting `pinderlog.com` copies exactly that string, the highlight starts
+  and ends on the URL glyphs, and a double-click selects the whole domain.
+  `transcriptPlainSelectionMatchesVisibleText` proves clipped header text and
+  select-all cannot reach an unpainted suffix.
+- [x] Full native suite: **9/9 passed** in 28.71 s.
+
 ## Status update — 2026-11-13 (sixty-ninth pass)
 
 **Transcript selection now paints every wrapped visual line.**
