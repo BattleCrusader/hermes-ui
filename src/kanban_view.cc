@@ -3524,12 +3524,13 @@ void KanbanView::BulkMove(const QStringList& ids, const QString& column) {
   Request(QStringLiteral("POST"), QStringLiteral("/tasks/bulk"),
           QJsonObject{{QStringLiteral("ids"), array},
                       {QStringLiteral("status"), column}},
-          [this, column](const QJsonObject&, const QString& error) {
+          [this, column, count = ids.size()](const QJsonObject&,
+                                             const QString& error) {
             if (!error.isEmpty()) {
               return;
             }
             ShowStatus(QStringLiteral("Moved %1 cards to %2")
-                           .arg(1)
+                           .arg(count)
                            .arg(kanban::ColumnLabel(column)));
             FetchBoard();
           });
