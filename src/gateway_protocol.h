@@ -42,6 +42,11 @@ QJsonObject BuildSessionEventsSinceParams(const QString& session_id,
 QJsonObject BuildPromptReceiptParams(const QString& session_id,
                                      const QString& admission_id);
 
+// Stop is fenced on the running turn's claim identity. A missing generation is
+// rejected by the gateway as `stale_generation`, so only omit it when unknown.
+QJsonObject BuildInterruptParams(const QString& session_id,
+                                 int execution_generation);
+
 // Gateway-owned queue snapshot. `session.resume` and `session.info` publish
 // the same row shape; parsing it here keeps the worker and the queue dialog on
 // one definition. Rows remain in FIFO order.

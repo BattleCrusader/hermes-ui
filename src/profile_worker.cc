@@ -360,6 +360,10 @@ std::shared_ptr<const ProfileSnapshot> ProfileWorker::Snapshot() const {
   return published_;
 }
 
+int ProfileWorker::ExecutionGeneration() const {
+  return execution_generation_.load(std::memory_order_relaxed);
+}
+
 void ProfileWorker::SetForeground(bool foreground) {
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -427,6 +431,9 @@ void ProfileWorker::SelectSession(const QString& session_id) {
       pinned_model_.clear();
     }
     state_.selected_session_id = session_id;
+    // A generation belongs to one session. Carrying it across a switch would
+    // make Stop target a claim that is not on screen.
+    execution_generation_ = -1;
     // Never let the previous chat's runtime controls leak into a placeholder
     // session that has not reached /api/sessions yet.
     state_.model.clear();
@@ -711,7 +718,11 @@ void ProfileWorker::Interrupt() {
     PublishLocked();
   }
   if (!session_id.isEmpty() && socket_ != nullptr && socket_->IsConnected()) {
-    socket_->InterruptSession(session_id, execution_generation_);
+    const int request_id =
+        socket_->InterruptSession(session_id, execution_generation_);
+    if (request_id >= 0) {
+      pending_interrupts_.insert(request_id);
+    }
   }
 }
 
@@ -2477,6 +2488,7 @@ void ProfileWorker::OnSocketDisconnected() {
     }
   }
   pending_prompt_callbacks_.clear();
+  pending_interrupts_.clear();
   if (deferred_prompt_callback_) {
     prompt_callbacks.push_back(std::move(deferred_prompt_callback_));
   }
@@ -2905,13 +2917,6 @@ void ProfileWorker::OnSocketEvent(const QString& type,
   }
   const QJsonValue generation =
       payload.value(QStringLiteral("execution_generation"));
-  if (generation.isDouble()) {
-    execution_generation_ = generation.toInt();
-  }
-  if (qEnvironmentVariableIsSet("HERMES_UI_DEBUG_GEN")) {
-    qInfo("event type=%s generation=%d has=%d", qUtf8Printable(type),
-          execution_generation_, generation.isDouble() ? 1 : 0);
-  }
   if (type == QStringLiteral("voice.status")) {
     const QString status = payload.value(QStringLiteral("state")).toString();
     std::lock_guard<std::mutex> lock(mutex_);
@@ -3060,6 +3065,16 @@ void ProfileWorker::OnSocketEvent(const QString& type,
   if (!session_id.isEmpty() && !selected.isEmpty() && session_id != selected &&
       session_id != runtime_session_id_) {
     return;
+  }
+  // Only a claim for the session on screen may fence Stop/Steer. A late event
+  // from a previously attached session carries a different generation and
+  // would otherwise make every interrupt look stale.
+  if (generation.isDouble()) {
+    execution_generation_ = generation.toInt();
+  }
+  if (qEnvironmentVariableIsSet("HERMES_UI_DEBUG_GEN")) {
+    qInfo("event type=%s generation=%d has=%d", qUtf8Printable(type),
+          execution_generation_.load(), generation.isDouble() ? 1 : 0);
   }
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -3429,6 +3444,22 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
       return;
     }
   }
+  if (const auto interrupt = pending_interrupts_.find(id);
+      interrupt != pending_interrupts_.end()) {
+    pending_interrupts_.erase(interrupt);
+    if (!error.isEmpty()) {
+      if (error.contains(QStringLiteral("stale_generation"))) {
+        // The turn settled before this Stop landed. Clear the identity so the
+        // next steer does not fence against a generation that is gone.
+        execution_generation_ = -1;
+        Note(QStringLiteral("The turn had already stopped"));
+        qInfo("interrupt stale profile=%s", qUtf8Printable(name_));
+      } else {
+        PublishError(QStringLiteral("Stop failed: %1").arg(error));
+      }
+    }
+    return;
+  }
   if (const auto mutation = pending_session_mutations_.find(id);
       mutation != pending_session_mutations_.end()) {
     const PendingSessionMutation pending = mutation->second;
@@ -3752,6 +3783,7 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
       admission_id_.clear();
       admission_status_.clear();
       pending_receipt_id_ = -1;
+      execution_generation_ = -1;
       state_.running = false;
       state_.running_session_id.clear();
       state_.error_text.clear();
@@ -3866,12 +3898,24 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
       }
       receipt_admission = admission_id_;
     }
-    if (!info.isEmpty() && info.contains(QStringLiteral("running"))) {
+    // session.resume carries the authoritative claim identity at the top
+    // level. Without it a Stop pressed before the first event would send no
+    // generation and the gateway would reject it as stale.
+    if (result.contains(QStringLiteral("execution_generation"))) {
+      execution_generation_ =
+          result.value(QStringLiteral("execution_generation")).toInt(-1);
+    }
+    if (result.contains(QStringLiteral("running"))) {
+      state_.running = result.value(QStringLiteral("running")).toBool();
+      state_.running_session_id =
+          state_.running ? state_.selected_session_id : QString();
+    } else if (!info.isEmpty() && info.contains(QStringLiteral("running"))) {
       state_.running = info.value(QStringLiteral("running")).toBool();
       state_.running_session_id =
           state_.running ? state_.selected_session_id : QString();
     }
-    if (!info.isEmpty()) {
+    if (!info.isEmpty() || result.contains(QStringLiteral("running")) ||
+        result.contains(QStringLiteral("execution_generation"))) {
       // Start the quiet-stream clock from the fresh resume report; otherwise a
       // UI that attaches mid-turn with no subsequent event never reconciles.
       last_event_ms_ = QDateTime::currentMSecsSinceEpoch();

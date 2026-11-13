@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QString>
+#include <atomic>
 #include <functional>
 #include <map>
 #include <memory>
@@ -41,6 +42,9 @@ class ProfileWorker : public QObject {
   ProfileWorker& operator=(const ProfileWorker&) = delete;
 
   std::shared_ptr<const ProfileSnapshot> Snapshot() const;
+  // Current claim identity. Read from the UI thread when Stop is pressed so a
+  // blocked worker cannot hand the relay a generation from a later turn.
+  int ExecutionGeneration() const;
   void SetForeground(bool foreground);
 
   // `session.steer` is asynchronous. The callback reports whether the gateway
@@ -258,9 +262,13 @@ class ProfileWorker : public QObject {
   int pending_catalog_id_ = -1;
   bool catalog_requested_ = false;
   // Execution identity of the turn currently claimed on this session; the
-  // gateway fences session.steer / session.interrupt on it.
-  int execution_generation_ = -1;
+  // gateway fences session.steer / session.interrupt on it. Atomic because the
+  // UI reads it when Stop must leave immediately.
+  std::atomic<int> execution_generation_{-1};
   std::map<int, QString> pending_commands_;
+  // session.interrupt answers are not user-facing: a turn that settled between
+  // the click and the RPC is a normal race, not an error.
+  std::set<int> pending_interrupts_;
   std::map<int, QString> pending_steers_;
   std::map<int, SteerCallback> pending_steer_callbacks_;
   std::map<int, SteerCallback> pending_prompt_callbacks_;

@@ -106,6 +106,16 @@ QJsonObject BuildPromptReceiptParams(const QString& session_id,
   return params;
 }
 
+QJsonObject BuildInterruptParams(const QString& session_id,
+                                 int execution_generation) {
+  QJsonObject params;
+  params.insert(QStringLiteral("session_id"), session_id);
+  if (execution_generation >= 0) {
+    params.insert(QStringLiteral("execution_generation"), execution_generation);
+  }
+  return params;
+}
+
 std::vector<PendingAdmission> ParsePendingAdmissions(const QJsonArray& rows) {
   std::vector<PendingAdmission> pending;
   pending.reserve(static_cast<std::size_t>(rows.size()));

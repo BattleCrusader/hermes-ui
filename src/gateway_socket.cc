@@ -174,15 +174,24 @@ void GatewaySocket::OnTextMessage(const QString& message) {
   const QString method = request_methods_.take(id);
   const QString session_id = request_sessions_.take(id);
   if (!error.isEmpty()) {
-    qWarning("rpc error id=%d method=%s message=%s data=%s", id,
-             qUtf8Printable(method),
-             qUtf8Printable(error.value(QStringLiteral("message")).toString()),
-             qUtf8Printable(QString::fromUtf8(
-                 QJsonDocument(error.value(QStringLiteral("data")).toObject())
-                     .toJson(QJsonDocument::Compact))));
-    emit ResponseReceived(id, QJsonObject(),
-                          error.value(QStringLiteral("message"))
-                              .toString(QStringLiteral("gateway RPC failed")));
+    const QString message =
+        error.value(QStringLiteral("message"))
+            .toString(QStringLiteral("gateway RPC failed"));
+    // Stop races a turn that is already settling. The gateway rejects the old
+    // claim as stale; that is expected and must not look like a failure.
+    const bool settled_interrupt =
+        method == QStringLiteral("session.interrupt") &&
+        message.contains(QStringLiteral("stale_generation"));
+    if (settled_interrupt) {
+      qInfo("interrupt settled before it landed id=%d", id);
+    } else {
+      qWarning("rpc error id=%d method=%s message=%s data=%s", id,
+               qUtf8Printable(method), qUtf8Printable(message),
+               qUtf8Printable(QString::fromUtf8(
+                   QJsonDocument(error.value(QStringLiteral("data")).toObject())
+                       .toJson(QJsonDocument::Compact))));
+    }
+    emit ResponseReceived(id, QJsonObject(), message);
     return;
   }
   const QJsonObject result = frame.value(QStringLiteral("result")).toObject();
@@ -320,14 +329,10 @@ int GatewaySocket::SendPromptAt(const QString& session_id, const QString& text,
   return Request(QStringLiteral("prompt.submit"), params);
 }
 
-void GatewaySocket::InterruptSession(const QString& session_id,
-                                     int execution_generation) {
-  QJsonObject params;
-  params.insert(QStringLiteral("session_id"), session_id);
-  if (execution_generation >= 0) {
-    params.insert(QStringLiteral("execution_generation"), execution_generation);
-  }
-  Request(QStringLiteral("session.interrupt"), params);
+int GatewaySocket::InterruptSession(const QString& session_id,
+                                    int execution_generation) {
+  return Request(QStringLiteral("session.interrupt"),
+                 BuildInterruptParams(session_id, execution_generation));
 }
 
 void GatewaySocket::SetConfig(const QString& session_id, const QString& key,

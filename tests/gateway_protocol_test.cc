@@ -271,6 +271,16 @@ void GatewayProtocolTest::replayAndReceiptParamsCarryWatermarks() {
   QCOMPARE(receipt.value(QStringLiteral("admission_id")).toString(),
            QStringLiteral("admission-7"));
   QCOMPARE(receipt.value(QStringLiteral("include_result")).toBool(), true);
+
+  // Stop must echo the running claim. Losing the generation is what made the
+  // gateway answer `stale_generation`, so keep it in the payload test.
+  const QJsonObject interrupt =
+      BuildInterruptParams(QStringLiteral("s1"), 12);
+  QCOMPARE(interrupt.value(QStringLiteral("session_id")).toString(),
+           QStringLiteral("s1"));
+  QCOMPARE(interrupt.value(QStringLiteral("execution_generation")).toInt(), 12);
+  const QJsonObject unknown = BuildInterruptParams(QStringLiteral("s1"), -1);
+  QVERIFY(!unknown.contains(QStringLiteral("execution_generation")));
 }
 
 void GatewayProtocolTest::pendingAdmissionsParseAndBuildQueueActions() {

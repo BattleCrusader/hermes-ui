@@ -678,11 +678,15 @@ void Supervisor::Interrupt(int index) {
       entry.worker == nullptr ? nullptr : entry.worker->Snapshot();
   const QString session_id =
       snapshot == nullptr ? QString() : snapshot->selected_session_id;
+  const int generation =
+      entry.worker == nullptr ? -1 : entry.worker->ExecutionGeneration();
   if (!session_id.isEmpty() && StartRelay(&entry)) {
-    // Relay-only: the worker path would read execution_generation_ when its
-    // blocked event loop finally runs and could stop a later turn.
+    // Capture the claim identity now, on the UI thread. The relay must not
+    // read it later from a worker that may still be blocked in REST work; a
+    // missing generation is exactly what the gateway calls stale_generation.
     QMetaObject::invokeMethod(entry.relay, "Interrupt", Qt::QueuedConnection,
-                              Q_ARG(QString, session_id), Q_ARG(int, -1));
+                              Q_ARG(QString, session_id),
+                              Q_ARG(int, generation));
     return;
   }
   if (entry.worker != nullptr) {

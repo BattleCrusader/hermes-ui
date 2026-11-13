@@ -42,8 +42,8 @@ class GatewaySocket : public QObject {
   int SendPromptAt(const QString& session_id, const QString& text,
                    qint64 truncate_before_row_id, bool confirm_empty_truncate,
                    bool confirm_deep_truncate);
-  void InterruptSession(const QString& session_id,
-                        int execution_generation = -1);
+  int InterruptSession(const QString& session_id,
+                       int execution_generation = -1);
   int CreateSession(const QString& request_id = QString(),
                     const QString& cwd = QString());
   int ExecuteSlashCommand(const QString& session_id, const QString& command);
