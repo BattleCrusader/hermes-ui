@@ -15,6 +15,7 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QTimer>
 #include <QtTest>
 #include <algorithm>
@@ -200,6 +201,33 @@ std::shared_ptr<hermes::ui::ProfileSnapshot> SnapshotWithLongCodeLine() {
   return snapshot;
 }
 
+std::shared_ptr<hermes::ui::ProfileSnapshot> LongSessionSnapshot(
+    const QString& session_id, int revision) {
+  auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
+  snapshot->name = QStringLiteral("default");
+  snapshot->label = QStringLiteral("default");
+  snapshot->revision = revision;
+  snapshot->selected_session_id = session_id;
+  for (int index = 0; index < 24; ++index) {
+    hermes::ui::ChatMessage message;
+    message.role = index % 2 == 0 ? hermes::ui::MessageRole::kUser
+                                  : hermes::ui::MessageRole::kAssistant;
+    message.author = message.role == hermes::ui::MessageRole::kUser
+                         ? QStringLiteral("you")
+                         : QStringLiteral("Hermes");
+    message.timestamp = QDateTime::currentDateTime();
+    hermes::ui::MessageBlock block;
+    block.kind = hermes::ui::BlockKind::kParagraph;
+    block.text = QStringLiteral("Reply %1 in %2. %3")
+                     .arg(index)
+                     .arg(session_id)
+                     .arg(QString(160, QChar('x')));
+    message.blocks.push_back(block);
+    snapshot->messages.push_back(message);
+  }
+  return snapshot;
+}
+
 }  // namespace
 
 class ChatViewTest : public QObject {
@@ -226,6 +254,7 @@ class ChatViewTest : public QObject {
   void connectionCardYieldsToTypedText();
   void connectionDisplayCardUsesComposerText();
   void reactionFooterAddsTranscriptHeight();
+  void sessionSwitchScrollsToLatestReply();
   void hoverActionRowMatchesDesktop();
   void everyMessageItemUsesHoverActionRow();
   void transcriptTextSelectionCopiesToClipboard();
@@ -1847,6 +1876,24 @@ void ChatViewTest::reactionFooterAddsTranscriptHeight() {
   view.SetSnapshot(snapshot);
   QTest::qWait(30);
   QVERIFY(view.widget()->height() > without_reactions);
+}
+
+void ChatViewTest::sessionSwitchScrollsToLatestReply() {
+  hermes::ui::ChatView view(hermes::ui::Theme::Light());
+  view.resize(760, 420);
+  view.show();
+
+  view.SetSnapshot(LongSessionSnapshot(QStringLiteral("session-a"), 1));
+  QTest::qWait(30);
+  QScrollBar* bar = view.verticalScrollBar();
+  QVERIFY(bar->maximum() > 0);
+
+  // Leave the old conversation near the top, as if the user had scrolled back
+  // to re-read it. Switching sessions must still land on the newest reply.
+  bar->setValue(0);
+  view.SetSnapshot(LongSessionSnapshot(QStringLiteral("session-b"), 2));
+  QTest::qWait(30);
+  QCOMPARE(bar->value(), bar->maximum());
 }
 
 QTEST_MAIN(ChatViewTest)

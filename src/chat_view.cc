@@ -3401,8 +3401,22 @@ int ChatView::LastReusedMessageCountForTest() const {
 }
 
 void ChatView::SetSnapshot(std::shared_ptr<const ProfileSnapshot> snapshot) {
+  const QString next_session =
+      snapshot ? snapshot->selected_session_id : QString();
+  const bool session_changed = next_session != session_id_;
+  if (session_changed) {
+    session_id_ = next_session;
+    // Opening a different conversation is an explicit jump to its latest turn.
+    // Re-enable following before the transcript is rebuilt so streaming in the
+    // new session keeps the view pinned to the bottom too.
+    follow_bottom_ = true;
+  }
   QScrollBar* bar = verticalScrollBar();
-  const bool at_bottom = follow_bottom_ && bar->value() >= bar->maximum() - 6;
+  // A session change must scroll even when the previous conversation was left
+  // near the top. The old at-bottom check would preserve that stale offset and
+  // make the new transcript open halfway up.
+  const bool at_bottom =
+      session_changed || (follow_bottom_ && bar->value() >= bar->maximum() - 6);
   transcript_->SetSnapshot(std::move(snapshot));
   if (at_bottom) {
     // The range grows when the transcript's fixed height lands, which can be

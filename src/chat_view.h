@@ -122,6 +122,7 @@ class ChatView : public QScrollArea {
  private:
   Theme theme_;
   TranscriptWidget* transcript_ = nullptr;
+  QString session_id_;
   bool follow_bottom_ = true;
   double chat_font_scale_ = 1.0;
 };
