@@ -99,6 +99,28 @@ std::shared_ptr<hermes::ui::ProfileSnapshot> SnapshotWithSelectableUrl() {
   return snapshot;
 }
 
+std::shared_ptr<hermes::ui::ProfileSnapshot> SnapshotWithTable() {
+  auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
+  snapshot->name = QStringLiteral("default");
+  snapshot->label = QStringLiteral("default");
+  snapshot->revision = 1;
+  hermes::ui::ChatMessage message;
+  message.role = hermes::ui::MessageRole::kAssistant;
+  message.author = QStringLiteral("Hermes");
+  message.timestamp = QDateTime(QDate(2026, 1, 2), QTime(10, 30));
+  hermes::ui::MessageBlock table;
+  table.kind = hermes::ui::BlockKind::kTable;
+  table.detail = QStringLiteral(
+      "<table cellspacing='0' cellpadding='5' border='1' "
+      "style='border-collapse:collapse;'>"
+      "<tr><th>Host</th><th>Port</th></tr>"
+      "<tr><td>Cron-Reminder</td><td>dev-cron-reminder.com</td></tr>"
+      "</table>");
+  message.blocks.push_back(table);
+  snapshot->messages.push_back(message);
+  return snapshot;
+}
+
 std::shared_ptr<hermes::ui::ProfileSnapshot> SnapshotWithClippedHeader() {
   auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
   snapshot->name = QStringLiteral("default");
@@ -167,6 +189,7 @@ class ChatViewTest : public QObject {
   void everyMessageItemUsesHoverActionRow();
   void transcriptTextSelectionCopiesToClipboard();
   void transcriptSelectionMatchesVisibleUrl();
+  void transcriptTableSelectionHighlightsClickedCell();
   void transcriptPlainSelectionMatchesVisibleText();
   void detachedChatWindowSharesSnapshotAndComposer();
 };
@@ -1211,6 +1234,52 @@ void ChatViewTest::transcriptSelectionMatchesVisibleUrl() {
   QTest::mouseDClick(transcript, Qt::LeftButton, Qt::NoModifier,
                      middle.toPoint());
   QCOMPARE(view.SelectedTextForTest(), QStringLiteral("pinderlog.com"));
+}
+
+void ChatViewTest::transcriptTableSelectionHighlightsClickedCell() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::ChatView view(theme);
+  view.resize(900, 500);
+  view.show();
+  view.SetContentMaxWidth(600);
+  view.SetSnapshot(SnapshotWithTable());
+  QTest::qWait(30);
+
+  // Select the whole table and find the URL cell. Every cell is its own text
+  // block, so its highlight must be offset by the cell's table position; the
+  // old code only used the block-local x, painting later cells over the first
+  // column.
+  view.SelectAllTextForTest();
+  const std::vector<QRectF> highlights = view.SelectionRectsForTest();
+  QVERIFY(highlights.size() >= 4);
+  const auto url_it = std::max_element(
+      highlights.begin(), highlights.end(),
+      [](const QRectF& a, const QRectF& b) { return a.width() < b.width(); });
+  QVERIFY(url_it != highlights.end());
+  const QRectF url = *url_it;
+  bool saw_left_cell = false;
+  for (const QRectF& rect : highlights) {
+    if (qAbs(rect.top() - url.top()) < 1.0 && rect.right() <= url.left()) {
+      saw_left_cell = true;
+      break;
+    }
+  }
+  QVERIFY2(saw_left_cell,
+           "table cell highlights must occupy their own columns");
+
+  QWidget* transcript = view.widget();
+  const QPointF from(url.left() + 1, url.center().y());
+  const QPointF to(url.right() + 8, url.center().y());
+  QTest::mousePress(transcript, Qt::LeftButton, Qt::NoModifier, from.toPoint());
+  QMouseEvent move(QEvent::MouseMove, to, to, Qt::NoButton, Qt::LeftButton,
+                   Qt::NoModifier);
+  QApplication::sendEvent(transcript, &move);
+  QTest::mouseRelease(transcript, Qt::LeftButton, Qt::NoModifier, to.toPoint());
+  const QString selected = view.SelectedTextForTest();
+  QVERIFY2(selected.contains(QStringLiteral("dev-cron-reminder.com")),
+           qPrintable(selected));
+  QVERIFY2(!selected.contains(QStringLiteral("Cron-Reminder")),
+           qPrintable(selected));
 }
 
 void ChatViewTest::transcriptPlainSelectionMatchesVisibleText() {

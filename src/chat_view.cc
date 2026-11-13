@@ -1380,7 +1380,7 @@ std::vector<QRectF> TranscriptWidget::SelectionRects() const {
             if (x2 <= x1) {
               continue;
             }
-            rects.push_back(QRectF(run.rect.left() + x1,
+            rects.push_back(QRectF(run.rect.left() + block_rect.left() + x1,
                                    run.rect.top() + block_rect.top() + line.y(),
                                    x2 - x1, line.height()));
           }
