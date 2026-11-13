@@ -24,6 +24,24 @@
 namespace hermes::ui {
 namespace {
 
+bool SessionsEquivalent(const std::vector<SessionSummary>& a,
+                        const std::vector<SessionSummary>& b) {
+  if (a.size() != b.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < a.size(); ++i) {
+    const SessionSummary& x = a[i];
+    const SessionSummary& y = b[i];
+    if (x.id != y.id || x.title != y.title || x.preview != y.preview ||
+        x.project_id != y.project_id ||
+        x.last_active_secs != y.last_active_secs || x.unread != y.unread ||
+        x.pinned != y.pinned || x.archived != y.archived) {
+      return false;
+    }
+  }
+  return true;
+}
+
 constexpr int kOuterPadding = 12;
 constexpr int kSessionRowHeight = 30;
 constexpr int kSessionGap = 2;
@@ -213,13 +231,27 @@ void Sidebar::FocusSearch() {
 }
 
 void Sidebar::SetSnapshot(const ProfileSnapshot& snapshot) {
+  if (snapshot.name == snapshot_.name &&
+      snapshot.selected_session_id == snapshot_.selected_session_id &&
+      snapshot.today_count == snapshot_.today_count &&
+      SessionsEquivalent(snapshot.sessions, snapshot_.sessions)) {
+    return;
+  }
   if (snapshot.name != snapshot_.name) {
     session_scroll_ = 0;
     if (search_ != nullptr) {
       search_->clear();
     }
   }
-  snapshot_ = snapshot;
+  // The sidebar never reads transcript, artifacts, attachments, or model
+  // catalog state. Keeping a stripped snapshot avoids a deep copy of every
+  // message on each streaming publish.
+  ProfileSnapshot stripped;
+  stripped.name = snapshot.name;
+  stripped.selected_session_id = snapshot.selected_session_id;
+  stripped.today_count = snapshot.today_count;
+  stripped.sessions = snapshot.sessions;
+  snapshot_ = std::move(stripped);
   if (!snapshot.selected_session_id.isEmpty()) {
     selected_session_id_ = snapshot.selected_session_id;
   }

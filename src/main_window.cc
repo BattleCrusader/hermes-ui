@@ -263,7 +263,7 @@ MainWindow::MainWindow(ThemeMode mode, bool enable_streaming, QWidget* parent)
       right_rail_->SetSnapshot(*snapshot);
     }
     composer_->SetMentionRoot(snapshot->home);
-    composer_->SetHistory(ComposerHistory(*snapshot));
+    UpdateComposerHistory(*snapshot);
     ApplyRunIndicators(*snapshot);
     last_voice_transcript_serial_ = snapshot->voice_transcript_serial;
     ApplyVoiceState(*snapshot);
@@ -3442,7 +3442,7 @@ void MainWindow::ActivateProfile(int index) {
       right_rail_->SetSnapshot(*snapshot);
     }
     composer_->SetMentionRoot(snapshot->home);
-    composer_->SetHistory(ComposerHistory(*snapshot));
+    UpdateComposerHistory(*snapshot);
     ApplyRunIndicators(*snapshot);
     pinned_context_.clear();
     last_voice_transcript_serial_ = snapshot->voice_transcript_serial;
@@ -3514,7 +3514,7 @@ void MainWindow::Refresh() {
       right_rail_->SetSnapshot(*snapshot);
     }
     composer_->SetMentionRoot(snapshot->home);
-    composer_->SetHistory(ComposerHistory(*snapshot));
+    UpdateComposerHistory(*snapshot);
     ApplyRunIndicators(*snapshot);
     ApplyVoiceState(*snapshot);
     ApplyGatewayEvents(*snapshot);
@@ -4797,6 +4797,46 @@ void MainWindow::ApplyGatewayEvents(const ProfileSnapshot& snapshot) {
       status_bar_->ShowTransient(QStringLiteral("Hermes sent a vibe 💜"));
     }
   }
+}
+
+void MainWindow::UpdateComposerHistory(const ProfileSnapshot& snapshot) {
+  const ChatMessage* last_user = nullptr;
+  for (auto it = snapshot.messages.rbegin(); it != snapshot.messages.rend();
+       ++it) {
+    if (it->role == MessageRole::kUser) {
+      last_user = &*it;
+      break;
+    }
+  }
+  QString tail;
+  if (last_user != nullptr) {
+    for (const MessageBlock& block : last_user->blocks) {
+      if (block.kind == BlockKind::kTool) {
+        continue;
+      }
+      if (!tail.isEmpty()) {
+        tail += QLatin1Char('\n');
+      }
+      tail += block.text;
+    }
+    if (tail.isEmpty()) {
+      tail = last_user->raw_text;
+    }
+  }
+  const qint64 last_row = last_user == nullptr ? -1 : last_user->row_id;
+  if (composer_history_ready_ &&
+      snapshot.selected_session_id == composer_history_session_ &&
+      snapshot.messages.size() == composer_history_message_count_ &&
+      last_row == composer_history_last_row_ &&
+      tail == composer_history_tail_) {
+    return;
+  }
+  composer_history_ready_ = true;
+  composer_history_session_ = snapshot.selected_session_id;
+  composer_history_message_count_ = snapshot.messages.size();
+  composer_history_last_row_ = last_row;
+  composer_history_tail_ = tail;
+  composer_->SetHistory(ComposerHistory(snapshot));
 }
 
 void MainWindow::ApplyVoiceState(const ProfileSnapshot& snapshot) {

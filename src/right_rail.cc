@@ -342,6 +342,37 @@ void AppendSignatureField(QString* signature, const QString& value) {
   signature->append(QChar(0x1f));
 }
 
+QString TodosSignature(const std::vector<TodoItem>& todos) {
+  QString signature;
+  signature.reserve(todos.size() * 48);
+  for (const TodoItem& todo : todos) {
+    AppendSignatureField(&signature, todo.id);
+    AppendSignatureField(&signature, todo.content);
+    AppendSignatureField(&signature, todo.status);
+    AppendSignatureField(&signature, todo.parent);
+  }
+  return signature;
+}
+
+QString TimelineSignature(const std::vector<TimelineEntry>& entries,
+                          const QString& query) {
+  QString signature;
+  signature.reserve(entries.size() * 64);
+  AppendSignatureField(&signature, query);
+  for (const TimelineEntry& entry : entries) {
+    AppendSignatureField(&signature, QString::number(entry.row_id));
+    AppendSignatureField(&signature, entry.preview);
+    // The preview already carries the visible 160 characters. Its full length
+    // catches edits beyond that without keeping a second copy of long prompts.
+    AppendSignatureField(&signature,
+                         QString::number(entry.full_text.size()));
+    AppendSignatureField(
+        &signature,
+        QString::number(entry.timestamp.toMSecsSinceEpoch()));
+  }
+  return signature;
+}
+
 QString ArtifactRenderSignature(const std::vector<SessionArtifact>& artifacts,
                                 const ProfileSnapshot& snapshot) {
   QString signature;
@@ -1553,6 +1584,7 @@ void RightRail::SetTheme(const Theme& theme) {
       artifact_preview_ != nullptr && artifact_preview_->isVisible()) {
     RenderArtifactPreview();
   }
+  timeline_render_signature_.clear();
   RebuildTimelineRows();
   update();
 }
@@ -2713,6 +2745,11 @@ void RightRail::RebuildTodos(const ProfileSnapshot& snapshot) {
   if (layout == nullptr) {
     return;
   }
+  const QString signature = TodosSignature(snapshot.todos);
+  if (signature == todos_signature_) {
+    return;
+  }
+  todos_signature_ = signature;
   ClearLayout(layout);
   todos_empty_->setVisible(snapshot.todos.empty());
   todos_summary_->setVisible(!snapshot.todos.empty());
@@ -2745,10 +2782,15 @@ void RightRail::RebuildTimelineRows() {
   if (layout == nullptr) {
     return;
   }
-  ClearLayout(layout);
   const QString query = timeline_search_ == nullptr
                             ? QString()
                             : timeline_search_->text().trimmed();
+  const QString signature = TimelineSignature(timeline_entries_, query);
+  if (signature == timeline_render_signature_) {
+    return;
+  }
+  timeline_render_signature_ = signature;
+  ClearLayout(layout);
   int shown = 0;
   for (const TimelineEntry& entry : timeline_entries_) {
     if (!query.isEmpty() &&

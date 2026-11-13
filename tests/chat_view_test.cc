@@ -140,6 +140,47 @@ std::shared_ptr<hermes::ui::ProfileSnapshot> SnapshotWithClippedHeader() {
   return snapshot;
 }
 
+std::shared_ptr<hermes::ui::ProfileSnapshot> SnapshotWithStreamingTail(
+    const QString& tail) {
+  auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
+  snapshot->name = QStringLiteral("default");
+  snapshot->label = QStringLiteral("default");
+  snapshot->revision = 1;
+  hermes::ui::ChatMessage user;
+  user.role = hermes::ui::MessageRole::kUser;
+  user.row_id = 1;
+  user.author = QStringLiteral("You");
+  user.timestamp = QDateTime(QDate(2026, 1, 2), QTime(10, 29));
+  hermes::ui::MessageBlock prompt;
+  prompt.kind = hermes::ui::BlockKind::kParagraph;
+  prompt.text = QStringLiteral("Keep this selection while the answer streams.");
+  user.blocks.push_back(prompt);
+  snapshot->messages.push_back(user);
+
+  hermes::ui::ChatMessage answer;
+  answer.role = hermes::ui::MessageRole::kAssistant;
+  answer.row_id = 2;
+  answer.author = QStringLiteral("Hermes");
+  answer.timestamp = QDateTime(QDate(2026, 1, 2), QTime(10, 30));
+  hermes::ui::MessageBlock stable;
+  stable.kind = hermes::ui::BlockKind::kParagraph;
+  stable.text = QStringLiteral("A stable, already completed paragraph.");
+  answer.blocks.push_back(stable);
+  snapshot->messages.push_back(answer);
+
+  hermes::ui::ChatMessage streaming;
+  streaming.role = hermes::ui::MessageRole::kAssistant;
+  streaming.author = QStringLiteral("Hermes");
+  streaming.timestamp = QDateTime(QDate(2026, 1, 2), QTime(10, 31));
+  streaming.streaming = true;
+  hermes::ui::MessageBlock growing;
+  growing.kind = hermes::ui::BlockKind::kParagraph;
+  growing.text = tail;
+  streaming.blocks.push_back(growing);
+  snapshot->messages.push_back(streaming);
+  return snapshot;
+}
+
 std::shared_ptr<hermes::ui::ProfileSnapshot> SnapshotWithLongCodeLine() {
   auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
   snapshot->name = QStringLiteral("default");
@@ -191,6 +232,7 @@ class ChatViewTest : public QObject {
   void transcriptSelectionMatchesVisibleUrl();
   void transcriptTableSelectionHighlightsClickedCell();
   void transcriptPlainSelectionMatchesVisibleText();
+  void streamingUpdateReusesLayoutAndKeepsSelection();
   void detachedChatWindowSharesSnapshotAndComposer();
 };
 
@@ -1322,6 +1364,41 @@ void ChatViewTest::transcriptPlainSelectionMatchesVisibleText() {
   // made the invisible suffix copyable even though it was never painted.
   view.SelectAllTextForTest();
   QVERIFY(!view.SelectedTextForTest().contains(QStringLiteral("MUST_NOT_COPY")));
+}
+
+void ChatViewTest::streamingUpdateReusesLayoutAndKeepsSelection() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::ChatView view(theme);
+  view.resize(900, 620);
+  view.show();
+  view.SetSnapshot(SnapshotWithStreamingTail(QStringLiteral("First token.")));
+  QTest::qWait(30);
+
+  const QRectF first_text = view.MessageBodyRectForTest(0);
+  QVERIFY(!first_text.isNull());
+  QWidget* transcript = view.widget();
+  QVERIFY(transcript != nullptr);
+  const QPointF from(first_text.left() + 2, first_text.center().y());
+  const QPointF to(first_text.right() - 2, first_text.center().y());
+  QTest::mousePress(transcript, Qt::LeftButton, Qt::NoModifier, from.toPoint());
+  QMouseEvent move(QEvent::MouseMove, to, to, Qt::NoButton, Qt::LeftButton,
+                   Qt::NoModifier);
+  QApplication::sendEvent(transcript, &move);
+  QTest::mouseRelease(transcript, Qt::LeftButton, Qt::NoModifier, to.toPoint());
+  const QString selected = view.SelectedTextForTest();
+  QVERIFY2(selected.contains(QStringLiteral("Keep this selection")),
+           qPrintable(selected));
+
+  auto next =
+      SnapshotWithStreamingTail(QStringLiteral("First token. More tokens."));
+  next->revision = 2;
+  view.SetSnapshot(next);
+  QTest::qWait(30);
+
+  // The two unchanged messages must not be re-laid out. Only the streaming
+  // tail changes on each publish.
+  QCOMPARE(view.LastReusedMessageCountForTest(), 2);
+  QCOMPARE(view.SelectedTextForTest(), selected);
 }
 
 void ChatViewTest::promptSubmitTruncationIsExplicit() {

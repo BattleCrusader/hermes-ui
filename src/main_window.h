@@ -173,6 +173,7 @@ class MainWindow : public QWidget {
   QString ProjectPath(const QString& project_id) const;
   void UpdateRequest(const ProfileSnapshot& snapshot);
   void UpdateFindBar();
+  void UpdateComposerHistory(const ProfileSnapshot& snapshot);
   void ApplyRunIndicators(const ProfileSnapshot& snapshot);
   void ApplyVoiceState(const ProfileSnapshot& snapshot);
   void ApplyGatewayEvents(const ProfileSnapshot& snapshot);
@@ -197,6 +198,11 @@ class MainWindow : public QWidget {
   PagesView* pages_view_ = nullptr;
   Composer* composer_ = nullptr;
   QWidget* composer_host_ = nullptr;
+  bool composer_history_ready_ = false;
+  QString composer_history_session_;
+  std::size_t composer_history_message_count_ = 0;
+  qint64 composer_history_last_row_ = -1;
+  QString composer_history_tail_;
   SessionSearchBar* session_search_ = nullptr;
   RightRail* right_rail_ = nullptr;
   QSplitter* body_splitter_ = nullptr;

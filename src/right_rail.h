@@ -265,6 +265,8 @@ class RightRail : public QWidget {
   QLabel* timeline_empty_ = nullptr;
   QWidget* timeline_list_ = nullptr;
   std::vector<TimelineEntry> timeline_entries_;
+  QString todos_signature_;
+  QString timeline_render_signature_;
   QLabel* artifacts_empty_ = nullptr;
   QWidget* artifacts_list_ = nullptr;
   QWidget* artifact_preview_ = nullptr;

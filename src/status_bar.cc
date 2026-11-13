@@ -114,6 +114,10 @@ void StatusBar::SetTheme(const Theme& theme) {
 
 void StatusBar::SetState(const QString& left, const QString& center,
                          const QString& right, bool healthy) {
+  if (left_ == left && center_ == center && right_ == right &&
+      healthy_ == healthy) {
+    return;
+  }
   left_ = left;
   center_ = center;
   right_ = right;

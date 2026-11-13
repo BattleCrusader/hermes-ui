@@ -60,6 +60,10 @@ class ChatView : public QScrollArea {
   void SetChatFontScale(double scale);
   void SetCodeFontScale(double scale);
   bool IsCaretAnimatingForTest() const;
+  // Number of messages whose previous layout was reused by the last snapshot
+  // publish. Streaming updates should reuse the whole transcript except the
+  // changed tail.
+  int LastReusedMessageCountForTest() const;
   void ScrollToTop();
   void ScrollToBottom();
   // PageUp / PageDown and any other fractional scroll action.
@@ -97,6 +101,7 @@ class ChatView : public QScrollArea {
   // carry an inner text rect so tests can prove text stays inside the card.
   std::vector<std::pair<QRectF, QRectF>> BlockRectsForTest(
       BlockKind kind) const;
+  QRectF MessageBodyRectForTest(int message_index) const;
   // Test seam: the actual highlight rectangles painted for the current text
   // selection. Wrapped and multi-paragraph documents must contribute one rect
   // per selected visual line.

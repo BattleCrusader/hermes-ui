@@ -1836,11 +1836,34 @@ void PreferencesTest::rightRailShowsTodoTimelineAndFiltersPrompts() {
       rail.findChild<QLabel*>(QStringLiteral("rightRailTodoSummary"));
   QVERIFY(summary != nullptr);
   QCOMPARE(summary->text(), QStringLiteral("1 active · 1 done"));
-  const auto* todo = rail.findChild<QLabel*>(QStringLiteral("rightRailTodo_1"));
+  auto* todo = rail.findChild<QLabel*>(QStringLiteral("rightRailTodo_1"));
   QVERIFY(todo != nullptr);
   QVERIFY(todo->text().contains(QStringLiteral("[>] Audit pricing")));
   QVERIFY(!rail.findChild<QLabel*>(QStringLiteral("rightRailTodosEmpty"))
                ->isVisible());
+
+  // Streaming publishes the same todo and timeline content repeatedly. Keep
+  // the existing widgets instead of deleting and recreating them on every
+  // revision.
+  QPointer<QLabel> todo_guard(todo);
+  rail.SetSnapshot(snapshot);
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  QCoreApplication::processEvents();
+  QCOMPARE(todo_guard.data(), todo);
+
+  snapshot.todos[0].content = QStringLiteral("Audit pricing v2");
+  rail.SetSnapshot(snapshot);
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  QCoreApplication::processEvents();
+  QVERIFY(todo_guard.isNull());
+  const auto* updated_todo =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailTodo_1"));
+  QVERIFY(updated_todo != nullptr);
+  QVERIFY(updated_todo->text().contains(QStringLiteral("Audit pricing v2")));
+  snapshot.todos[0].content = QStringLiteral("Audit pricing");
+  rail.SetSnapshot(snapshot);
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  QCoreApplication::processEvents();
 
   const auto entries = hermes::ui::CollectTimelineEntries(snapshot.messages);
   QCOMPARE(static_cast<int>(entries.size()), 2);

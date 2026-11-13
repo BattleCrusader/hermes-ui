@@ -501,7 +501,7 @@ class TranscriptWidget : public QWidget {
     return messages_[index].bounds;
   }
   int content_height() const { return content_height_; }
-  void Rebuild();
+  void Rebuild(int reuse_messages = 0, bool preserve_selection = false);
   void RecomputeSearch() {
     search_matches_.clear();
     search_current_ = -1;
@@ -576,8 +576,10 @@ class TranscriptWidget : public QWidget {
   void SelectAllText();
   QString SelectedText() const;
   std::vector<QRectF> SelectionRects() const;
+  QRectF SelectionBounds() const;
   std::vector<std::pair<QRectF, QRectF>> BlockRectsForTest(
       BlockKind kind) const;
+  QRectF MessageBodyRectForTest(int message_index) const;
   QColor FirstCodeForegroundForTest() const;
   void SetContentMaxWidth(int pixels);
   void SetShowTimestamps(bool show);
@@ -586,6 +588,7 @@ class TranscriptWidget : public QWidget {
   void SetChatFontScale(double scale);
   void SetCodeFontScale(double scale);
   bool IsCaretAnimatingForTest() const;
+  int LastReusedMessageCountForTest() const;
 
  protected:
   void paintEvent(QPaintEvent* event) override;
@@ -669,7 +672,8 @@ class TranscriptWidget : public QWidget {
     int from = 0;
     int to = 0;
   };
-  std::vector<TextRun> SelectableRuns() const;
+  const std::vector<TextRun>& SelectableRuns() const;
+  void InvalidateSelectableRuns() const;
   std::vector<SelectionFragment> SelectionFragments(
       const std::vector<TextRun>& runs) const;
   TextPosition TextPositionAt(const QPointF& position) const;
@@ -680,12 +684,13 @@ class TranscriptWidget : public QWidget {
                                int end);
   bool HasSelection() const;
   void ClearSelection();
-  void PaintSelection(QPainter& painter) const;
+  void PaintSelection(QPainter& painter);
 
   void BuildAssistantMessage(const ChatMessage& message, qreal width,
                              qreal start_y, std::size_t message_index,
                              LaidMessage* laid_out);
   static QString MessageText(const ChatMessage& message);
+  static bool SameMessage(const ChatMessage& a, const ChatMessage& b);
   void BuildSystemMessage(const ChatMessage& message, qreal width,
                           qreal start_y, LaidMessage* laid_out);
   void BuildUserMessage(const ChatMessage& message, qreal width, qreal start_y,
@@ -717,6 +722,8 @@ class TranscriptWidget : public QWidget {
   bool has_request_ = false;
   std::vector<LaidMessage> messages_;
   std::map<QString, LayoutCache> layout_cache_;
+  int laid_out_width_ = 0;
+  int last_reused_messages_ = 0;
   // Collapsible reasoning state: key is "<profile>#<message index>", so it
   // survives a re-layout but not a profile switch (where indices change).
   std::map<QString, bool> reasoning_expanded_;
@@ -735,8 +742,18 @@ class TranscriptWidget : public QWidget {
   std::function<void(const ChatMessage&, const QString&)> read_aloud_handler_;
   std::function<void(const ChatMessage&, const QString&)> pin_handler_;
   std::set<QString> expanded_tools_;
+  // Building runs walks every laid-out message and elides plain text. Selection
+  // hit testing used to do that on every mouse move (and again while painting),
+  // which made dragging lag behind the pointer. Runs only change when layout or
+  // the transient "Copied" labels do, so cache them.
+  mutable std::vector<TextRun> selectable_runs_cache_;
+  mutable bool selectable_runs_valid_ = false;
   TextPosition selection_anchor_;
   TextPosition selection_cursor_;
+  // Union of the highlight rectangles currently painted, in widget space.
+  // Repaints during a drag can then be limited to the old/new selection band
+  // instead of every visible message.
+  QRectF selection_paint_bounds_;
   bool selecting_ = false;
   int content_height_ = 0;
   bool caret_visible_ = true;
@@ -867,6 +884,29 @@ bool TranscriptWidget::IsCaretAnimatingForTest() const {
          caret_timer_->isActive();
 }
 
+int TranscriptWidget::LastReusedMessageCountForTest() const {
+  return last_reused_messages_;
+}
+
+QRectF TranscriptWidget::MessageBodyRectForTest(int message_index) const {
+  if (message_index < 0 ||
+      message_index >= static_cast<int>(messages_.size())) {
+    return {};
+  }
+  const LaidMessage& message = messages_[message_index];
+  if (message.bubble_document) {
+    const QPointF origin =
+        message.is_user
+            ? QPointF(message.bubble.left() + 12, message.bubble.top() + 10)
+            : QPointF(message.bubble.left() + 13, message.bubble.top() + 6);
+    return QRectF(origin, message.bubble_document->size());
+  }
+  if (!message.blocks.empty()) {
+    return BlockTextRect(message.blocks.front());
+  }
+  return message.bounds;
+}
+
 void TranscriptWidget::SetRequest(const PendingRequest& request) {
   has_request_ = true;
   const qreal width = std::max<qreal>(320, this->width());
@@ -919,9 +959,13 @@ QRectF TranscriptWidget::PreviewButtonRect(const LaidBlock& block) {
                 kCodeHeaderHeight);
 }
 
-std::vector<TranscriptWidget::TextRun> TranscriptWidget::SelectableRuns()
-    const {  // NOLINT(whitespace/indent_namespace)
-  std::vector<TextRun> runs;
+const std::vector<TranscriptWidget::TextRun>&
+TranscriptWidget::SelectableRuns() const {
+  if (selectable_runs_valid_) {
+    return selectable_runs_cache_;
+  }
+  std::vector<TextRun>& runs = selectable_runs_cache_;
+  runs.clear();
   const auto add_plain = [&runs](const QRectF& rect, const QString& text,
                                  const QFont& font, Qt::Alignment alignment,
                                  bool elide = false) {
@@ -1108,7 +1152,12 @@ std::vector<TranscriptWidget::TextRun> TranscriptWidget::SelectableRuns()
               theme_.UiFont(10, QFont::Normal),
               Qt::AlignRight | Qt::AlignVCenter);
   }
-  return runs;
+  selectable_runs_valid_ = true;
+  return selectable_runs_cache_;
+}
+
+void TranscriptWidget::InvalidateSelectableRuns() const {
+  selectable_runs_valid_ = false;
 }
 
 QRectF TranscriptWidget::BlockTextRect(const LaidBlock& block) const {
@@ -1182,7 +1231,7 @@ int TranscriptWidget::PlainOffsetAt(const TextRun& run,
 
 TranscriptWidget::TextPosition TranscriptWidget::TextPositionAt(
     const QPointF& position) const {
-  const std::vector<TextRun> runs = SelectableRuns();
+  const std::vector<TextRun>& runs = SelectableRuns();
   int best = -1;
   qreal best_score = std::numeric_limits<qreal>::max();
   for (int index = 0; index < static_cast<int>(runs.size()); ++index) {
@@ -1245,12 +1294,13 @@ void TranscriptWidget::ClearSelection() {
   }
   selection_anchor_ = {};
   selection_cursor_ = {};
+  selection_paint_bounds_ = {};
   selecting_ = false;
   update();
 }
 
 void TranscriptWidget::SelectAllText() {
-  const std::vector<TextRun> runs = SelectableRuns();
+  const std::vector<TextRun>& runs = SelectableRuns();
   if (runs.empty()) {
     ClearSelection();
     return;
@@ -1261,6 +1311,7 @@ void TranscriptWidget::SelectAllText() {
                          ? std::max(0, last.document->characterCount() - 1)
                          : last.plain.size();
   selection_cursor_ = {static_cast<int>(runs.size()) - 1, offset};
+  selection_paint_bounds_ = SelectionBounds();
   selecting_ = false;
   setFocus(Qt::OtherFocusReason);
   update();
@@ -1296,7 +1347,7 @@ TranscriptWidget::SelectionFragments(const std::vector<TextRun>& runs) const {
 }
 
 QString TranscriptWidget::SelectedText() const {
-  const std::vector<TextRun> runs = SelectableRuns();
+  const std::vector<TextRun>& runs = SelectableRuns();
   QString text;
   for (const SelectionFragment& fragment : SelectionFragments(runs)) {
     const TextRun& run = runs[fragment.run];
@@ -1347,7 +1398,7 @@ std::vector<std::pair<QRectF, QRectF>> TranscriptWidget::BlockRectsForTest(
 
 std::vector<QRectF> TranscriptWidget::SelectionRects() const {
   std::vector<QRectF> rects;
-  const std::vector<TextRun> runs = SelectableRuns();
+  const std::vector<TextRun>& runs = SelectableRuns();
   for (const SelectionFragment& fragment : SelectionFragments(runs)) {
     const TextRun& run = runs[fragment.run];
     if (run.document) {
@@ -1402,8 +1453,21 @@ std::vector<QRectF> TranscriptWidget::SelectionRects() const {
   return rects;
 }
 
-void TranscriptWidget::PaintSelection(QPainter& painter) const {
+QRectF TranscriptWidget::SelectionBounds() const {
+  QRectF bounds;
+  for (const QRectF& rect : SelectionRects()) {
+    bounds = bounds.isNull() ? rect : bounds.united(rect);
+  }
+  return bounds;
+}
+
+void TranscriptWidget::PaintSelection(QPainter& painter) {
   const std::vector<QRectF> rects = SelectionRects();
+  QRectF bounds;
+  for (const QRectF& rect : rects) {
+    bounds = bounds.isNull() ? rect : bounds.united(rect);
+  }
+  selection_paint_bounds_ = bounds;
   if (rects.empty()) {
     return;
   }
@@ -1421,8 +1485,21 @@ void TranscriptWidget::PaintSelection(QPainter& painter) const {
 void TranscriptWidget::mouseMoveEvent(QMouseEvent* event) {
   const QPointF position = event->position();
   if (selecting_ && (event->buttons() & Qt::LeftButton)) {
-    selection_cursor_ = TextPositionAt(position);
-    update();
+    const TextPosition next = TextPositionAt(position);
+    if (next.run != selection_cursor_.run ||
+        next.offset != selection_cursor_.offset) {
+      const QRectF previous = selection_paint_bounds_;
+      selection_cursor_ = next;
+      const QRectF current = SelectionBounds();
+      selection_paint_bounds_ = current;
+      QRectF dirty = previous.isNull() ? current : previous.united(current);
+      if (!dirty.isNull()) {
+        dirty = dirty.toAlignedRect().adjusted(-3, -3, 3, 3);
+        update(dirty.toRect().intersected(rect()));
+      } else {
+        update();
+      }
+    }
     event->accept();
     return;
   }
@@ -1572,8 +1649,10 @@ void TranscriptWidget::mousePressEvent(QMouseEvent* event) {
             CopyButtonRect(block).contains(position)) {
           QGuiApplication::clipboard()->setText(block.source.text);
           copied_block_ = block.source.text;
+          InvalidateSelectableRuns();
           QTimer::singleShot(1200, this, [this]() {
             copied_block_.clear();
+            InvalidateSelectableRuns();
             update();
           });
           update();
@@ -1602,6 +1681,7 @@ void TranscriptWidget::mousePressEvent(QMouseEvent* event) {
     if (selected.run >= 0) {
       selection_anchor_ = selected;
       selection_cursor_ = selected;
+      selection_paint_bounds_ = {};
       selecting_ = true;
       setFocus(Qt::MouseFocusReason);
       update();
@@ -1615,9 +1695,18 @@ void TranscriptWidget::mousePressEvent(QMouseEvent* event) {
 
 void TranscriptWidget::mouseReleaseEvent(QMouseEvent* event) {
   if (event->button() == Qt::LeftButton && selecting_) {
+    const QRectF previous = selection_paint_bounds_;
     selection_cursor_ = TextPositionAt(event->position());
     selecting_ = false;
-    update();
+    const QRectF current = SelectionBounds();
+    selection_paint_bounds_ = current;
+    QRectF dirty = previous.isNull() ? current : previous.united(current);
+    if (!dirty.isNull()) {
+      update(dirty.toAlignedRect().adjusted(-3, -3, 3, 3).intersected(
+          rect()));
+    } else {
+      update();
+    }
     event->accept();
     return;
   }
@@ -1634,7 +1723,7 @@ void TranscriptWidget::mouseDoubleClickEvent(QMouseEvent* event) {
     QWidget::mouseDoubleClickEvent(event);
     return;
   }
-  const std::vector<TextRun> runs = SelectableRuns();
+  const std::vector<TextRun>& runs = SelectableRuns();
   if (hit.run >= static_cast<int>(runs.size())) {
     return;
   }
@@ -1795,13 +1884,45 @@ void TranscriptWidget::contextMenuEvent(QContextMenuEvent* event) {
   event->accept();
 }
 
+bool TranscriptWidget::SameMessage(const ChatMessage& a,
+                                   const ChatMessage& b) {
+  if (a.id != b.id || a.row_id != b.row_id || a.role != b.role ||
+      a.author != b.author || a.timestamp != b.timestamp ||
+      a.streaming != b.streaming || a.reasoning != b.reasoning ||
+      a.reasoning_streaming != b.reasoning_streaming ||
+      a.raw_text != b.raw_text || a.duration_secs != b.duration_secs ||
+      a.blocks.size() != b.blocks.size() ||
+      a.reactions.size() != b.reactions.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < a.blocks.size(); ++i) {
+    const MessageBlock& left = a.blocks[i];
+    const MessageBlock& right = b.blocks[i];
+    if (left.kind != right.kind || left.text != right.text ||
+        left.language != right.language || left.detail != right.detail ||
+        left.id != right.id) {
+      return false;
+    }
+  }
+  for (std::size_t i = 0; i < a.reactions.size(); ++i) {
+    if (a.reactions[i].emoji != b.reactions[i].emoji ||
+        a.reactions[i].author != b.reactions[i].author) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void TranscriptWidget::SetSnapshot(
     std::shared_ptr<const ProfileSnapshot> snapshot) {
-  ClearSelection();
   const int width = std::max<qreal>(320, this->width());
   if (!snapshot) {
+    ClearSelection();
+    InvalidateSelectableRuns();
     snapshot_ = nullptr;
     messages_.clear();
+    laid_out_width_ = 0;
+    last_reused_messages_ = 0;
     content_height_ = 0;
     setFixedHeight(0);
     search_matches_.clear();
@@ -1810,6 +1931,8 @@ void TranscriptWidget::SetSnapshot(
     return;
   }
 
+  const bool same_profile =
+      snapshot_ != nullptr && snapshot_->name == snapshot->name;
   // A profile switch is a cache lookup when the snapshot has not changed and
   // the transcript width is the same. Copying the laid-out vector only copies
   // shared_ptr/QString handles; the QTextDocuments stay shared.
@@ -1817,8 +1940,14 @@ void TranscriptWidget::SetSnapshot(
   if (cached != layout_cache_.end() &&
       cached->second.revision == snapshot->revision &&
       cached->second.width == width) {
+    if (!same_profile) {
+      ClearSelection();
+    }
     snapshot_ = std::move(snapshot);
     messages_ = cached->second.messages;
+    laid_out_width_ = width;
+    last_reused_messages_ = static_cast<int>(messages_.size());
+    InvalidateSelectableRuns();
     content_height_ = cached->second.content_height;
     setFixedHeight(content_height_);
     RecomputeSearch();
@@ -1826,8 +1955,25 @@ void TranscriptWidget::SetSnapshot(
     return;
   }
 
+  // Streaming publishes the same transcript with only the tail changed. Reuse
+  // the laid-out prefix instead of rebuilding every QTextDocument. Comparing
+  // content (not the revision counter) is what makes that possible: revision
+  // increments even when only the last assistant block grew.
+  int reuse = 0;
+  if (same_profile && laid_out_width_ == width) {
+    const std::size_t limit =
+        std::min(messages_.size(), snapshot->messages.size());
+    while (static_cast<std::size_t>(reuse) < limit &&
+           SameMessage(messages_[reuse].source,
+                       snapshot->messages[reuse])) {
+      ++reuse;
+    }
+  }
+  if (!same_profile) {
+    ClearSelection();
+  }
   snapshot_ = std::move(snapshot);
-  Rebuild();
+  Rebuild(reuse, same_profile && reuse > 0);
   RecomputeSearch();
   update();
 }
@@ -1836,18 +1982,42 @@ void TranscriptWidget::SetProfileName(const QString& name) {
   profile_name_ = name;
 }
 
-void TranscriptWidget::Rebuild() {
-  ClearSelection();
-  messages_.clear();
+void TranscriptWidget::Rebuild(int reuse_messages, bool preserve_selection) {
+  if (!preserve_selection) {
+    ClearSelection();
+  }
+  InvalidateSelectableRuns();
   if (!snapshot_) {
+    messages_.clear();
+    laid_out_width_ = 0;
+    last_reused_messages_ = 0;
     content_height_ = 0;
     setFixedHeight(0);
     return;
   }
 
   const qreal width = std::max<qreal>(320, this->width());
+  const int limit = static_cast<int>(std::min(
+      messages_.size(), snapshot_->messages.size()));
+  const int reuse = std::clamp(reuse_messages, 0, limit);
+  if (reuse == 0) {
+    messages_.clear();
+  } else {
+    messages_.resize(static_cast<std::size_t>(reuse));
+  }
   qreal y = 26;
-  for (std::size_t message_index = 0;
+  bool has_user_before = false;
+  for (int prior = 0; prior < reuse; ++prior) {
+    const LaidMessage& earlier = messages_[prior];
+    if (earlier.source.role == MessageRole::kUser &&
+        earlier.source.row_id > 0) {
+      has_user_before = true;
+    }
+  }
+  if (reuse > 0) {
+    y = messages_.back().bounds.bottom() + kMessageGap;
+  }
+  for (std::size_t message_index = static_cast<std::size_t>(reuse);
        message_index < snapshot_->messages.size(); ++message_index) {
     const ChatMessage& message = snapshot_->messages[message_index];
     LaidMessage laid_out;
@@ -1863,13 +2033,6 @@ void TranscriptWidget::Rebuild() {
     }
     laid_out.bounds = QRectF(0, y, width, laid_out.bounds.height());
     if (message.role != MessageRole::kSystem) {
-      bool has_user_before = false;
-      for (std::size_t prior = 0; prior < message_index; ++prior) {
-        const ChatMessage& earlier = snapshot_->messages[prior];
-        has_user_before =
-            has_user_before ||
-            (earlier.role == MessageRole::kUser && earlier.row_id > 0);
-      }
       if (laid_out.is_user) {
         if (message.row_id > 0) {
           laid_out.action_label = QStringLiteral("Edit");
@@ -1877,11 +2040,16 @@ void TranscriptWidget::Rebuild() {
       } else if (message.row_id > 0 && !message.streaming && has_user_before) {
         laid_out.action_label = QStringLiteral("Retry");
       }
+      if (laid_out.is_user && message.row_id > 0) {
+        has_user_before = true;
+      }
     }
     LayoutMessageActions(&laid_out, message);
     messages_.push_back(std::move(laid_out));
     y += messages_.back().bounds.height() + kMessageGap;
   }
+  laid_out_width_ = static_cast<int>(width);
+  last_reused_messages_ = reuse;
   if (has_request_) {
     const qreal card_width =
         std::max<qreal>(280, width - kContentLeft - kRightPadding);
@@ -1903,7 +2071,11 @@ void TranscriptWidget::Rebuild() {
   content_height_ = static_cast<int>(y + 26);
   setFixedHeight(content_height_);
 
-  if (snapshot_) {
+  // Only a full layout refreshes the cache. Streaming updates reuse the prefix
+  // and would otherwise copy the whole laid-out vector on every token. A stale
+  // cache entry is harmless: switching back re-lays out from the transcript
+  // because its revision no longer matches.
+  if (snapshot_ && reuse == 0) {
     LayoutCache cache;
     cache.revision = snapshot_->revision;
     cache.width = static_cast<int>(width);
@@ -3052,6 +3224,12 @@ std::vector<std::pair<QRectF, QRectF>> ChatView::BlockRectsForTest(
   return transcript_->BlockRectsForTest(kind);
 }
 
+QRectF ChatView::MessageBodyRectForTest(int message_index) const {
+  return transcript_ == nullptr
+             ? QRectF()
+             : transcript_->MessageBodyRectForTest(message_index);
+}
+
 std::vector<QRectF> ChatView::SelectionRectsForTest() const {
   return transcript_ == nullptr ? std::vector<QRectF>()
                                 : transcript_->SelectionRects();
@@ -3144,6 +3322,11 @@ void ChatView::SetCodeFontScale(double scale) {
 
 bool ChatView::IsCaretAnimatingForTest() const {
   return transcript_ != nullptr && transcript_->IsCaretAnimatingForTest();
+}
+
+int ChatView::LastReusedMessageCountForTest() const {
+  return transcript_ == nullptr ? 0
+                                : transcript_->LastReusedMessageCountForTest();
 }
 
 void ChatView::SetSnapshot(std::shared_ptr<const ProfileSnapshot> snapshot) {
