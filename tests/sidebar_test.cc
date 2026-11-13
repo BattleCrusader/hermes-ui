@@ -247,11 +247,13 @@ void SidebarTest::navRowsRouteToWorkspacePages() {
   sidebar.on_nav = [&navigated](const QString& id) { navigated.append(id); };
 
   // Nav rows are 26px tall starting at y=46 in the order the desktop lists
-  // them: Capabilities, Messaging, Artifacts, Webhooks, Scheduled tasks, Bots.
+  // them: Capabilities, Messaging, Artifacts, Kanban, Webhooks, Scheduled
+  // tasks, Bots.
   const QStringList expected{
       QStringLiteral("capabilities"), QStringLiteral("messaging"),
-      QStringLiteral("artifacts"),    QStringLiteral("webhooks"),
-      QStringLiteral("cron"),         QStringLiteral("profiles")};
+      QStringLiteral("artifacts"),    QStringLiteral("kanban"),
+      QStringLiteral("webhooks"),     QStringLiteral("cron"),
+      QStringLiteral("profiles")};
   for (int i = 0; i < expected.size(); ++i) {
     QTest::mouseClick(&sidebar, Qt::LeftButton, Qt::NoModifier,
                       QPoint(60, 46 + i * 28 + 13));

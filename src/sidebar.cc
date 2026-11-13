@@ -91,6 +91,7 @@ Sidebar::Sidebar(const Theme& theme, QWidget* parent)
       {QStringLiteral("capabilities"), QStringLiteral("Capabilities"), 0xEB63},
       {QStringLiteral("messaging"), QStringLiteral("Messaging"), 0xEA6B},
       {QStringLiteral("artifacts"), QStringLiteral("Artifacts"), 0xEAF0},
+      {QStringLiteral("kanban"), QStringLiteral("Kanban"), 0xEB5B},
       {QStringLiteral("webhooks"), QStringLiteral("Webhooks"), 0xEAD4},
       {QStringLiteral("cron"), QStringLiteral("Scheduled tasks"), 0xEB7C},
       {QStringLiteral("profiles"), QStringLiteral("Bots"), 0xEC20},

@@ -160,8 +160,9 @@ void ClickAuditTest::sidebarTargetsFire() {
   }
 
   QCOMPARE(new_chat, 1);
-  QCOMPARE(nav.size(), 6);
+  QCOMPARE(nav.size(), 7);
   QVERIFY(nav.contains(QStringLiteral("capabilities")));
+  QVERIFY(nav.contains(QStringLiteral("kanban")));
   QVERIFY(nav.contains(QStringLiteral("webhooks")));
   QVERIFY(nav.contains(QStringLiteral("profiles")));
   QCOMPARE(profiles, 2);

@@ -61,7 +61,9 @@
 #include "src/composer.h"
 #include "src/detached_chat.h"
 #include "src/gateway_events.h"
+#include "src/gateway_http.h"
 #include "src/gateway_protocol.h"
+#include "src/kanban_view.h"
 #include "src/model_visibility.h"
 #include "src/native_prefs.h"
 #include "src/notification_prefs.h"
@@ -237,6 +239,11 @@ MainWindow::MainWindow(ThemeMode mode, bool enable_streaming, QWidget* parent)
   RegisterShortcut(QStringLiteral("new_chat"),
                    QKeySequence(Qt::CTRL | Qt::Key_N),
                    [this]() { NewSession(); });
+  RegisterShortcut(QStringLiteral("new_kanban_task"),
+                   QKeySequence(Qt::CTRL | Qt::ALT | Qt::Key_N), [this]() {
+                     ShowWorkspacePage(QStringLiteral("kanban"));
+                     pages_view_->Kanban()->NewTask();
+                   });
   RegisterShortcut(
       QStringLiteral("interrupt"), QKeySequence(Qt::CTRL | Qt::Key_Period),
       [this]() { supervisor_.Interrupt(supervisor_.active_index()); });
@@ -717,6 +724,10 @@ void MainWindow::BuildUi() {
   QObject::connect(quick_entry_shortcut, &QShortcut::activated, this,
                    [this]() { ShowQuickEntry(); });
   pages_view_->on_page_request = [this](const QString& page) {
+    if (page == QStringLiteral("kanban")) {
+      pages_view_->Kanban()->Refresh();
+      return;
+    }
     supervisor_.FetchPage(supervisor_.active_index(), page);
   };
   pages_view_->on_page_action =
@@ -725,6 +736,76 @@ void MainWindow::BuildUi() {
         supervisor_.PageAction(supervisor_.active_index(), page, method, path,
                                body);
       };
+  if (KanbanView* kanban = pages_view_->Kanban()) {
+    kanban->get_pref = [](const QString& key) { return NativePref(key); };
+    kanban->set_pref = [](const QString& key, const QString& value) {
+      SetNativePref(key, value);
+    };
+    kanban->on_notify = [this](const QString& title, const QString& body) {
+      status_bar_->ShowTransient(
+          body.isEmpty() ? title : QStringLiteral("%1 — %2").arg(title, body));
+    };
+    kanban->on_request =
+        [this](const QString& method, const QString& path,
+               const QJsonObject& body, KanbanView::JsonCallback done) {
+          const Supervisor::RequestScope scope =
+              supervisor_.CaptureRequestScope();
+          RunPageBackground(
+              [scope, method, path, body]() {
+                BackgroundResult result;
+                GatewayHttp http(scope.home, scope.profile, scope.endpoint);
+                QJsonDocument document;
+                const QString api_path =
+                    QStringLiteral("/api/plugins/kanban") + path;
+                if (!http.RequestJson(method, api_path, body, &document,
+                                      &result.error)) {
+                  return result;
+                }
+                if (document.isObject()) {
+                  result.data = document.object();
+                }
+                return result;
+              },
+              std::move(done));
+        };
+    kanban->on_upload_attachment =
+        [this](const QString& path, const QString& local_path,
+               KanbanView::JsonCallback done) {
+          const Supervisor::RequestScope scope =
+              supervisor_.CaptureRequestScope();
+          RunPageBackground(
+              [scope, path, local_path]() {
+                BackgroundResult result;
+                GatewayHttp http(scope.home, scope.profile, scope.endpoint);
+                QString uploaded;
+                const QString api_path =
+                    QStringLiteral("/api/plugins/kanban") + path;
+                if (!http.PostFile(api_path, local_path, &uploaded,
+                                   &result.error)) {
+                  return result;
+                }
+                result.data.insert(QStringLiteral("path"), uploaded);
+                return result;
+              },
+              std::move(done));
+        };
+    kanban->on_download_attachment =
+        [this](const QString& path, const QString& local_path,
+               KanbanView::JsonCallback done) {
+          const Supervisor::RequestScope scope =
+              supervisor_.CaptureRequestScope();
+          RunPageBackground(
+              [scope, path, local_path]() {
+                BackgroundResult result;
+                GatewayHttp http(scope.home, scope.profile, scope.endpoint);
+                const QString api_path =
+                    QStringLiteral("/api/plugins/kanban") + path;
+                http.DownloadFile(api_path, local_path, &result.error);
+                return result;
+              },
+              std::move(done));
+        };
+  }
   pages_view_->on_open_dir = [this](const QString& path) {
     supervisor_.OpenArtifactsDir(supervisor_.active_index(), path);
   };
@@ -2177,6 +2258,12 @@ void MainWindow::ShowCommandPalette() {
                           supervisor_.Interrupt(supervisor_.active_index());
                         }});
   }
+  commands.push_back({QStringLiteral("New Kanban task"),
+                      QStringLiteral("Add a card to the dispatcher queue"),
+                      QStringLiteral("Actions"), [this]() {
+                        ShowWorkspacePage(QStringLiteral("kanban"));
+                        pages_view_->Kanban()->NewTask();
+                      }});
   commands.push_back({QStringLiteral("Preferences"),
                       QStringLiteral("Appearance, model and reasoning"),
                       QStringLiteral("Actions"), [this]() { ShowSettings(); }});
@@ -2240,6 +2327,7 @@ void MainWindow::ShowCommandPalette() {
       {"capabilities", "Capabilities"},
       {"messaging", "Messaging"},
       {"artifacts", "Artifacts"},
+      {"kanban", "Kanban"},
       {"cron", "Scheduled tasks"},
       {"profiles", "Bots"},
       {"agents", "Agents"},
@@ -2336,7 +2424,9 @@ void MainWindow::ShowWorkspacePage(const QString& page) {
   }
   settings_view_->hide();
   sidebar_->SetActivePage(page);
-  supervisor_.FetchPage(supervisor_.active_index(), page);
+  if (page != QStringLiteral("kanban")) {
+    supervisor_.FetchPage(supervisor_.active_index(), page);
+  }
 }
 
 void MainWindow::ShowFindBar() {

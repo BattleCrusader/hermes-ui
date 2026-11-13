@@ -20,6 +20,8 @@ class QVBoxLayout;
 
 namespace hermes::ui {
 
+class KanbanView;
+
 // Full-page workspace surfaces the desktop mounts inside the workspace pane:
 // Capabilities, Messaging, Artifacts and the Bots (profiles) roster. They share
 // the Settings data-page renderers but are not Settings: the sidebar nav owns
@@ -35,6 +37,7 @@ class PagesView : public QWidget {
   void OpenPage(const QString& id);
   bool IsOpen() const;
   QString CurrentPage() const { return page_; }
+  KanbanView* Kanban() const { return kanban_; }
 
   std::function<void()> on_close;
   std::function<void(const QString& page)> on_page_request;
@@ -172,6 +175,7 @@ class PagesView : public QWidget {
   QLabel* status_ = nullptr;
   QPushButton* refresh_ = nullptr;
   QScrollArea* scroll_ = nullptr;
+  KanbanView* kanban_ = nullptr;
   QWidget* body_ = nullptr;
   QVBoxLayout* body_layout_ = nullptr;
 };

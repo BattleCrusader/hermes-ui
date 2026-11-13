@@ -100,6 +100,8 @@ add_executable(hermes_ui MACOSX_BUNDLE
   src/fallback_models.cc
   src/settings_pages.cc
   src/pages_view.cc
+  src/kanban_model.cc
+  src/kanban_view.cc
   src/native_prefs.cc
   src/notification_prefs.cc
   src/notification_service.cc
@@ -388,6 +390,31 @@ if(APPLE)
       "-DLAUNCHER=${CMAKE_BINARY_DIR}/hermes_ui"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_macos_bundle.cmake")
 endif()
+
+add_executable(hermes_kanban_tests
+  tests/kanban_model_test.cc
+  src/kanban_model.cc
+  src/kanban_view.cc
+  src/theme.cc
+  src/theme_presets.cc
+  src/paint_utils.cc
+  resources/resources.qrc
+)
+
+target_include_directories(hermes_kanban_tests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(hermes_kanban_tests PRIVATE
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Svg
+  Qt6::Test
+)
+
+add_test(NAME native_kanban COMMAND hermes_kanban_tests)
 
 add_executable(hermes_click_tests
   tests/click_audit_test.cc

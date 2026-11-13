@@ -2,6 +2,8 @@
 
 #include "src/pages_view.h"
 
+#include "src/kanban_view.h"
+
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPainter>
@@ -72,6 +74,13 @@ void PagesView::BuildUi() {
   body_layout_->setAlignment(Qt::AlignTop);
   scroll_->setWidget(body_);
   root->addWidget(scroll_, 1);
+
+  // The Kanban board is a single custom-painted widget that owns its own
+  // scrolling and lives across snapshot revisions. Unlike the data pages it
+  // must not be rebuilt (or destroyed) while the chat publishes.
+  kanban_ = new KanbanView(theme_, this);
+  kanban_->hide();
+  root->addWidget(kanban_, 1);
 }
 
 void PagesView::SetTheme(const Theme& theme) {
@@ -113,8 +122,19 @@ void PagesView::OpenPage(const QString& id) {
   title_->setText(TitleFor(id));
   subtitle_->setText(QStringLiteral("Workspace · %1").arg(snapshot_.label));
   last_revision_ = -1;
-  if (on_page_request) {
+  const bool kanban = id == QStringLiteral("kanban");
+  // Kanban owns its own backend; do not run the generic data-page fetch for it.
+  if (!kanban && on_page_request) {
     on_page_request(id);
+  }
+  scroll_->setVisible(!kanban);
+  status_->setVisible(!kanban);
+  refresh_->setVisible(!kanban);
+  if (kanban_) {
+    kanban_->setVisible(kanban);
+    if (kanban) {
+      kanban_->Activate();
+    }
   }
   Rebuild();
 }
@@ -131,6 +151,16 @@ void PagesView::ClearBody() {
 void PagesView::Rebuild() {
   if (page_.isEmpty()) {
     return;
+  }
+  if (page_ == QStringLiteral("kanban")) {
+    // KanbanView refreshes itself; a snapshot revision must not tear it down.
+    return;
+  }
+  scroll_->setVisible(true);
+  status_->setVisible(true);
+  refresh_->setVisible(true);
+  if (kanban_ != nullptr) {
+    kanban_->hide();
   }
   const int revision = snapshot_.revision;
   if (last_revision_ == revision && body_layout_->count() > 0) {
@@ -258,6 +288,9 @@ QString PagesView::TitleFor(const QString& id) {
   }
   if (id == QStringLiteral("starmap")) {
     return QStringLiteral("Star map");
+  }
+  if (id == QStringLiteral("kanban")) {
+    return QStringLiteral("Kanban");
   }
   return id;
 }
