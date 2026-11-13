@@ -126,6 +126,7 @@ class RightRail : public QWidget {
       on_interrupt_subagent;
 
  private:
+  struct GitRepoPane;
   void RebuildContext(const ProfileSnapshot& snapshot);
   void RebuildAgents(const ProfileSnapshot& snapshot);
   void RebuildTodos(const ProfileSnapshot& snapshot);
@@ -142,8 +143,25 @@ class RightRail : public QWidget {
   void RebuildGitRepositories(const std::vector<ProjectRepoInfo>& repositories);
   void RefreshGitStatuses();
   void RefreshGitStatus(const QString& path, quint64 serial);
+  void RebuildGitChanges(GitRepoPane* repository, const QString& status_output);
+  void RefreshGitignore(GitRepoPane* repository);
   void RunGit(const QString& root, const QStringList& arguments,
               std::function<void(bool ok, const QString& output)> done);
+  void StageGitPaths(const QString& path, quint64 serial,
+                     const QStringList& paths, bool stage);
+  void UnstageGitPaths(const QString& path, quint64 serial,
+                       const QStringList& paths, bool all);
+  void StageAllGit(const QString& path, quint64 serial, bool stage);
+  void AddGitignorePattern(const QString& path, quint64 serial,
+                           const QString& pattern);
+  void RemoveGitignorePattern(const QString& path, quint64 serial,
+                              const QString& pattern);
+  void ShowGitDiff(const QString& path, quint64 serial,
+                   const QStringList& paths, const QString& display_path,
+                   bool staged, bool untracked);
+  void CommitStagedGit(
+      const QString& path, quint64 serial, const QString& message,
+      std::function<void(bool ok, const QString& output)> done);
   void CommitGit(const QString& path, quint64 serial);
   void PushGit(const QString& path, quint64 serial);
   void GenerateCommitMessage(const QString& path, quint64 serial);
@@ -157,10 +175,23 @@ class RightRail : public QWidget {
     QString id;
     QString label;
     QString path;
+    QString suffix;
     quint64 serial = 0;
     QWidget* card = nullptr;
     QLabel* root = nullptr;
-    QPlainTextEdit* status = nullptr;
+    QLabel* branch = nullptr;
+    QLabel* status = nullptr;
+    QWidget* changes_host = nullptr;
+    QVBoxLayout* changes_layout = nullptr;
+    QWidget* diff_host = nullptr;
+    QLabel* diff_title = nullptr;
+    QPlainTextEdit* diff_view = nullptr;
+    QPushButton* diff_close = nullptr;
+    quint64 diff_generation = 0;
+    QLineEdit* ignore_input = nullptr;
+    QPushButton* ignore_add = nullptr;
+    QWidget* ignore_host = nullptr;
+    QVBoxLayout* ignore_layout = nullptr;
     QPlainTextEdit* message = nullptr;
     QLabel* message_status = nullptr;
     QPushButton* refresh = nullptr;

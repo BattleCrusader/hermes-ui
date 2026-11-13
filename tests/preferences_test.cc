@@ -135,6 +135,7 @@ class PreferencesTest : public QObject {
   void rightRailKeepsArtifactScrollAcrossSnapshots();
   void rightRailProjectGitTerminalPanes();
   void rightRailMultipleProjectGitPanes();
+  void rightRailStagesUnstagesAndIgnoresFiles();
   void flowLayoutWrapsRowsAtNarrowWidths();
   void artifactDetectionAndNamingMatchDesktop();
   void rightRailBrowsesGeneratedArtifactVersions();
@@ -1294,8 +1295,10 @@ void PreferencesTest::rightRailProjectGitTerminalPanes() {
            theme.MonoFont(12, QFont::Normal).family());
 
   auto* git_pane = rail.findChild<QWidget*>(QStringLiteral("rightRailGitPane"));
-  auto* git_status =
-      rail.findChild<QPlainTextEdit*>(QStringLiteral("rightRailGitStatus"));
+  auto* git_branch =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitBranch"));
+  auto* git_summary =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitSummary"));
   auto* git_message =
       rail.findChild<QPlainTextEdit*>(QStringLiteral("rightRailGitMessage"));
   auto* git_message_status =
@@ -1307,7 +1310,8 @@ void PreferencesTest::rightRailProjectGitTerminalPanes() {
   auto* git_push =
       rail.findChild<QPushButton*>(QStringLiteral("rightRailGitPush"));
   QVERIFY(git_pane != nullptr);
-  QVERIFY(git_status != nullptr);
+  QVERIFY(git_branch != nullptr);
+  QVERIFY(git_summary != nullptr);
   QVERIFY(git_message != nullptr);
   QVERIFY(git_message_status != nullptr);
   QVERIFY(git_refresh != nullptr);
@@ -1339,19 +1343,34 @@ void PreferencesTest::rightRailProjectGitTerminalPanes() {
   QCOMPARE(preview->document()->defaultFont().pixelSize(),
            theme.UiFont(13, QFont::Normal).pixelSize());
   QVERIFY(git_pane->isVisible());
-  QTRY_VERIFY(git_status->toPlainText().contains(QStringLiteral("##")));
+  QTRY_VERIFY(!git_branch->text().isEmpty() &&
+              git_branch->text() != QStringLiteral("Checking branch…"));
   QVERIFY(git_push->isEnabled());
+  const auto has_git_path = [&rail](const QString& path) {
+    for (QPushButton* button : rail.findChildren<QPushButton*>()) {
+      if (button->property("gitChangePath").toBool() &&
+          button->text().contains(path)) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   QVERIFY(write_file(QStringLiteral("second.txt"),
                      QStringLiteral("second change")));
   git_refresh->click();
-  QTRY_VERIFY(git_status->toPlainText().contains(QStringLiteral("second.txt")));
+  QTRY_VERIFY(has_git_path(QStringLiteral("second.txt")));
+  QTRY_VERIFY(git_summary->text().contains(QStringLiteral("changed")));
+  auto* stage_all =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailGitStageAll"));
+  QVERIFY(stage_all != nullptr);
+  stage_all->click();
+  QTRY_VERIFY(git_commit->isEnabled());
   git_message->setPlainText(QStringLiteral("add second"));
   git_commit->click();
   QTRY_VERIFY(git_message->toPlainText().isEmpty());
   QTRY_COMPARE(git_message_status->text(), QStringLiteral("Committed."));
-  QTRY_VERIFY(
-      !git_status->toPlainText().contains(QStringLiteral("second.txt")));
+  QTRY_VERIFY(!has_git_path(QStringLiteral("second.txt")));
 
   auto* terminal_pane =
       rail.findChild<QWidget*>(QStringLiteral("rightRailTerminalPane"));
@@ -1399,7 +1418,7 @@ void PreferencesTest::rightRailProjectGitTerminalPanes() {
   QVERIFY(write_file(QStringLiteral("ai.txt"),
                      QStringLiteral("ai-assisted change")));
   git_refresh->click();
-  QTRY_VERIFY(git_status->toPlainText().contains(QStringLiteral("ai.txt")));
+  QTRY_VERIFY(has_git_path(QStringLiteral("ai.txt")));
   QTRY_VERIFY(git_generate->isEnabled());
   git_generate->click();
   QTRY_VERIFY(generated_diff.contains(QStringLiteral("ai.txt")));
@@ -3568,6 +3587,223 @@ void PreferencesTest::historyHydratesAndPreservesDisplayReasoning() {
   QCOMPARE(rows.size(), std::size_t{2});
 }
 
+void PreferencesTest::rightRailStagesUnstagesAndIgnoresFiles() {
+  if (QStandardPaths::findExecutable(QStringLiteral("git")).isEmpty()) {
+    QSKIP("git is not installed");
+  }
+  QTemporaryDir repository;
+  QVERIFY(repository.isValid());
+  const QString root = repository.path();
+  const auto write_file = [&root](const QString& name,
+                                  const QString& contents) {
+    QFile file(QDir(root).filePath(name));
+    if (!file.open(QIODevice::WriteOnly)) {
+      return false;
+    }
+    return file.write(contents.toUtf8()) >= 0;
+  };
+  const auto run_git = [&root](const QStringList& arguments,
+                               QString* output = nullptr) {
+    QProcess process;
+    process.setWorkingDirectory(root);
+    process.start(QStringLiteral("git"), arguments);
+    if (!process.waitForFinished(5000) || process.exitCode() != 0) {
+      qWarning() << process.readAllStandardError();
+      return false;
+    }
+    if (output != nullptr) {
+      *output =
+          QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+    }
+    return true;
+  };
+  QVERIFY(write_file(QStringLiteral("tracked.txt"),
+                     QStringLiteral("initial content")));
+  QVERIFY(run_git({QStringLiteral("init")}));
+  QVERIFY(run_git({QStringLiteral("config"), QStringLiteral("user.email"),
+                   QStringLiteral("test@example.com")}));
+  QVERIFY(run_git({QStringLiteral("config"), QStringLiteral("user.name"),
+                   QStringLiteral("Hermes Test")}));
+  QVERIFY(run_git({QStringLiteral("add"), QStringLiteral("tracked.txt")}));
+  QVERIFY(run_git({QStringLiteral("commit"), QStringLiteral("-m"),
+                   QStringLiteral("initial")}));
+
+  hermes::ui::RightRail rail(hermes::ui::Theme::Light());
+  rail.resize(360, 1000);
+  rail.show();
+  rail.SetProjectContext(QStringLiteral("ignore-test"),
+                         QStringLiteral("Ignore Test"), root, {});
+
+  const auto has_git_path = [&rail](const QString& path) {
+    for (QPushButton* button : rail.findChildren<QPushButton*>()) {
+      if (button->property("gitChangePath").toBool() &&
+          button->text().contains(path)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  const auto git_button = [&rail](const QString& prefix, const QString& path) {
+    for (QPushButton* button : rail.findChildren<QPushButton*>()) {
+      if (button->objectName().startsWith(prefix) &&
+          button->property("gitPath").toString() == path) {
+        return button;
+      }
+    }
+    return static_cast<QPushButton*>(nullptr);
+  };
+  const auto ignore_remove = [&rail](const QString& pattern) {
+    for (QPushButton* button : rail.findChildren<QPushButton*>()) {
+      if (button->objectName().startsWith(
+              QStringLiteral("rightRailGitIgnoreRemove")) &&
+          button->property("gitIgnorePattern").toString() == pattern) {
+        return button;
+      }
+    }
+    return static_cast<QPushButton*>(nullptr);
+  };
+  const auto gitignore_contains = [&](const QString& line) {
+    QFile file(QDir(root).filePath(QStringLiteral(".gitignore")));
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+      return false;
+    }
+    const QStringList lines =
+        QString::fromUtf8(file.readAll()).split(QChar('\n'));
+    return lines.contains(line);
+  };
+
+  QVERIFY(write_file(QStringLiteral("note.txt"), QStringLiteral("note")));
+  QVERIFY(write_file(QStringLiteral("commit-me.txt"),
+                     QStringLiteral("commit me")));
+  QVERIFY(write_file(QStringLiteral("tracked.txt"),
+                     QStringLiteral("modified content")));
+  QDir(root).mkpath(QStringLiteral("logs"));
+  QVERIFY(write_file(QStringLiteral("logs/app.log"), QStringLiteral("log")));
+  QVERIFY(write_file(QStringLiteral("scratch.tmp"), QStringLiteral("tmp")));
+  auto* refresh =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailGitRefresh"));
+  QVERIFY(refresh != nullptr);
+  refresh->click();
+  QTRY_VERIFY(has_git_path(QStringLiteral("note.txt")));
+  QTRY_VERIFY(has_git_path(QStringLiteral("logs/app.log")));
+
+  auto* diff_view = [&rail]() -> QPlainTextEdit* {
+    for (QPlainTextEdit* view : rail.findChildren<QPlainTextEdit*>()) {
+      if (view->objectName().startsWith(QStringLiteral("rightRailGitDiff"))) {
+        return view;
+      }
+    }
+    return nullptr;
+  }();
+  QVERIFY(diff_view != nullptr);
+  QPushButton* tracked_path = git_button(
+      QStringLiteral("rightRailGitChangePath"), QStringLiteral("tracked.txt"));
+  QTRY_VERIFY(tracked_path != nullptr);
+  tracked_path->click();
+  QTRY_VERIFY(diff_view->toPlainText().contains(
+      QStringLiteral("-initial content")));
+  QVERIFY(diff_view->toPlainText().contains(
+      QStringLiteral("+modified content")));
+  QPushButton* note_path = git_button(
+      QStringLiteral("rightRailGitChangePath"), QStringLiteral("note.txt"));
+  QTRY_VERIFY(note_path != nullptr);
+  note_path->click();
+  QTRY_VERIFY(diff_view->toPlainText().contains(QStringLiteral("+note")));
+  QPushButton* diff_close = nullptr;
+  for (QPushButton* button : rail.findChildren<QPushButton*>()) {
+    if (button->objectName().startsWith(
+            QStringLiteral("rightRailGitDiffClose"))) {
+      diff_close = button;
+      break;
+    }
+  }
+  QVERIFY(diff_close != nullptr);
+  diff_close->click();
+  QTRY_VERIFY(!diff_view->isVisible());
+
+  QPushButton* stage_note = git_button(QStringLiteral("rightRailGitStage"),
+                                      QStringLiteral("note.txt"));
+  QTRY_VERIFY(stage_note != nullptr);
+  stage_note->click();
+  QTRY_VERIFY(git_button(QStringLiteral("rightRailGitUnstage"),
+                         QStringLiteral("note.txt")) != nullptr);
+  QString staged;
+  QVERIFY(run_git({QStringLiteral("diff"), QStringLiteral("--cached"),
+                   QStringLiteral("--name-only")},
+                  &staged));
+  QVERIFY(staged.contains(QStringLiteral("note.txt")));
+  QPushButton* staged_note_path = git_button(
+      QStringLiteral("rightRailGitChangePath"), QStringLiteral("note.txt"));
+  QTRY_VERIFY(staged_note_path != nullptr);
+  staged_note_path->click();
+  QTRY_VERIFY(diff_view->toPlainText().contains(QStringLiteral("+note")));
+  QPushButton* unstage_note = git_button(QStringLiteral("rightRailGitUnstage"),
+                                        QStringLiteral("note.txt"));
+  QVERIFY(unstage_note != nullptr);
+  unstage_note->click();
+  QTRY_VERIFY(git_button(QStringLiteral("rightRailGitStage"),
+                         QStringLiteral("note.txt")) != nullptr);
+  QVERIFY(run_git({QStringLiteral("diff"), QStringLiteral("--cached"),
+                   QStringLiteral("--name-only")},
+                  &staged));
+  QVERIFY(!staged.contains(QStringLiteral("note.txt")));
+
+  auto* ignore_input = rail.findChild<QLineEdit*>(
+      QStringLiteral("rightRailGitIgnoreInput"));
+  auto* ignore_add =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailGitIgnoreAdd"));
+  QVERIFY(ignore_input != nullptr);
+  QVERIFY(ignore_add != nullptr);
+  ignore_input->setText(QStringLiteral("note.txt"));
+  ignore_add->click();
+  QTRY_VERIFY(gitignore_contains(QStringLiteral("note.txt")));
+  QTRY_VERIFY(!has_git_path(QStringLiteral("note.txt")));
+
+  ignore_input->setText(QStringLiteral("logs/"));
+  ignore_add->click();
+  QTRY_VERIFY(gitignore_contains(QStringLiteral("logs/")));
+  QTRY_VERIFY(!has_git_path(QStringLiteral("logs/app.log")));
+
+  ignore_input->setText(QStringLiteral("*.tmp"));
+  ignore_add->click();
+  QTRY_VERIFY(gitignore_contains(QStringLiteral("*.tmp")));
+  QTRY_VERIFY(!has_git_path(QStringLiteral("scratch.tmp")));
+
+  QPushButton* remove_note = ignore_remove(QStringLiteral("note.txt"));
+  QTRY_VERIFY(remove_note != nullptr);
+  remove_note->click();
+  QTRY_VERIFY(!gitignore_contains(QStringLiteral("note.txt")));
+  QTRY_VERIFY(has_git_path(QStringLiteral("note.txt")));
+
+  QPushButton* stage_commit = git_button(QStringLiteral("rightRailGitStage"),
+                                        QStringLiteral("commit-me.txt"));
+  QTRY_VERIFY(stage_commit != nullptr);
+  stage_commit->click();
+  QTRY_VERIFY(git_button(QStringLiteral("rightRailGitUnstage"),
+                         QStringLiteral("commit-me.txt")) != nullptr);
+  auto* message =
+      rail.findChild<QPlainTextEdit*>(QStringLiteral("rightRailGitMessage"));
+  auto* message_status =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitMessageStatus"));
+  auto* commit =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailGitCommit"));
+  QVERIFY(message != nullptr);
+  QVERIFY(message_status != nullptr);
+  QVERIFY(commit != nullptr);
+  message->setPlainText(QStringLiteral("add only the staged file"));
+  commit->click();
+  QTRY_VERIFY(message->toPlainText().isEmpty());
+  QTRY_COMPARE(message_status->text(), QStringLiteral("Committed."));
+  QString committed;
+  QVERIFY(run_git({QStringLiteral("show"), QStringLiteral("--pretty=format:"),
+                   QStringLiteral("--name-only"), QStringLiteral("HEAD")},
+                  &committed));
+  QVERIFY(committed.contains(QStringLiteral("commit-me.txt")));
+  QVERIFY(!committed.contains(QStringLiteral("tracked.txt")));
+  QTRY_VERIFY(has_git_path(QStringLiteral("tracked.txt")));
+  QTRY_VERIFY(!has_git_path(QStringLiteral("commit-me.txt")));
+}
+
 QTEST_MAIN(PreferencesTest)
 #include "preferences_test.moc"
 
@@ -3671,10 +3907,14 @@ void PreferencesTest::rightRailMultipleProjectGitPanes() {
   rail.SetProjectContext(QStringLiteral("multi"), QStringLiteral("Multi"),
                          first.path(), repositories);
 
-  auto* first_status =
-      rail.findChild<QPlainTextEdit*>(QStringLiteral("rightRailGitStatus"));
-  auto* second_status =
-      rail.findChild<QPlainTextEdit*>(QStringLiteral("rightRailGitStatus_1"));
+  auto* first_branch =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitBranch"));
+  auto* second_branch =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitBranch_1"));
+  auto* first_summary =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitSummary"));
+  auto* second_summary =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitSummary_1"));
   auto* first_message =
       rail.findChild<QPlainTextEdit*>(QStringLiteral("rightRailGitMessage"));
   auto* second_message =
@@ -3695,8 +3935,10 @@ void PreferencesTest::rightRailMultipleProjectGitPanes() {
       rail.findChild<QLabel*>(QStringLiteral("rightRailGitRepoRoot"));
   auto* second_root =
       rail.findChild<QLabel*>(QStringLiteral("rightRailGitRepoRoot_1"));
-  QVERIFY(first_status != nullptr);
-  QVERIFY(second_status != nullptr);
+  QVERIFY(first_branch != nullptr);
+  QVERIFY(second_branch != nullptr);
+  QVERIFY(first_summary != nullptr);
+  QVERIFY(second_summary != nullptr);
   QVERIFY(first_message != nullptr);
   QVERIFY(second_message != nullptr);
   QVERIFY(first_message_status != nullptr);
@@ -3716,18 +3958,40 @@ void PreferencesTest::rightRailMultipleProjectGitPanes() {
   QVERIFY(rail.findChild<QWidget*>(QStringLiteral("rightRailGitRepo_1")) !=
           nullptr);
 
-  QTRY_VERIFY(first_status->toPlainText().contains(QStringLiteral("##")));
-  QTRY_VERIFY(second_status->toPlainText().contains(QStringLiteral("##")));
+  QTRY_VERIFY(!first_branch->text().isEmpty() &&
+              first_branch->text() != QStringLiteral("Checking branch…"));
+  QTRY_VERIFY(!second_branch->text().isEmpty() &&
+              second_branch->text() != QStringLiteral("Checking branch…"));
   QCOMPARE(first_message_status->text(), QString());
   QCOMPARE(second_message_status->text(), QString());
+  const auto repo_has_path = [&rail](const QString& card_name,
+                                     const QString& path) {
+    auto* card = rail.findChild<QWidget*>(card_name);
+    if (card == nullptr) {
+      return false;
+    }
+    for (QPushButton* button : card->findChildren<QPushButton*>()) {
+      if (button->property("gitChangePath").toBool() &&
+          button->text().contains(path)) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   QVERIFY(write_file(first.path(), QStringLiteral("first-change.txt"),
                      QStringLiteral("first change")));
   first_refresh->click();
   QTRY_VERIFY(
-      first_status->toPlainText().contains(QStringLiteral("first-change.txt")));
-  QVERIFY(!second_status->toPlainText().contains(
-      QStringLiteral("first-change.txt")));
+      repo_has_path(QStringLiteral("rightRailGitRepo_0"),
+                    QStringLiteral("first-change.txt")));
+  QVERIFY(!repo_has_path(QStringLiteral("rightRailGitRepo_1"),
+                         QStringLiteral("first-change.txt")));
+  auto* first_stage_all =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailGitStageAll"));
+  QVERIFY(first_stage_all != nullptr);
+  first_stage_all->click();
+  QTRY_VERIFY(first_commit->isEnabled());
   first_message->setPlainText(QStringLiteral("commit first repo"));
   first_commit->click();
   QTRY_VERIFY(first_message->toPlainText().isEmpty());
@@ -3747,7 +4011,8 @@ void PreferencesTest::rightRailMultipleProjectGitPanes() {
                      QStringLiteral("second repo change")));
   second_refresh->click();
   QTRY_VERIFY(
-      second_status->toPlainText().contains(QStringLiteral("repo-two.txt")));
+      repo_has_path(QStringLiteral("rightRailGitRepo_1"),
+                    QStringLiteral("repo-two.txt")));
   QTRY_VERIFY(second_generate->isEnabled());
   second_generate->click();
   QTRY_VERIFY(generated_diff.contains(QStringLiteral("repo-two.txt")));

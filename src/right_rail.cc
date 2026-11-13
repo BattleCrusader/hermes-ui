@@ -14,6 +14,7 @@
 #include <QJsonArray>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPixmap>
 #include <QPlainTextEdit>
 #include <QPointer>
@@ -21,6 +22,7 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QSaveFile>
 #include <QResizeEvent>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -335,6 +337,305 @@ QPushButton* PreviewAction(QWidget* parent, const QString& text,
   button->setFlat(true);
   button->setCursor(Qt::PointingHandCursor);
   return button;
+}
+
+QString GitPaneObjectName(const QString& base, const QString& suffix,
+                          int row = -1) {
+  QString name = base + suffix;
+  if (row >= 0) {
+    name += QStringLiteral("_%1").arg(row);
+  }
+  return name;
+}
+
+struct GitFileChange {
+  QString status;
+  QString path;
+  QString original_path;
+  bool staged = false;
+};
+
+struct GitStatusSnapshot {
+  QString branch;
+  std::vector<GitFileChange> changes;
+};
+
+QString GitBranchText(const QString& header) {
+  QString text = header;
+  if (text.startsWith(QStringLiteral("## "))) {
+    text = text.mid(3);
+  }
+  return text.trimmed();
+}
+
+QString GitChangeDescription(const QString& status) {
+  if (status == QStringLiteral("A")) {
+    return QStringLiteral("Added");
+  }
+  if (status == QStringLiteral("M")) {
+    return QStringLiteral("Modified");
+  }
+  if (status == QStringLiteral("D")) {
+    return QStringLiteral("Deleted");
+  }
+  if (status == QStringLiteral("R")) {
+    return QStringLiteral("Renamed");
+  }
+  if (status == QStringLiteral("C")) {
+    return QStringLiteral("Copied");
+  }
+  if (status == QStringLiteral("U")) {
+    return QStringLiteral("Conflicted");
+  }
+  if (status == QStringLiteral("?")) {
+    return QStringLiteral("Untracked");
+  }
+  if (status == QStringLiteral("T")) {
+    return QStringLiteral("Type changed");
+  }
+  return QStringLiteral("Changed");
+}
+
+QString GitChangeKind(const QString& status) {
+  if (status == QStringLiteral("A")) {
+    return QStringLiteral("added");
+  }
+  if (status == QStringLiteral("D")) {
+    return QStringLiteral("deleted");
+  }
+  if (status == QStringLiteral("R") || status == QStringLiteral("C")) {
+    return QStringLiteral("renamed");
+  }
+  if (status == QStringLiteral("?")) {
+    return QStringLiteral("untracked");
+  }
+  if (status == QStringLiteral("U")) {
+    return QStringLiteral("conflicted");
+  }
+  return QStringLiteral("modified");
+}
+
+void StyleGitBadge(QLabel* badge, const Theme& theme) {
+  if (badge == nullptr) {
+    return;
+  }
+  const QString kind = badge->property("gitChangeKind").toString();
+  QColor color = theme.accent;
+  QColor background = theme.code_background;
+  if (kind == QStringLiteral("added")) {
+    color = theme.success;
+  } else if (kind == QStringLiteral("deleted")) {
+    color = theme.danger;
+  } else if (kind == QStringLiteral("renamed")) {
+    color = theme.warning;
+  } else if (kind == QStringLiteral("untracked")) {
+    color = theme.text_secondary;
+  } else if (kind == QStringLiteral("conflicted")) {
+    color = theme.danger;
+  }
+  badge->setFont(theme.MonoFont(10, QFont::Bold));
+  badge->setStyleSheet(
+      QStringLiteral("color: %1; background: %2; border-radius: 4px;")
+          .arg(color.name(), background.name()));
+}
+
+GitStatusSnapshot ParseGitStatus(const QString& output) {
+  GitStatusSnapshot snapshot;
+  const QStringList records = output.split(QChar('\0'), Qt::SkipEmptyParts);
+  for (int i = 0; i < records.size(); ++i) {
+    const QString& record = records[i];
+    if (i == 0 && record.startsWith(QStringLiteral("## "))) {
+      snapshot.branch = GitBranchText(record);
+      continue;
+    }
+    if (record.size() < 4) {
+      continue;
+    }
+    const QChar index_status = record[0];
+    const QChar worktree_status = record[1];
+    const QString path = record.mid(3);
+    if (path.isEmpty()) {
+      continue;
+    }
+    QString original_path;
+    if (index_status == QChar('R') || index_status == QChar('C') ||
+        worktree_status == QChar('R') || worktree_status == QChar('C')) {
+      if (i + 1 < records.size()) {
+        original_path = records[++i];
+      }
+    }
+    if (index_status == QChar('?') && worktree_status == QChar('?')) {
+      snapshot.changes.push_back(
+          GitFileChange{QStringLiteral("?"), path, QString(), false});
+      continue;
+    }
+    if (index_status != QChar(' ') && index_status != QChar('!')) {
+      snapshot.changes.push_back(
+          GitFileChange{index_status, path, original_path, true});
+    }
+    if (worktree_status != QChar(' ') && worktree_status != QChar('!')) {
+      snapshot.changes.push_back(
+          GitFileChange{worktree_status, path, original_path, false});
+    }
+  }
+  return snapshot;
+}
+
+QStringList GitChangePaths(const GitFileChange& change) {
+  QStringList paths;
+  if (!change.original_path.isEmpty() &&
+      change.original_path != change.path) {
+    paths << change.original_path;
+  }
+  paths << change.path;
+  return paths;
+}
+
+QString GitChangeDisplayPath(const GitFileChange& change) {
+  if (!change.original_path.isEmpty() &&
+      change.original_path != change.path) {
+    return QStringLiteral("%1 → %2").arg(change.original_path, change.path);
+  }
+  return change.path;
+}
+
+QString GitignorePathPattern(const QString& path) {
+  QString pattern = path;
+  pattern.replace(QChar('\\'), QChar('/'));
+  if (pattern.startsWith(QChar('#')) || pattern.startsWith(QChar('!'))) {
+    pattern.prepend(QChar('\\'));
+  }
+  return pattern;
+}
+
+QString GitignoreDirectoryPattern(const QString& path) {
+  QString directory = path;
+  while (directory.endsWith(QChar('/'))) {
+    directory.chop(1);
+  }
+  const int slash = directory.lastIndexOf(QChar('/'));
+  if (slash >= 0) {
+    return directory.left(slash + 1);
+  }
+  return QString();
+}
+
+QString GitignoreExtensionPattern(const QString& path) {
+  QString file = path;
+  while (file.endsWith(QChar('/'))) {
+    file.chop(1);
+  }
+  const int slash = file.lastIndexOf(QChar('/'));
+  if (slash >= 0) {
+    file = file.mid(slash + 1);
+  }
+  const int dot = file.lastIndexOf(QChar('.'));
+  if (dot <= 0 || dot == file.size() - 1) {
+    return QString();
+  }
+  return QStringLiteral("*%1").arg(file.mid(dot));
+}
+
+QString GitignoreFilePath(const QString& root) {
+  return QDir(root).filePath(QStringLiteral(".gitignore"));
+}
+
+QStringList ReadGitignoreEntries(const QString& root) {
+  QFile file(GitignoreFilePath(root));
+  if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    return {};
+  }
+  QStringList entries;
+  const QStringList lines =
+      QString::fromUtf8(file.readAll()).split(QChar('\n'));
+  for (const QString& line : lines) {
+    const QString trimmed = line.trimmed();
+    if (trimmed.isEmpty() || trimmed.startsWith(QChar('#'))) {
+      continue;
+    }
+    entries << trimmed;
+  }
+  return entries;
+}
+
+bool AppendGitignoreEntry(const QString& root, const QString& pattern,
+                          QString* error) {
+  const QString normalized = pattern.trimmed();
+  if (normalized.isEmpty()) {
+    if (error != nullptr) {
+      *error = QStringLiteral("Enter a file, directory, or pattern.");
+    }
+    return false;
+  }
+  if (ReadGitignoreEntries(root).contains(normalized)) {
+    return true;
+  }
+  QFile file(GitignoreFilePath(root));
+  if (!file.open(QIODevice::ReadWrite | QIODevice::Text)) {
+    if (error != nullptr) {
+      *error = QStringLiteral("Could not open .gitignore for writing.");
+    }
+    return false;
+  }
+  const QByteArray existing = file.readAll();
+  if (!existing.isEmpty() && !existing.endsWith('\n')) {
+    file.write("\n");
+  }
+  file.write(normalized.toUtf8());
+  file.write("\n");
+  if (file.error() != QFileDevice::NoError) {
+    if (error != nullptr) {
+      *error = QStringLiteral("Could not update .gitignore.");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool RemoveGitignoreEntry(const QString& root, const QString& pattern,
+                          QString* error) {
+  QFile source(GitignoreFilePath(root));
+  if (!source.open(QIODevice::ReadOnly | QIODevice::Text)) {
+    if (error != nullptr) {
+      *error = QStringLiteral("Could not read .gitignore.");
+    }
+    return false;
+  }
+  const QStringList lines =
+      QString::fromUtf8(source.readAll()).split(QChar('\n'));
+  QStringList kept;
+  bool removed = false;
+  for (const QString& line : lines) {
+    if (line.trimmed() == pattern) {
+      removed = true;
+      continue;
+    }
+    kept << line;
+  }
+  source.close();
+  if (!removed) {
+    return true;
+  }
+  while (!kept.isEmpty() && kept.last().isEmpty()) {
+    kept.removeLast();
+  }
+  QSaveFile target(GitignoreFilePath(root));
+  if (!target.open(QIODevice::WriteOnly | QIODevice::Text)) {
+    if (error != nullptr) {
+      *error = QStringLiteral("Could not write .gitignore.");
+    }
+    return false;
+  }
+  if (!kept.isEmpty()) {
+    target.write((kept.join(QChar('\n')) + QChar('\n')).toUtf8());
+  }
+  if (!target.commit()) {
+    if (error != nullptr) {
+      *error = QStringLiteral("Could not save .gitignore.");
+    }
+    return false;
+  }
+  return true;
 }
 
 void AppendSignatureField(QString* signature, const QString& value) {
@@ -1450,6 +1751,10 @@ void RightRail::SetTheme(const Theme& theme) {
           "QPushButton[railAction=\"true\"] { background: transparent; "
           "color: %3; border: 1px solid %2; border-radius: 5px; "
           "padding: 4px 7px; }"
+          "QPushButton[gitChangePath=\"true\"] { text-align: left; "
+          "padding: 0; border: 0; background: transparent; color: %4; }"
+          "QPushButton[gitChangePath=\"true\"]:hover, "
+          "QPushButton[gitChangePath=\"true\"]:focus { color: %5; }"
           "QPushButton[railAction=\"true\"]:hover { color: %4; "
           "background: %7; }"
           "QPushButton[railAction=\"true\"]:disabled { color: %2; "
@@ -1494,7 +1799,7 @@ void RightRail::SetTheme(const Theme& theme) {
           "QLineEdit#rightRailTimelineSearch, "
           "QLineEdit#rightRailProjectSearch { background: %6; color: %4; "
           "border: 1px solid %2; border-radius: 5px; padding: 4px 6px; }"
-          "QPlainTextEdit#rightRailGitStatus, "
+          "QLineEdit#rightRailGitIgnoreInput, "
           "QPlainTextEdit#rightRailGitMessage, "
           "QPlainTextEdit[gitRepoField=\"true\"], "
           "QTextBrowser#rightRailProjectPreview, "
@@ -1528,6 +1833,9 @@ void RightRail::SetTheme(const Theme& theme) {
   }
   for (QLabel* label : findChildren<QLabel*>()) {
     StyleRailLabel(label, theme_);
+    if (label->property("gitBadge").toBool()) {
+      StyleGitBadge(label, theme_);
+    }
   }
   for (auto& entry : agent_cards_) {
     AgentCard& card = entry.second;
@@ -1555,11 +1863,22 @@ void RightRail::SetTheme(const Theme& theme) {
     if (button->property("railArtifactCard").toBool() ||
         button->property("railAction").toBool()) {
       button->setFont(theme_.UiFont(11, QFont::Normal));
+    } else if (button->property("gitChangePath").toBool()) {
+      button->setFont(theme_.UiFont(10, QFont::Normal));
     }
   }
   for (const GitRepoPane& repo : git_repositories_) {
+    if (repo.branch != nullptr) {
+      repo.branch->setFont(theme_.UiFont(11, QFont::DemiBold));
+    }
     if (repo.status != nullptr) {
-      repo.status->setFont(theme_.MonoFont(10, QFont::Normal));
+      repo.status->setFont(theme_.UiFont(10, QFont::Normal));
+    }
+    if (repo.ignore_input != nullptr) {
+      repo.ignore_input->setFont(theme_.UiFont(10, QFont::Normal));
+    }
+    if (repo.diff_view != nullptr) {
+      repo.diff_view->setFont(theme_.MonoFont(10, QFont::Normal));
     }
     if (repo.message != nullptr) {
       repo.message->setFont(theme_.UiFont(11, QFont::Normal));
@@ -1626,7 +1945,7 @@ void RightRail::SetProjectContext(
       resolved == project_root_ && repositories_equal) {
     for (const GitRepoPane& repository : git_repositories_) {
       if (repository.status != nullptr &&
-          repository.status->toPlainText().isEmpty()) {
+          repository.status->text().isEmpty()) {
         RefreshGitStatus(repository.path, repository.serial);
       }
     }
@@ -1725,7 +2044,6 @@ void RightRail::RebuildGitRepositories(
     git_repositories_host_->setVisible(!resolved.empty());
   }
 
-  const bool multiple = resolved.size() > 1;
   for (std::size_t index = 0; index < resolved.size(); ++index) {
     const ProjectRepoInfo& repository = resolved[index];
     const int ordinal = static_cast<int>(index);
@@ -1736,6 +2054,7 @@ void RightRail::RebuildGitRepositories(
     pane.id = repository.id;
     pane.label = repository.label;
     pane.path = repository.path;
+    pane.suffix = suffix;
     pane.serial = ++git_repository_serial_;
 
     auto* card = new QWidget(git_repositories_host_);
@@ -1757,17 +2076,108 @@ void RightRail::RebuildGitRepositories(
     pane.root->setToolTip(repository.path);
     card_layout->addWidget(pane.root);
 
-    pane.status = new QPlainTextEdit(card);
+    pane.branch = RailLabel(card, theme_, QStringLiteral("Checking branch…"),
+                            11, QFont::DemiBold, theme_.foreground);
+    pane.branch->setObjectName(
+        QStringLiteral("rightRailGitBranch%1").arg(suffix));
+    pane.branch->setWordWrap(false);
+    pane.branch->setToolTip(QStringLiteral("Current branch"));
+    card_layout->addWidget(pane.branch);
+
+    pane.status = RailLabel(card, theme_,
+                            QStringLiteral("Reading changes…"), 10,
+                            QFont::Normal, theme_.text_secondary);
     pane.status->setObjectName(
-        QStringLiteral("rightRailGitStatus%1").arg(suffix));
-    pane.status->setProperty("gitRepoField", true);
-    pane.status->setReadOnly(true);
-    pane.status->setLineWrapMode(QPlainTextEdit::WidgetWidth);
-    pane.status->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-    pane.status->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    pane.status->setFont(theme_.MonoFont(10, QFont::Normal));
-    pane.status->setMinimumHeight(multiple ? 86 : 120);
-    card_layout->addWidget(pane.status, 1);
+        QStringLiteral("rightRailGitSummary%1").arg(suffix));
+    pane.status->setToolTip(
+        QStringLiteral("Staged and unstaged changes in this repository"));
+    card_layout->addWidget(pane.status);
+
+    pane.changes_host = new QWidget(card);
+    pane.changes_host->setObjectName(
+        QStringLiteral("rightRailGitChanges%1").arg(suffix));
+    pane.changes_host->setAttribute(Qt::WA_StyledBackground, true);
+    pane.changes_layout = new QVBoxLayout(pane.changes_host);
+    pane.changes_layout->setContentsMargins(0, 2, 0, 2);
+    pane.changes_layout->setSpacing(2);
+    card_layout->addWidget(pane.changes_host);
+
+    pane.diff_host = new QWidget(card);
+    pane.diff_host->setObjectName(
+        QStringLiteral("rightRailGitDiffPanel%1").arg(suffix));
+    pane.diff_host->setAttribute(Qt::WA_StyledBackground, true);
+    pane.diff_host->setVisible(false);
+    auto* diff_layout = new QVBoxLayout(pane.diff_host);
+    diff_layout->setContentsMargins(0, 2, 0, 4);
+    diff_layout->setSpacing(3);
+    auto* diff_header = new QHBoxLayout();
+    diff_header->setContentsMargins(0, 0, 0, 0);
+    diff_header->setSpacing(4);
+    pane.diff_title = RailLabel(pane.diff_host, theme_, QString(), 10,
+                                QFont::DemiBold, theme_.text_secondary);
+    pane.diff_title->setObjectName(
+        QStringLiteral("rightRailGitDiffTitle%1").arg(suffix));
+    pane.diff_title->setWordWrap(false);
+    pane.diff_title->setSizePolicy(QSizePolicy::Ignored,
+                                   QSizePolicy::Preferred);
+    pane.diff_title->setMinimumWidth(0);
+    diff_header->addWidget(pane.diff_title, 1);
+    pane.diff_close = PreviewAction(
+        pane.diff_host, QStringLiteral("×"),
+        QStringLiteral("rightRailGitDiffClose%1").arg(suffix));
+    pane.diff_close->setFixedSize(18, 20);
+    pane.diff_close->setToolTip(QStringLiteral("Close diff"));
+    diff_header->addWidget(pane.diff_close);
+    diff_layout->addLayout(diff_header);
+    pane.diff_view = new QPlainTextEdit(pane.diff_host);
+    pane.diff_view->setObjectName(
+        QStringLiteral("rightRailGitDiff%1").arg(suffix));
+    pane.diff_view->setProperty("gitRepoField", true);
+    pane.diff_view->setReadOnly(true);
+    pane.diff_view->setLineWrapMode(QPlainTextEdit::NoWrap);
+    pane.diff_view->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    pane.diff_view->setFont(theme_.MonoFont(10, QFont::Normal));
+    pane.diff_view->setMinimumHeight(110);
+    pane.diff_view->setMaximumHeight(220);
+    diff_layout->addWidget(pane.diff_view);
+    card_layout->addWidget(pane.diff_host);
+
+    auto* ignore_title = RailLabel(card, theme_, QStringLiteral("Ignore rules"),
+                                   10, QFont::DemiBold, theme_.text_secondary);
+    ignore_title->setObjectName(
+        QStringLiteral("rightRailGitIgnoreTitle%1").arg(suffix));
+    ignore_title->setToolTip(
+        QStringLiteral("Add files, folders, or patterns to .gitignore"));
+    card_layout->addWidget(ignore_title);
+
+    auto* ignore_input_row = new QHBoxLayout();
+    ignore_input_row->setContentsMargins(0, 0, 0, 0);
+    ignore_input_row->setSpacing(4);
+    pane.ignore_input = new QLineEdit(card);
+    pane.ignore_input->setObjectName(
+        QStringLiteral("rightRailGitIgnoreInput%1").arg(suffix));
+    pane.ignore_input->setProperty("gitRepoField", true);
+    pane.ignore_input->setPlaceholderText(
+        QStringLiteral("file, dir/, or *.pattern"));
+    pane.ignore_input->setClearButtonEnabled(true);
+    pane.ignore_input->setFont(theme_.UiFont(10, QFont::Normal));
+    pane.ignore_input->setMinimumHeight(24);
+    ignore_input_row->addWidget(pane.ignore_input, 1);
+    pane.ignore_add = PreviewAction(
+        card, QStringLiteral("Add"),
+        QStringLiteral("rightRailGitIgnoreAdd%1").arg(suffix));
+    pane.ignore_add->setToolTip(QStringLiteral("Add to .gitignore"));
+    ignore_input_row->addWidget(pane.ignore_add);
+    card_layout->addLayout(ignore_input_row);
+
+    pane.ignore_host = new QWidget(card);
+    pane.ignore_host->setObjectName(
+        QStringLiteral("rightRailGitIgnoreEntries%1").arg(suffix));
+    pane.ignore_host->setAttribute(Qt::WA_StyledBackground, true);
+    pane.ignore_layout = new QVBoxLayout(pane.ignore_host);
+    pane.ignore_layout->setContentsMargins(0, 0, 0, 4);
+    pane.ignore_layout->setSpacing(1);
+    card_layout->addWidget(pane.ignore_host);
 
     pane.message = new QPlainTextEdit(card);
     pane.message->setObjectName(
@@ -1802,6 +2212,8 @@ void RightRail::RebuildGitRepositories(
     pane.commit =
         PreviewAction(card, QStringLiteral("Commit"),
                       QStringLiteral("rightRailGitCommit%1").arg(suffix));
+    pane.commit->setToolTip(QStringLiteral("Commit staged changes"));
+    pane.commit->setEnabled(false);
     actions->addWidget(pane.commit);
     pane.push = PreviewAction(card, QStringLiteral("Commit & Push"),
                               QStringLiteral("rightRailGitPush%1").arg(suffix));
@@ -1820,6 +2232,35 @@ void RightRail::RebuildGitRepositories(
                      [this, path, serial]() { CommitGit(path, serial); });
     QObject::connect(pane.push, &QPushButton::clicked, pane.push,
                      [this, path, serial]() { PushGit(path, serial); });
+    QObject::connect(pane.diff_close, &QPushButton::clicked, pane.diff_close,
+                     [this, path, serial]() {
+                       GitRepoPane* repo = FindGitRepository(path, serial);
+                       if (repo == nullptr) {
+                         return;
+                       }
+                       ++repo->diff_generation;
+                       if (repo->diff_host != nullptr) {
+                         repo->diff_host->setVisible(false);
+                       }
+                     });
+    QObject::connect(pane.ignore_add, &QPushButton::clicked, pane.ignore_add,
+                     [this, path, serial]() {
+                       GitRepoPane* repo = FindGitRepository(path, serial);
+                       if (repo == nullptr || repo->ignore_input == nullptr) {
+                         return;
+                       }
+                       AddGitignorePattern(path, serial,
+                                           repo->ignore_input->text());
+                     });
+    QObject::connect(
+        pane.ignore_input, &QLineEdit::returnPressed, pane.ignore_input,
+        [this, path, serial]() {
+          GitRepoPane* repo = FindGitRepository(path, serial);
+          if (repo == nullptr || repo->ignore_input == nullptr) {
+            return;
+          }
+          AddGitignorePattern(path, serial, repo->ignore_input->text());
+        });
 
     git_repositories_.push_back(pane);
     git_repositories_layout_->addWidget(card);
@@ -1964,20 +2405,28 @@ void RightRail::RefreshGitStatus(const QString& path, quint64 serial) {
   if (repository == nullptr || repository->status == nullptr) {
     return;
   }
-  repository->status->setPlainText(QStringLiteral("Checking git status…"));
+  repository->status->setText(QStringLiteral("Reading changes…"));
+  RefreshGitignore(repository);
   RunGit(
       path,
-      {QStringLiteral("status"), QStringLiteral("--short"),
-       QStringLiteral("--branch")},
+      {QStringLiteral("status"), QStringLiteral("--porcelain=v1"),
+       QStringLiteral("-z"), QStringLiteral("--branch"),
+       QStringLiteral("--untracked-files=all")},
       [this, path, serial](bool ok, const QString& output) {
         GitRepoPane* current = FindGitRepository(path, serial);
         if (current == nullptr || current->status == nullptr) {
           return;
         }
         if (!ok) {
-          current->status->setPlainText(
-              output.isEmpty() ? QStringLiteral("Not a git repository.")
+          if (current->branch != nullptr) {
+            current->branch->setText(QStringLiteral("Not a git repository"));
+          }
+          current->status->setText(
+              output.isEmpty() ? QStringLiteral("Git status is unavailable.")
                                : output);
+          if (current->changes_layout != nullptr) {
+            ClearLayout(current->changes_layout);
+          }
           if (current->commit != nullptr) {
             current->commit->setEnabled(false);
           }
@@ -1989,18 +2438,529 @@ void RightRail::RefreshGitStatus(const QString& path, quint64 serial) {
           }
           return;
         }
-        current->status->setPlainText(
-            output.isEmpty() ? QStringLiteral("Working tree clean.") : output);
-        if (current->commit != nullptr) {
-          current->commit->setEnabled(true);
-        }
-        if (current->push != nullptr) {
-          current->push->setEnabled(true);
-        }
-        if (current->generate != nullptr && !current->ai_generating) {
-          current->generate->setEnabled(true);
-        }
+        RebuildGitChanges(current, output);
       });
+}
+
+void RightRail::RebuildGitChanges(GitRepoPane* repository,
+                                  const QString& status_output) {
+  if (repository == nullptr || repository->changes_layout == nullptr) {
+    return;
+  }
+  ClearLayout(repository->changes_layout);
+  const GitStatusSnapshot snapshot = ParseGitStatus(status_output);
+  int staged_count = 0;
+  int unstaged_count = 0;
+  for (const GitFileChange& change : snapshot.changes) {
+    if (change.staged) {
+      ++staged_count;
+    } else {
+      ++unstaged_count;
+    }
+  }
+
+  if (repository->branch != nullptr) {
+    repository->branch->setText(
+        snapshot.branch.isEmpty() ? QStringLiteral("Detached HEAD")
+                                  : snapshot.branch);
+    repository->branch->setToolTip(
+        snapshot.branch.isEmpty()
+            ? QStringLiteral("No current branch")
+            : QStringLiteral("Current branch: %1").arg(snapshot.branch));
+  }
+  if (repository->status != nullptr) {
+    QStringList summary;
+    if (staged_count > 0) {
+      summary << QStringLiteral("%1 staged").arg(staged_count);
+    }
+    if (unstaged_count > 0) {
+      summary << QStringLiteral("%1 changed").arg(unstaged_count);
+    }
+    repository->status->setText(
+        summary.isEmpty() ? QStringLiteral("Working tree clean")
+                          : summary.join(QStringLiteral(" · ")));
+  }
+
+  const QString path = repository->path;
+  const quint64 serial = repository->serial;
+  int row_index = 0;
+  auto add_group_header = [this, repository](const QString& title, int count,
+                                             bool staged) {
+    auto* header = new QWidget(repository->changes_host);
+    header->setObjectName(GitPaneObjectName(
+        staged ? QStringLiteral("rightRailGitStagedGroup")
+               : QStringLiteral("rightRailGitChangesGroup"),
+        repository->suffix));
+    auto* layout = new QHBoxLayout(header);
+    layout->setContentsMargins(0, 4, 0, 2);
+    layout->setSpacing(4);
+    auto* label = RailLabel(
+        header, theme_, QStringLiteral("%1 · %2").arg(title).arg(count), 10,
+        QFont::DemiBold, theme_.text_secondary);
+    label->setWordWrap(false);
+    label->setProperty("gitGroupTitle", true);
+    layout->addWidget(label, 1);
+    if (count > 0) {
+      auto* action = PreviewAction(
+          header, staged ? QStringLiteral("Unstage all")
+                         : QStringLiteral("Stage all"),
+          GitPaneObjectName(staged ? QStringLiteral("rightRailGitUnstageAll")
+                                   : QStringLiteral("rightRailGitStageAll"),
+                            repository->suffix));
+      action->setProperty("gitStageAll", !staged);
+      action->setToolTip(staged ? QStringLiteral("Unstage every file")
+                                : QStringLiteral("Stage every change"));
+      layout->addWidget(action);
+      const QString root = repository->path;
+      const quint64 repo_serial = repository->serial;
+      QObject::connect(action, &QPushButton::clicked, action,
+                       [this, root, repo_serial, staged]() {
+                         StageAllGit(root, repo_serial, !staged);
+                       });
+    }
+    repository->changes_layout->addWidget(header);
+  };
+  auto add_empty_group = [this, repository](const QString& text) {
+    auto* label = RailLabel(repository->changes_host, theme_, text, 10,
+                            QFont::Normal, theme_.text_tertiary);
+    label->setWordWrap(false);
+    label->setProperty("gitEmptyGroup", true);
+    repository->changes_layout->addWidget(label);
+  };
+  auto add_change_row = [this, repository, path, serial, &row_index](
+                            const GitFileChange& change, bool staged) {
+    auto* row = new QWidget(repository->changes_host);
+    row->setObjectName(GitPaneObjectName(QStringLiteral("rightRailGitChange"),
+                                         repository->suffix, row_index));
+    row->setProperty("gitChangeRow", true);
+    row->setAttribute(Qt::WA_StyledBackground, true);
+    auto* layout = new QHBoxLayout(row);
+    layout->setContentsMargins(0, 1, 0, 1);
+    layout->setSpacing(4);
+
+    auto* badge = new QLabel(change.status.left(1), row);
+    badge->setObjectName(
+        GitPaneObjectName(QStringLiteral("rightRailGitBadge"),
+                          repository->suffix, row_index));
+    badge->setAlignment(Qt::AlignCenter);
+    badge->setFixedSize(18, 18);
+    badge->setProperty("gitBadge", true);
+    badge->setProperty("gitChangeKind", GitChangeKind(change.status));
+    badge->setToolTip(GitChangeDescription(change.status));
+    StyleGitBadge(badge, theme_);
+    layout->addWidget(badge);
+
+    const QString display_path = GitChangeDisplayPath(change);
+    const QStringList change_paths = GitChangePaths(change);
+    const bool untracked = change.status == QStringLiteral("?");
+    QString path_button_text = display_path;
+    path_button_text.replace(QStringLiteral("&"), QStringLiteral("&&"));
+    auto* name = new QPushButton(path_button_text, row);
+    name->setObjectName(
+        GitPaneObjectName(QStringLiteral("rightRailGitChangePath"),
+                          repository->suffix, row_index));
+    name->setFlat(true);
+    name->setCursor(Qt::PointingHandCursor);
+    name->setFocusPolicy(Qt::StrongFocus);
+    name->setAutoDefault(false);
+    name->setFont(theme_.UiFont(10, QFont::Normal));
+    name->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    name->setMinimumWidth(0);
+    name->setProperty("gitChangePath", true);
+    name->setProperty("gitPath", change.path);
+    name->setToolTip(
+        QStringLiteral("%1\n%2\nClick to view the diff.")
+            .arg(GitChangeDescription(change.status), display_path));
+    layout->addWidget(name, 1);
+    const auto show_diff = [this, path, serial, change_paths, display_path,
+                            staged, untracked]() {
+      ShowGitDiff(path, serial, change_paths, display_path, staged, untracked);
+    };
+    QObject::connect(name, &QPushButton::clicked, name, show_diff);
+
+    auto* action = PreviewAction(
+        row, staged ? QStringLiteral("Unstage") : QStringLiteral("Stage"),
+        GitPaneObjectName(staged ? QStringLiteral("rightRailGitUnstage")
+                                 : QStringLiteral("rightRailGitStage"),
+                          repository->suffix, row_index));
+    action->setProperty("gitPath", change.path);
+    action->setProperty("gitOriginalPath", change.original_path);
+    action->setMinimumHeight(22);
+    action->setToolTip(staged ? QStringLiteral("Unstage %1").arg(change.path)
+                              : QStringLiteral("Stage %1").arg(change.path));
+    layout->addWidget(action);
+    QObject::connect(action, &QPushButton::clicked, action,
+                     [this, path, serial, change_paths, staged]() {
+                       StageGitPaths(path, serial, change_paths, !staged);
+                     });
+
+    auto* menu = new QMenu(row);
+    auto* view_diff = menu->addAction(QStringLiteral("View diff"));
+    QObject::connect(view_diff, &QAction::triggered, row, show_diff);
+    auto* preview = menu->addAction(QStringLiteral("Preview file"));
+    QObject::connect(preview, &QAction::triggered, row,
+                     [this, path, change]() {
+                       ShowProjectPreview(
+                           QDir(path).filePath(change.path));
+                     });
+    auto* copy = menu->addAction(QStringLiteral("Copy path"));
+    QObject::connect(copy, &QAction::triggered, row, [change]() {
+      QGuiApplication::clipboard()->setText(change.path);
+    });
+    if (!staged) {
+      menu->addSeparator();
+      auto* ignore_file = menu->addAction(QStringLiteral("Ignore this file"));
+      QObject::connect(
+          ignore_file, &QAction::triggered, row,
+          [this, path, serial, pattern = GitignorePathPattern(change.path)]() {
+            AddGitignorePattern(path, serial, pattern);
+          });
+      const QString directory = GitignoreDirectoryPattern(change.path);
+      if (!directory.isEmpty()) {
+        auto* ignore_directory =
+            menu->addAction(QStringLiteral("Ignore parent folder"));
+        QObject::connect(
+            ignore_directory, &QAction::triggered, row,
+            [this, path, serial, directory]() {
+              AddGitignorePattern(path, serial, directory);
+            });
+      }
+      const QString extension = GitignoreExtensionPattern(change.path);
+      if (!extension.isEmpty()) {
+        auto* ignore_extension =
+            menu->addAction(QStringLiteral("Ignore %1 files").arg(extension));
+        QObject::connect(
+            ignore_extension, &QAction::triggered, row,
+            [this, path, serial, extension]() {
+              AddGitignorePattern(path, serial, extension);
+            });
+      }
+    }
+    auto* more = PreviewAction(
+        row, QStringLiteral("⋯"),
+        GitPaneObjectName(QStringLiteral("rightRailGitChangeMenu"),
+                          repository->suffix, row_index));
+    more->setFixedSize(20, 22);
+    more->setMenu(menu);
+    more->setToolTip(QStringLiteral("More file actions"));
+    layout->addWidget(more);
+
+    repository->changes_layout->addWidget(row);
+    ++row_index;
+  };
+
+  if (!snapshot.changes.empty()) {
+    add_group_header(QStringLiteral("Staged"), staged_count, true);
+    if (staged_count == 0) {
+      add_empty_group(QStringLiteral("No staged changes"));
+    }
+    for (const GitFileChange& change : snapshot.changes) {
+      if (change.staged) {
+        add_change_row(change, true);
+      }
+    }
+    add_group_header(QStringLiteral("Changes"), unstaged_count, false);
+    if (unstaged_count == 0) {
+      add_empty_group(QStringLiteral("No unstaged changes"));
+    }
+    for (const GitFileChange& change : snapshot.changes) {
+      if (!change.staged) {
+        add_change_row(change, false);
+      }
+    }
+  }
+
+  if (repository->commit != nullptr) {
+    repository->commit->setEnabled(staged_count > 0);
+  }
+  if (repository->push != nullptr) {
+    repository->push->setEnabled(true);
+  }
+  if (repository->generate != nullptr && !repository->ai_generating) {
+    repository->generate->setEnabled(true);
+  }
+}
+
+void RightRail::RefreshGitignore(GitRepoPane* repository) {
+  if (repository == nullptr || repository->ignore_layout == nullptr) {
+    return;
+  }
+  ClearLayout(repository->ignore_layout);
+  const QStringList entries = ReadGitignoreEntries(repository->path);
+  const QString suffix = repository->suffix;
+  if (entries.isEmpty()) {
+    auto* empty = RailLabel(repository->ignore_host, theme_,
+                            QStringLiteral("No ignore rules"), 10,
+                            QFont::Normal, theme_.text_tertiary);
+    empty->setObjectName(
+        QStringLiteral("rightRailGitIgnoreEmpty%1").arg(suffix));
+    empty->setWordWrap(false);
+    repository->ignore_layout->addWidget(empty);
+    return;
+  }
+  const QString path = repository->path;
+  const quint64 serial = repository->serial;
+  for (int i = 0; i < entries.size(); ++i) {
+    const QString pattern = entries[i];
+    auto* row = new QWidget(repository->ignore_host);
+    row->setObjectName(
+        GitPaneObjectName(QStringLiteral("rightRailGitIgnoreRow"), suffix, i));
+    auto* layout = new QHBoxLayout(row);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(4);
+    auto* label = RailLabel(row, theme_, pattern, 10, QFont::Normal,
+                            theme_.text_secondary);
+    label->setObjectName(
+        GitPaneObjectName(QStringLiteral("rightRailGitIgnoreEntry"), suffix,
+                          i));
+    label->setWordWrap(false);
+    label->setProperty("gitIgnoreEntry", true);
+    label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    label->setMinimumWidth(0);
+    label->setToolTip(pattern);
+    layout->addWidget(label, 1);
+    auto* remove = PreviewAction(
+        row, QStringLiteral("×"),
+        GitPaneObjectName(QStringLiteral("rightRailGitIgnoreRemove"), suffix,
+                          i));
+    remove->setFixedSize(18, 20);
+    remove->setProperty("gitIgnorePattern", pattern);
+    remove->setToolTip(
+        QStringLiteral("Remove %1 from .gitignore").arg(pattern));
+    layout->addWidget(remove);
+    QObject::connect(remove, &QPushButton::clicked, remove,
+                     [this, path, serial, pattern]() {
+                       RemoveGitignorePattern(path, serial, pattern);
+                     });
+    repository->ignore_layout->addWidget(row);
+  }
+}
+
+void RightRail::StageGitPaths(const QString& path, quint64 serial,
+                              const QStringList& paths, bool stage) {
+  if (paths.isEmpty()) {
+    return;
+  }
+  GitRepoPane* repository = FindGitRepository(path, serial);
+  if (repository == nullptr || repository->message_status == nullptr) {
+    return;
+  }
+  repository->message_status->setText(
+      stage ? QStringLiteral("Staging…") : QStringLiteral("Unstaging…"));
+  if (!stage) {
+    UnstageGitPaths(path, serial, paths, false);
+    return;
+  }
+  QStringList stage_arguments{QStringLiteral("add"), QStringLiteral("-A"),
+                              QStringLiteral("--")};
+  stage_arguments << paths;
+  RunGit(path, stage_arguments,
+         [this, path, serial](bool ok, const QString& output) {
+           GitRepoPane* current = FindGitRepository(path, serial);
+           if (current == nullptr || current->message_status == nullptr) {
+             return;
+           }
+           if (!ok) {
+             current->message_status->setText(output);
+             return;
+           }
+           current->message_status->setText(QStringLiteral("Staged."));
+           RefreshGitStatus(path, serial);
+         });
+}
+
+void RightRail::UnstageGitPaths(const QString& path, quint64 serial,
+                                const QStringList& paths, bool all) {
+  if (!all && paths.isEmpty()) {
+    return;
+  }
+  GitRepoPane* repository = FindGitRepository(path, serial);
+  if (repository == nullptr || repository->message_status == nullptr) {
+    return;
+  }
+  repository->message_status->setText(QStringLiteral("Unstaging…"));
+  const auto finish = [this, path, serial, all](bool ok,
+                                                const QString& output) {
+    GitRepoPane* current = FindGitRepository(path, serial);
+    if (current == nullptr || current->message_status == nullptr) {
+      return;
+    }
+    if (!ok) {
+      current->message_status->setText(output);
+      return;
+    }
+    current->message_status->setText(
+        all ? QStringLiteral("Unstaged all changes.")
+            : QStringLiteral("Unstaged."));
+    RefreshGitStatus(path, serial);
+  };
+  QStringList restore{QStringLiteral("restore"), QStringLiteral("--staged"),
+                      QStringLiteral("--")};
+  if (all) {
+    restore << QStringLiteral(".");
+  } else {
+    restore << paths;
+  }
+  RunGit(path, restore,
+         [this, path, paths, all, finish](bool ok, const QString& output) {
+           if (ok) {
+             finish(true, output);
+             return;
+           }
+           // A repository with no commits has no HEAD to restore from. Remove
+           // the paths from the index instead, leaving the worktree untouched.
+           RunGit(
+               path,
+               {QStringLiteral("rev-parse"), QStringLiteral("--verify"),
+                QStringLiteral("HEAD")},
+               [this, path, paths, all, finish, output](bool has_head,
+                                                        const QString&) {
+                 if (has_head) {
+                   finish(false, output);
+                   return;
+                 }
+                 QStringList cached{QStringLiteral("rm"),
+                                    QStringLiteral("--cached"),
+                                    QStringLiteral("-r"),
+                                    QStringLiteral("--quiet"),
+                                    QStringLiteral("--")};
+                 if (all) {
+                   cached << QStringLiteral(".");
+                 } else {
+                   cached << paths;
+                 }
+                 RunGit(path, cached, finish);
+               });
+         });
+}
+
+void RightRail::StageAllGit(const QString& path, quint64 serial, bool stage) {
+  GitRepoPane* repository = FindGitRepository(path, serial);
+  if (repository == nullptr || repository->message_status == nullptr) {
+    return;
+  }
+  if (!stage) {
+    UnstageGitPaths(path, serial, {}, true);
+    return;
+  }
+  repository->message_status->setText(QStringLiteral("Staging all…"));
+  RunGit(
+      path, {QStringLiteral("add"), QStringLiteral("-A")},
+      [this, path, serial](bool ok, const QString& output) {
+        GitRepoPane* current = FindGitRepository(path, serial);
+        if (current == nullptr || current->message_status == nullptr) {
+          return;
+        }
+        if (!ok) {
+          current->message_status->setText(output);
+          return;
+        }
+        current->message_status->setText(QStringLiteral("Staged all changes."));
+        RefreshGitStatus(path, serial);
+      });
+}
+
+void RightRail::ShowGitDiff(const QString& path, quint64 serial,
+                            const QStringList& paths,
+                            const QString& display_path, bool staged,
+                            bool untracked) {
+  GitRepoPane* repository = FindGitRepository(path, serial);
+  if (repository == nullptr || repository->diff_host == nullptr ||
+      repository->diff_title == nullptr || repository->diff_view == nullptr ||
+      paths.isEmpty()) {
+    return;
+  }
+  ++repository->diff_generation;
+  const quint64 generation = repository->diff_generation;
+  repository->diff_host->setVisible(true);
+  QString title_prefix = QStringLiteral("Unstaged diff");
+  if (staged) {
+    title_prefix = QStringLiteral("Staged diff");
+  } else if (untracked) {
+    title_prefix = QStringLiteral("New file");
+  }
+  repository->diff_title->setText(
+      QStringLiteral("%1 · %2").arg(title_prefix, display_path));
+  repository->diff_title->setToolTip(display_path);
+  repository->diff_view->setPlainText(QStringLiteral("Loading diff…"));
+  QStringList arguments;
+  if (untracked) {
+    arguments << QStringLiteral("diff") << QStringLiteral("--no-index")
+              << QStringLiteral("--") << QStringLiteral("/dev/null")
+              << paths.first();
+  } else {
+    arguments << QStringLiteral("diff");
+    if (staged) {
+      arguments << QStringLiteral("--cached");
+    }
+    arguments << QStringLiteral("--no-ext-diff") << QStringLiteral("--")
+              << paths;
+  }
+  RunGit(path, arguments,
+         [this, path, serial, generation](bool ok, const QString& output) {
+           GitRepoPane* current = FindGitRepository(path, serial);
+           if (current == nullptr || current->diff_generation != generation ||
+               current->diff_view == nullptr) {
+             return;
+           }
+           // git diff exits 1 when it finds differences. The output is still
+           // the diff we want, so accept anything that looks like one.
+           const bool looks_like_diff =
+               output.startsWith(QStringLiteral("diff --git")) ||
+               output.contains(QStringLiteral("\n@@ "));
+           if (!ok && !looks_like_diff) {
+             current->diff_view->setPlainText(
+                 output.isEmpty() ? QStringLiteral("Unable to read the diff.")
+                                  : output);
+             return;
+           }
+           current->diff_view->setPlainText(
+               output.isEmpty()
+                   ? QStringLiteral("No textual diff in this file.")
+                   : output);
+           current->diff_view->moveCursor(QTextCursor::Start);
+         });
+}
+
+void RightRail::AddGitignorePattern(const QString& path, quint64 serial,
+                                    const QString& pattern) {
+  GitRepoPane* repository = FindGitRepository(path, serial);
+  if (repository == nullptr || repository->message_status == nullptr) {
+    return;
+  }
+  const QString normalized = pattern.trimmed();
+  if (normalized.isEmpty()) {
+    repository->message_status->setText(
+        QStringLiteral("Enter a file, directory, or pattern."));
+    return;
+  }
+  QString error;
+  if (!AppendGitignoreEntry(path, normalized, &error)) {
+    repository->message_status->setText(error);
+    return;
+  }
+  if (repository->ignore_input != nullptr) {
+    repository->ignore_input->clear();
+  }
+  repository->message_status->setText(
+      QStringLiteral("Added %1 to .gitignore.").arg(normalized));
+  RefreshGitStatus(path, serial);
+}
+
+void RightRail::RemoveGitignorePattern(const QString& path, quint64 serial,
+                                       const QString& pattern) {
+  GitRepoPane* repository = FindGitRepository(path, serial);
+  if (repository == nullptr || repository->message_status == nullptr) {
+    return;
+  }
+  QString error;
+  if (!RemoveGitignoreEntry(path, pattern, &error)) {
+    repository->message_status->setText(error);
+    return;
+  }
+  repository->message_status->setText(
+      QStringLiteral("Removed %1 from .gitignore.").arg(pattern));
+  RefreshGitStatus(path, serial);
 }
 
 void RightRail::RunGit(
@@ -2040,6 +3000,43 @@ void RightRail::RunGit(
   process->start(QStringLiteral("git"), arguments);
 }
 
+void RightRail::CommitStagedGit(
+    const QString& path, quint64 serial, const QString& message,
+    std::function<void(bool ok, const QString& output)> done) {
+  GitRepoPane* repository = FindGitRepository(path, serial);
+  if (repository == nullptr || repository->message_status == nullptr) {
+    done(false, QStringLiteral("No git repository."));
+    return;
+  }
+  repository->message_status->setText(
+      QStringLiteral("Checking staged changes…"));
+  RunGit(
+      path,
+      {QStringLiteral("diff"), QStringLiteral("--cached"),
+       QStringLiteral("--name-only")},
+      [this, path, serial, message, done](bool ok, const QString& output) {
+        GitRepoPane* current = FindGitRepository(path, serial);
+        if (current == nullptr || current->message_status == nullptr) {
+          done(false, QStringLiteral("No git repository."));
+          return;
+        }
+        if (!ok) {
+          done(false, output);
+          return;
+        }
+        if (output.trimmed().isEmpty()) {
+          done(false, QStringLiteral("Stage files before committing."));
+          return;
+        }
+        current->message_status->setText(QStringLiteral("Committing…"));
+        RunGit(
+            path, {QStringLiteral("commit"), QStringLiteral("-m"), message},
+            [done](bool committed, const QString& commit_output) {
+              done(committed, commit_output);
+            });
+      });
+}
+
 void RightRail::CommitGit(const QString& path, quint64 serial) {
   GitRepoPane* repository = FindGitRepository(path, serial);
   if (repository == nullptr || repository->message == nullptr ||
@@ -2052,36 +3049,22 @@ void RightRail::CommitGit(const QString& path, quint64 serial) {
         QStringLiteral("Enter a commit message."));
     return;
   }
-  repository->message_status->setText(QStringLiteral("Staging…"));
-  RunGit(
-      path, {QStringLiteral("add"), QStringLiteral("-A")},
-      [this, path, serial, message](bool staged, const QString& output) {
+  CommitStagedGit(
+      path, serial, message,
+      [this, path, serial](bool committed, const QString& output) {
         GitRepoPane* current = FindGitRepository(path, serial);
         if (current == nullptr || current->message_status == nullptr) {
           return;
         }
-        if (!staged) {
+        if (!committed) {
           current->message_status->setText(output);
           return;
         }
-        current->message_status->setText(QStringLiteral("Committing…"));
-        RunGit(
-            path, {QStringLiteral("commit"), QStringLiteral("-m"), message},
-            [this, path, serial](bool committed, const QString& commit_output) {
-              GitRepoPane* done = FindGitRepository(path, serial);
-              if (done == nullptr || done->message_status == nullptr) {
-                return;
-              }
-              if (!committed) {
-                done->message_status->setText(commit_output);
-                return;
-              }
-              if (done->message != nullptr) {
-                done->message->clear();
-              }
-              done->message_status->setText(QStringLiteral("Committed."));
-              RefreshGitStatus(path, serial);
-            });
+        if (current->message != nullptr) {
+          current->message->clear();
+        }
+        current->message_status->setText(QStringLiteral("Committed."));
+        RefreshGitStatus(path, serial);
       });
 }
 
@@ -2279,34 +3262,21 @@ void RightRail::PushGit(const QString& path, quint64 serial) {
     push();
     return;
   }
-  repository->message_status->setText(QStringLiteral("Committing…"));
-  RunGit(
-      path, {QStringLiteral("add"), QStringLiteral("-A")},
-      [this, path, serial, message, push](bool staged, const QString& output) {
+  CommitStagedGit(
+      path, serial, message,
+      [this, path, serial, push](bool committed, const QString& output) {
         GitRepoPane* current = FindGitRepository(path, serial);
         if (current == nullptr || current->message_status == nullptr) {
           return;
         }
-        if (!staged) {
+        if (!committed) {
           current->message_status->setText(output);
           return;
         }
-        RunGit(path, {QStringLiteral("commit"), QStringLiteral("-m"), message},
-               [this, path, serial, push](bool committed,
-                                          const QString& commit_output) {
-                 GitRepoPane* done = FindGitRepository(path, serial);
-                 if (done == nullptr || done->message_status == nullptr) {
-                   return;
-                 }
-                 if (!committed) {
-                   done->message_status->setText(commit_output);
-                   return;
-                 }
-                 if (done->message != nullptr) {
-                   done->message->clear();
-                 }
-                 push();
-               });
+        if (current->message != nullptr) {
+          current->message->clear();
+        }
+        push();
       });
 }
 
