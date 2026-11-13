@@ -676,6 +676,15 @@ class TranscriptWidget : public QWidget {
   void InvalidateSelectableRuns() const;
   std::vector<SelectionFragment> SelectionFragments(
       const std::vector<TextRun>& runs) const;
+  std::vector<SelectionFragment> SelectionFragmentsBetween(
+      const std::vector<TextRun>& runs, TextPosition start,
+      TextPosition end) const;
+  std::vector<SelectionFragment> SelectionFragmentsInRunRange(
+      const std::vector<TextRun>& runs, TextPosition start, TextPosition end,
+      int first_run, int last_run) const;
+  std::vector<QRectF> SelectionRectsBetween(
+      const std::vector<SelectionFragment>& fragments) const;
+  QRectF SelectionBoundsBetween(TextPosition start, TextPosition end) const;
   TextPosition TextPositionAt(const QPointF& position) const;
   static int DocumentOffsetAt(const QTextDocument& document,
                               const QPointF& local);
@@ -753,7 +762,6 @@ class TranscriptWidget : public QWidget {
   // Union of the highlight rectangles currently painted, in widget space.
   // Repaints during a drag can then be limited to the old/new selection band
   // instead of every visible message.
-  QRectF selection_paint_bounds_;
   bool selecting_ = false;
   int content_height_ = 0;
   bool caret_visible_ = true;
@@ -1294,7 +1302,6 @@ void TranscriptWidget::ClearSelection() {
   }
   selection_anchor_ = {};
   selection_cursor_ = {};
-  selection_paint_bounds_ = {};
   selecting_ = false;
   update();
 }
@@ -1311,7 +1318,6 @@ void TranscriptWidget::SelectAllText() {
                          ? std::max(0, last.document->characterCount() - 1)
                          : last.plain.size();
   selection_cursor_ = {static_cast<int>(runs.size()) - 1, offset};
-  selection_paint_bounds_ = SelectionBounds();
   selecting_ = false;
   setFocus(Qt::OtherFocusReason);
   update();
@@ -1319,18 +1325,37 @@ void TranscriptWidget::SelectAllText() {
 
 std::vector<TranscriptWidget::SelectionFragment>
 TranscriptWidget::SelectionFragments(const std::vector<TextRun>& runs) const {
-  std::vector<SelectionFragment> fragments;
   if (!HasSelection()) {
+    return {};
+  }
+  return SelectionFragmentsBetween(runs, selection_anchor_, selection_cursor_);
+}
+
+std::vector<TranscriptWidget::SelectionFragment>
+TranscriptWidget::SelectionFragmentsBetween(const std::vector<TextRun>& runs,
+                                            TextPosition start,
+                                            TextPosition end) const {
+  return SelectionFragmentsInRunRange(runs, start, end, 0,
+                                      static_cast<int>(runs.size()) - 1);
+}
+
+std::vector<TranscriptWidget::SelectionFragment>
+TranscriptWidget::SelectionFragmentsInRunRange(const std::vector<TextRun>& runs,
+                                               TextPosition start,
+                                               TextPosition end, int first_run,
+                                               int last_run) const {
+  std::vector<SelectionFragment> fragments;
+  if (start.run < 0 || end.run < 0 || first_run > last_run) {
     return fragments;
   }
-  TextPosition start = selection_anchor_;
-  TextPosition end = selection_cursor_;
   if (start.run > end.run ||
       (start.run == end.run && start.offset > end.offset)) {
     std::swap(start, end);
   }
-  for (int index = start.run;
-       index <= end.run && index < static_cast<int>(runs.size()); ++index) {
+  const int begin = std::max(first_run, start.run);
+  const int finish =
+      std::min({last_run, end.run, static_cast<int>(runs.size()) - 1});
+  for (int index = begin; index <= finish; ++index) {
     const TextRun& run = runs[index];
     const int length = run.document
                            ? std::max(0, run.document->characterCount() - 1)
@@ -1397,9 +1422,14 @@ std::vector<std::pair<QRectF, QRectF>> TranscriptWidget::BlockRectsForTest(
 }
 
 std::vector<QRectF> TranscriptWidget::SelectionRects() const {
+  return SelectionRectsBetween(SelectionFragments(SelectableRuns()));
+}
+
+std::vector<QRectF> TranscriptWidget::SelectionRectsBetween(
+    const std::vector<SelectionFragment>& fragments) const {
   std::vector<QRectF> rects;
   const std::vector<TextRun>& runs = SelectableRuns();
-  for (const SelectionFragment& fragment : SelectionFragments(runs)) {
+  for (const SelectionFragment& fragment : fragments) {
     const TextRun& run = runs[fragment.run];
     if (run.document) {
       QTextBlock block = run.document->findBlock(fragment.from);
@@ -1454,20 +1484,62 @@ std::vector<QRectF> TranscriptWidget::SelectionRects() const {
 }
 
 QRectF TranscriptWidget::SelectionBounds() const {
+  return SelectionBoundsBetween(selection_anchor_, selection_cursor_);
+}
+
+QRectF TranscriptWidget::SelectionBoundsBetween(TextPosition start,
+                                                TextPosition end) const {
   QRectF bounds;
-  for (const QRectF& rect : SelectionRects()) {
+  const std::vector<TextRun>& runs = SelectableRuns();
+  for (const QRectF& rect : SelectionRectsBetween(
+           SelectionFragmentsBetween(runs, start, end))) {
     bounds = bounds.isNull() ? rect : bounds.united(rect);
   }
   return bounds;
 }
 
 void TranscriptWidget::PaintSelection(QPainter& painter) {
-  const std::vector<QRectF> rects = SelectionRects();
-  QRectF bounds;
-  for (const QRectF& rect : rects) {
-    bounds = bounds.isNull() ? rect : bounds.united(rect);
+  if (!HasSelection()) {
+    return;
   }
-  selection_paint_bounds_ = bounds;
+  const std::vector<TextRun>& runs = SelectableRuns();
+  if (runs.empty()) {
+    return;
+  }
+  // Build only the selection rectangles that can land inside this repaint.
+  // During a drag Qt asks for a small dirty band, but the selection itself can
+  // span the whole transcript; recomputing every line made long selections
+  // progressively laggier to drag.
+  QRectF band = painter.clipBoundingRect();
+  if (band.isNull()) {
+    band = rect();
+  }
+  int first = 0;
+  int lo = 0;
+  int hi = static_cast<int>(runs.size());
+  while (lo < hi) {
+    const int mid = (lo + hi) / 2;
+    if (runs[mid].rect.top() < band.top()) {
+      lo = mid + 1;
+    } else {
+      hi = mid;
+    }
+  }
+  first = lo;
+  while (first > 0 && runs[first - 1].rect.bottom() >= band.top()) {
+    --first;
+  }
+  int last = first;
+  while (last < static_cast<int>(runs.size()) &&
+         runs[last].rect.top() <= band.bottom()) {
+    ++last;
+  }
+  if (last <= first) {
+    return;
+  }
+  const std::vector<QRectF> rects = SelectionRectsBetween(
+      SelectionFragmentsInRunRange(runs, selection_anchor_, selection_cursor_,
+                                   first, last - 1));
   if (rects.empty()) {
     return;
   }
@@ -1488,11 +1560,11 @@ void TranscriptWidget::mouseMoveEvent(QMouseEvent* event) {
     const TextPosition next = TextPositionAt(position);
     if (next.run != selection_cursor_.run ||
         next.offset != selection_cursor_.offset) {
-      const QRectF previous = selection_paint_bounds_;
+      // Only the span between the old and new cursor changed. Repainting the
+      // whole selection made dragging get slower as the selection grew.
+      const TextPosition previous = selection_cursor_;
       selection_cursor_ = next;
-      const QRectF current = SelectionBounds();
-      selection_paint_bounds_ = current;
-      QRectF dirty = previous.isNull() ? current : previous.united(current);
+      QRectF dirty = SelectionBoundsBetween(previous, next);
       if (!dirty.isNull()) {
         dirty = dirty.toAlignedRect().adjusted(-3, -3, 3, 3);
         update(dirty.toRect().intersected(rect()));
@@ -1681,7 +1753,6 @@ void TranscriptWidget::mousePressEvent(QMouseEvent* event) {
     if (selected.run >= 0) {
       selection_anchor_ = selected;
       selection_cursor_ = selected;
-      selection_paint_bounds_ = {};
       selecting_ = true;
       setFocus(Qt::MouseFocusReason);
       update();
@@ -1695,12 +1766,12 @@ void TranscriptWidget::mousePressEvent(QMouseEvent* event) {
 
 void TranscriptWidget::mouseReleaseEvent(QMouseEvent* event) {
   if (event->button() == Qt::LeftButton && selecting_) {
-    const QRectF previous = selection_paint_bounds_;
-    selection_cursor_ = TextPositionAt(event->position());
+    const TextPosition previous = selection_cursor_;
+    const TextPosition next = TextPositionAt(event->position());
+    selection_cursor_ = next;
     selecting_ = false;
-    const QRectF current = SelectionBounds();
-    selection_paint_bounds_ = current;
-    QRectF dirty = previous.isNull() ? current : previous.united(current);
+    QRectF dirty = next.run < 0 ? SelectionBounds()
+                                : SelectionBoundsBetween(previous, next);
     if (!dirty.isNull()) {
       update(dirty.toAlignedRect().adjusted(-3, -3, 3, 3).intersected(
           rect()));

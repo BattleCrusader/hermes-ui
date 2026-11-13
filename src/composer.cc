@@ -28,7 +28,9 @@
 #include <QResizeEvent>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QTextBlock>
 #include <QTextCursor>
+#include <QTextDocument>
 #include <QTextEdit>
 #include <QTimer>
 #include <QToolButton>
@@ -517,7 +519,9 @@ void Composer::UpdateMentionMenu() {
     return;
   }
   const QTextCursor cursor = editor_->textCursor();
-  const QString before = Text().left(cursor.position());
+  // Mentions live inside the current paragraph. Reading the block avoids
+  // copying the whole draft into a temporary string for every keystroke.
+  const QString before = cursor.block().text().left(cursor.positionInBlock());
   const int at = before.lastIndexOf(QLatin1Char('@'));
   if (at < 0) {
     HideMentionMenu();
@@ -1190,9 +1194,16 @@ void Composer::UpdateSlashMenu() {
   if (slash_menu_ == nullptr) {
     return;
   }
-  const QString text = Text();
+  // A slash command is a single-line draft. Ask the document instead of
+  // flattening the whole editor on every keystroke: toPlainText() allocates a
+  // copy of the entire draft, and this runs from textChanged() while typing.
+  const QTextDocument* document = editor_->document();
+  if (document->blockCount() != 1) {
+    HideSlashMenu();
+    return;
+  }
+  const QString text = document->firstBlock().text();
   const bool candidate = text.startsWith(QLatin1Char('/')) &&
-                         !text.contains(QLatin1Char('\n')) &&
                          !text.contains(QLatin1Char(' '));
   if (!candidate) {
     HideSlashMenu();
@@ -1472,7 +1483,14 @@ bool Composer::eventFilter(QObject* watched, QEvent* event) {
             break;
         }
       }
-      if (key_event->matches(QKeySequence::Paste)) {
+      const Qt::KeyboardModifiers key_modifiers = key_event->modifiers();
+      const bool paste_candidate =
+          (key_event->key() == Qt::Key_V &&
+           (key_modifiers & (Qt::ControlModifier | Qt::MetaModifier |
+                             Qt::AltModifier)) != 0) ||
+          (key_event->key() == Qt::Key_Insert &&
+           (key_modifiers & Qt::ShiftModifier) != 0);
+      if (paste_candidate && key_event->matches(QKeySequence::Paste)) {
         const QImage image = QGuiApplication::clipboard()->image();
         if (!image.isNull()) {
           const QString path =
@@ -1510,7 +1528,7 @@ bool Composer::eventFilter(QObject* watched, QEvent* event) {
         QTextCursor cursor = editor_->textCursor();
         const bool collapsed = !cursor.hasSelection();
         const bool at_start = cursor.position() == 0;
-        const bool at_end = cursor.position() == editor_->toPlainText().size();
+        const bool at_end = cursor.atEnd();
         if (key_event->key() == Qt::Key_Up &&
             (history_cursor_ >= 0 || (collapsed && at_start))) {
           if (history_cursor_ < 0) {

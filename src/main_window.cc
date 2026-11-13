@@ -1910,6 +1910,17 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     HideFindBar();
     return true;
   }
+  // A key typed into a text field cannot match a shortcut unless it carries a
+  // command modifier. Skip the QKeySequence conversion and the binding scan on
+  // the typing fast path; this filter sees every key in the application.
+  QWidget* focus = QApplication::focusWidget();
+  const bool typing = qobject_cast<QLineEdit*>(focus) != nullptr ||
+                      qobject_cast<QTextEdit*>(focus) != nullptr ||
+                      qobject_cast<QPlainTextEdit*>(focus) != nullptr;
+  const Qt::KeyboardModifiers modifiers = key_event->modifiers();
+  if (typing && (modifiers & ~(Qt::ShiftModifier | Qt::KeypadModifier)) == 0) {
+    return QWidget::eventFilter(watched, event);
+  }
   const QString pressed = QKeySequence(key_event->keyCombination())
                               .toString(QKeySequence::PortableText);
   if (pressed.isEmpty()) {
@@ -1925,10 +1936,6 @@ bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     // A bare key (no modifier) must never be stolen from a text field.
     const bool has_modifier =
         binding.sequence[0].keyboardModifiers() != Qt::NoModifier;
-    QWidget* focus = QApplication::focusWidget();
-    const bool typing = qobject_cast<QLineEdit*>(focus) != nullptr ||
-                        qobject_cast<QTextEdit*>(focus) != nullptr ||
-                        qobject_cast<QPlainTextEdit*>(focus) != nullptr;
     if (typing && !has_modifier) {
       continue;
     }
