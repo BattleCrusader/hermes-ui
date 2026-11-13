@@ -145,7 +145,7 @@ class PreferencesTest : public QObject {
   void modelVisibilityProviderToggleSelectsGroup();
   void projectsParseListTreeAndMutators();
   void promptHistoryEditsQueuedAndSteeredEntries();
-  void promptHistoryInjectsLocalAndServerQueues();
+  void promptHistorySendsLocalAndServerQueuesAsNewPrompts();
   void promptHistoryEditsAndCancelsServerQueue();
   void projectDialogEditsCreateAndDisplayFields();
   void projectAppearanceParsesColorsIconsAndFiltersDismissedAutos();
@@ -2475,7 +2475,7 @@ void PreferencesTest::promptHistoryEditsQueuedAndSteeredEntries() {
   QCOMPARE(loaded, QStringLiteral("steered two"));
 }
 
-void PreferencesTest::promptHistoryInjectsLocalAndServerQueues() {
+void PreferencesTest::promptHistorySendsLocalAndServerQueuesAsNewPrompts() {
   hermes::ui::Theme theme = hermes::ui::Theme::Light();
   QStringList queued{QStringLiteral("local queued prompt")};
   QStringList steered{QStringLiteral("local steered prompt")};
@@ -2493,7 +2493,7 @@ void PreferencesTest::promptHistoryInjectsLocalAndServerQueues() {
 
   QString injected;
   hermes::ui::PromptHistoryDialog::ActionDone finish_local;
-  dialog.on_inject_local =
+  dialog.on_send_local =
       [&injected, &finish_local](
           const QString& text,
           hermes::ui::PromptHistoryDialog::ActionDone done) {
@@ -2508,7 +2508,7 @@ void PreferencesTest::promptHistoryInjectsLocalAndServerQueues() {
   QCOMPARE(injected, QStringLiteral("local queued prompt"));
   QCOMPARE(queued.size(), 1);
   QVERIFY(finish_local != nullptr);
-  finish_local(false, QStringLiteral("steer rejected"));
+  finish_local(false, QStringLiteral("send rejected"));
   QCOMPARE(queued.size(), 1);
   QCOMPARE(list->count(), 2);
 
@@ -2519,7 +2519,7 @@ void PreferencesTest::promptHistoryInjectsLocalAndServerQueues() {
   QCOMPARE(list->count(), 1);
   QCOMPARE(steered.size(), 1);
 
-  // Re-injecting a delivered steer leaves the local history intact.
+  // Re-sending a delivered steer leaves the local history intact.
   list->setCurrentRow(0);
   QCOMPARE(inject->text(), QStringLiteral("Inject again"));
   QTest::mouseClick(inject, Qt::LeftButton);
@@ -2539,7 +2539,7 @@ void PreferencesTest::promptHistoryInjectsLocalAndServerQueues() {
 
   QString server_injected;
   hermes::ui::PromptHistoryDialog::ActionDone finish_server;
-  dialog.on_steer_server =
+  dialog.on_send_server =
       [&server_injected, &finish_server](
           const hermes::ui::PromptHistoryDialog::ServerPrompt& prompt,
           hermes::ui::PromptHistoryDialog::ActionDone done) {
@@ -2565,7 +2565,7 @@ void PreferencesTest::promptHistoryInjectsLocalAndServerQueues() {
   QCOMPARE(list->currentItem()->data(Qt::UserRole + 2).toString(),
            QStringLiteral("admission-1"));
 
-  // Closing the dialog while the steer ACK is in flight must not strand the
+  // Closing the dialog while the send ACK is in flight must not strand the
   // local queue entry.
   QStringList late_queued{QStringLiteral("late queued prompt")};
   QStringList late_steered;
@@ -2574,7 +2574,7 @@ void PreferencesTest::promptHistoryInjectsLocalAndServerQueues() {
   late->show();
   QTest::qWait(10);
   hermes::ui::PromptHistoryDialog::ActionDone finish_late;
-  late->on_inject_local =
+  late->on_send_local =
       [&finish_late](const QString&,
                      hermes::ui::PromptHistoryDialog::ActionDone done) {
         finish_late = std::move(done);
@@ -2657,12 +2657,13 @@ void PreferencesTest::promptHistoryEditsAndCancelsServerQueue() {
   QCOMPARE(list->count(), 1);
   QCOMPARE(list->item(0)->text().left(9), QStringLiteral("Unknown ·"));
 
-  // The unknown admission has no replace/steer verbs; only resolve/cancel.
+  // The unknown admission has no replace/steer verbs, but it can still be
+  // sent as a new prompt after the resolver clears the lost admission.
   list->setCurrentRow(0);
   QVERIFY(!save->isEnabled());
   QVERIFY(editor->isReadOnly());
   QVERIFY(steer->isVisible());
-  QVERIFY(!steer->isEnabled());
+  QVERIFY(steer->isEnabled());
   QString canceled_admission;
   dialog.on_cancel_server =
       [&canceled_admission](
@@ -2680,16 +2681,16 @@ void PreferencesTest::promptHistoryEditsAndCancelsServerQueue() {
   dialog.SetServerPrompts({steerable});
   QCOMPARE(list->count(), 1);
   list->setCurrentRow(0);
-  QString steered_admission;
-  dialog.on_steer_server =
-      [&steered_admission](
+  QString sent_admission;
+  dialog.on_send_server =
+      [&sent_admission](
           const hermes::ui::PromptHistoryDialog::ServerPrompt& prompt,
           hermes::ui::PromptHistoryDialog::ActionDone done) {
-        steered_admission = prompt.admission_id;
+        sent_admission = prompt.admission_id;
         done(true, QString());
       };
   QTest::mouseClick(steer, Qt::LeftButton);
-  QCOMPARE(steered_admission, QStringLiteral("a3"));
+  QCOMPARE(sent_admission, QStringLiteral("a3"));
   QCOMPARE(list->count(), 0);
 
   // The owner's FIFO can reorder between snapshots. Selection follows the

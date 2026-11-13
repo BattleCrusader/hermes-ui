@@ -45,7 +45,9 @@ class Supervisor {
   std::shared_ptr<const ProfileSnapshot> SnapshotAt(int index) const;
 
   void SelectSession(int index, const QString& session_id);
-  void SendPrompt(int index, const QString& text);
+  using SteerCallback = std::function<void(bool ok, const QString& message)>;
+  // `done` reports the prompt.submit ACK. It runs on the UI thread.
+  void SendPrompt(int index, const QString& text, SteerCallback done = {});
   // Queue behind the active turn; the gateway FIFO owns the admission.
   void QueuePrompt(int index, const QString& text);
   void SendPromptWithAttachments(int index, const QString& text,
@@ -82,7 +84,6 @@ class Supervisor {
   void DeleteSession(int index, const QString& session_id);
   void AttachFile(int index, const QString& local_path);
   void ExecuteSlash(int index, const QString& command);
-  using SteerCallback = std::function<void(bool ok, const QString& message)>;
   // `done` reports whether session.steer was accepted (or safely sent as a
   // new prompt when no turn was running). It runs on the UI thread.
   void Steer(int index, const QString& text, SteerCallback done = {});
@@ -260,12 +261,14 @@ class Supervisor {
   std::map<quint64, SpeechCallback> transcription_callbacks_;
   std::map<quint64, RpcCallback> rpc_callbacks_;
   std::map<quint64, SteerCallback> steer_callbacks_;
+  std::map<quint64, SteerCallback> prompt_callbacks_;
   quint64 next_skill_hub_token_ = 1;
   quint64 next_computer_use_token_ = 1;
   quint64 next_speech_token_ = 1;
   quint64 next_transcription_token_ = 1;
   quint64 next_rpc_token_ = 1;
   quint64 next_steer_token_ = 1;
+  quint64 next_prompt_token_ = 1;
 
   std::vector<Entry> entries_;
   // Relays retired by a profile switch finish asynchronously, so a slow ticket

@@ -53,6 +53,9 @@ class ProfileWorker : public QObject {
   void Shutdown();
   void SelectSession(const QString& session_id);
   void SendPrompt(const QString& text);
+  // Send a normal prompt and report the prompt.submit ACK. The callback never
+  // turns the text into a steer or a queued admission.
+  void SendPromptWithCallback(const QString& text, SteerCallback done);
   // Queue behind the running turn. The gateway owns the admission; `queued`
   // forces queue mode so run-after input can never become a live steer.
   void QueuePrompt(const QString& text);
@@ -159,6 +162,7 @@ class ProfileWorker : public QObject {
   void RpcFinished(quint64 token, const QJsonObject& result,
                    const QString& error);
   void SteerFinished(quint64 token, bool ok, const QString& message);
+  void PromptFinished(quint64 token, bool ok, const QString& message);
 
  private:
   void FinishActionRequest(quint64 token, const QString& method,
@@ -167,16 +171,18 @@ class ProfileWorker : public QObject {
                           bool confirm_empty_truncate,
                           bool confirm_deep_truncate,
                           const QStringList& attachments = {},
-                          bool queued = false);
+                          bool queued = false, SteerCallback done = {});
   void SubmitPromptFrame(const QString& session_id, const QString& text,
                          qint64 truncate_before_row_id,
                          bool confirm_empty_truncate,
-                         bool confirm_deep_truncate, bool queued);
+                         bool confirm_deep_truncate, bool queued,
+                         SteerCallback done = {});
   bool QueuePromptAttachments(const QString& session_id, const QString& text,
                               qint64 truncate_before_row_id,
                               bool confirm_empty_truncate,
                               bool confirm_deep_truncate,
-                              const QStringList& attachments);
+                              const QStringList& attachments,
+                              SteerCallback done = {});
   void FetchSessions();
   void LoadCachedState();
   void FlushSessionCache();
@@ -254,6 +260,7 @@ class ProfileWorker : public QObject {
   std::map<int, QString> pending_commands_;
   std::map<int, QString> pending_steers_;
   std::map<int, SteerCallback> pending_steer_callbacks_;
+  std::map<int, SteerCallback> pending_prompt_callbacks_;
   std::map<int, quint64> pending_rpc_;
   struct PendingSessionMutation {
     QString session_id;
@@ -266,6 +273,7 @@ class ProfileWorker : public QObject {
   // prompt.submit mode for the request above. Normal sends already rendered
   // their user row locally, so the admission must not be announced again.
   bool pending_prompt_queued_ = false;
+  SteerCallback deferred_prompt_callback_;
   QString pending_prompt_session_id_;
   QString admission_id_;
   QString admission_status_;
@@ -278,6 +286,7 @@ class ProfileWorker : public QObject {
     qint64 truncate_before_row_id = 0;
     bool confirm_empty_truncate = false;
     bool confirm_deep_truncate = false;
+    SteerCallback done;
     std::set<int> request_ids;
   };
   std::unique_ptr<PendingAttachedPrompt> pending_attached_prompt_;

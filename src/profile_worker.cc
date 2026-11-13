@@ -473,6 +473,11 @@ void ProfileWorker::SendPrompt(const QString& text) {
   SendPromptInternal(text, 0, false, false);
 }
 
+void ProfileWorker::SendPromptWithCallback(const QString& text,
+                                           SteerCallback done) {
+  SendPromptInternal(text, 0, false, false, {}, false, std::move(done));
+}
+
 void ProfileWorker::QueuePrompt(const QString& text) {
   SendPromptInternal(text, 0, false, false, {}, true);
 }
@@ -502,8 +507,12 @@ void ProfileWorker::SubmitPromptFrame(const QString& session_id,
                                       const QString& text,
                                       qint64 truncate_before_row_id,
                                       bool confirm_empty_truncate,
-                                      bool confirm_deep_truncate, bool queued) {
+                                      bool confirm_deep_truncate, bool queued,
+                                      SteerCallback done) {
   if (socket_ == nullptr || !socket_->IsConnected()) {
+    if (done) {
+      done(false, QStringLiteral("Gateway socket is not connected"));
+    }
     PublishError(QStringLiteral("Gateway socket is not connected"));
     return;
   }
@@ -519,6 +528,16 @@ void ProfileWorker::SubmitPromptFrame(const QString& session_id,
     pending_prompt_request_id_ = socket_->SendPrompt(session_id, text, queued);
   }
   pending_prompt_session_id_ = session_id;
+  if (pending_prompt_request_id_ < 0) {
+    if (done) {
+      done(false, QStringLiteral("Could not submit the prompt"));
+    }
+    PublishError(QStringLiteral("Could not submit the prompt"));
+    return;
+  }
+  if (done) {
+    pending_prompt_callbacks_[pending_prompt_request_id_] = std::move(done);
+  }
 }
 
 bool ProfileWorker::QueuePromptAttachments(const QString& session_id,
@@ -526,7 +545,8 @@ bool ProfileWorker::QueuePromptAttachments(const QString& session_id,
                                            qint64 truncate_before_row_id,
                                            bool confirm_empty_truncate,
                                            bool confirm_deep_truncate,
-                                           const QStringList& attachments) {
+                                           const QStringList& attachments,
+                                           SteerCallback done) {
   if (attachments.isEmpty() || socket_ == nullptr || !socket_->IsConnected()) {
     return false;
   }
@@ -550,6 +570,7 @@ bool ProfileWorker::QueuePromptAttachments(const QString& session_id,
   if (pending->request_ids.empty()) {
     return false;
   }
+  pending->done = std::move(done);
   pending_attached_prompt_ = std::move(pending);
   return true;
 }
@@ -559,9 +580,12 @@ void ProfileWorker::SendPromptInternal(const QString& text,
                                        bool confirm_empty_truncate,
                                        bool confirm_deep_truncate,
                                        const QStringList& attachments,
-                                       bool queued) {
+                                       bool queued, SteerCallback done) {
   const QString trimmed = text.trimmed();
   if (trimmed.isEmpty()) {
+    if (done) {
+      done(false, QStringLiteral("A prompt cannot be empty"));
+    }
     return;
   }
   QString session_id;
@@ -576,6 +600,7 @@ void ProfileWorker::SendPromptInternal(const QString& text,
         missing_session = true;
       } else {
         pending_prompt_ = trimmed;
+        deferred_prompt_callback_ = std::move(done);
         return;
       }
     }
@@ -588,10 +613,14 @@ void ProfileWorker::SendPromptInternal(const QString& text,
       missing_session = truncate_before_row_id > 0;
       if (!missing_session) {
         pending_prompt_ = trimmed;
+        deferred_prompt_callback_ = std::move(done);
       }
     }
   }
   if (missing_session) {
+    if (done) {
+      done(false, QStringLiteral("No session is selected to edit"));
+    }
     PublishError(QStringLiteral("No session is selected to edit"));
     return;
   }
@@ -632,11 +661,12 @@ void ProfileWorker::SendPromptInternal(const QString& text,
 
   if (QueuePromptAttachments(session_id, trimmed, truncate_before_row_id,
                              confirm_empty_truncate, confirm_deep_truncate,
-                             attachments)) {
+                             attachments, std::move(done))) {
     return;
   }
   SubmitPromptFrame(session_id, trimmed, truncate_before_row_id,
-                    confirm_empty_truncate, confirm_deep_truncate, queued);
+                    confirm_empty_truncate, confirm_deep_truncate, queued,
+                    std::move(done));
 }
 
 void ProfileWorker::NewSession() { NewSessionInDir(QString()); }
@@ -660,6 +690,10 @@ void ProfileWorker::NewSessionInDir(const QString& cwd,
     pending_create_project_id_.clear();
     PublishError(QStringLiteral("Could not request a new session"));
     pending_prompt_.clear();
+    auto deferred = std::move(deferred_prompt_callback_);
+    if (deferred) {
+      deferred(false, QStringLiteral("Could not request a new session"));
+    }
     return;
   }
   std::lock_guard<std::mutex> lock(mutex_);
@@ -2389,6 +2423,20 @@ void ProfileWorker::OnSocketDisconnected() {
   if (shutting_down_) {
     return;
   }
+  std::vector<SteerCallback> prompt_callbacks;
+  for (auto& entry : pending_prompt_callbacks_) {
+    if (entry.second) {
+      prompt_callbacks.push_back(std::move(entry.second));
+    }
+  }
+  pending_prompt_callbacks_.clear();
+  if (deferred_prompt_callback_) {
+    prompt_callbacks.push_back(std::move(deferred_prompt_callback_));
+  }
+  if (pending_attached_prompt_ != nullptr &&
+      pending_attached_prompt_->done) {
+    prompt_callbacks.push_back(std::move(pending_attached_prompt_->done));
+  }
   {
     std::lock_guard<std::mutex> lock(mutex_);
     state_.connected = false;
@@ -2402,6 +2450,10 @@ void ProfileWorker::OnSocketDisconnected() {
     pending_receipt_id_ = -1;
     state_.requests.clear();
     PublishLocked();
+  }
+  for (auto& done : prompt_callbacks) {
+    done(false, QStringLiteral(
+                   "Gateway disconnected before the prompt was acknowledged"));
   }
 }
 
@@ -3298,6 +3350,12 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
   if (shutting_down_) {
     return;
   }
+  if (const auto callback = pending_prompt_callbacks_.find(id);
+      callback != pending_prompt_callbacks_.end()) {
+    SteerCallback done = std::move(callback->second);
+    pending_prompt_callbacks_.erase(callback);
+    done(!error.isEmpty(), error);
+  }
   if (pending_attached_prompt_ != nullptr) {
     auto attachment = pending_attached_prompt_->request_ids.find(id);
     if (attachment != pending_attached_prompt_->request_ids.end()) {
@@ -3314,7 +3372,8 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
         SubmitPromptFrame(pending->session_id, pending->text,
                           pending->truncate_before_row_id,
                           pending->confirm_empty_truncate,
-                          pending->confirm_deep_truncate, false);
+                          pending->confirm_deep_truncate, false,
+                          std::move(pending->done));
       }
       return;
     }
@@ -3593,6 +3652,10 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
         std::exchange(pending_create_project_id_, QString());
     if (!error.isEmpty()) {
       pending_prompt_.clear();
+      auto deferred = std::move(deferred_prompt_callback_);
+      if (deferred) {
+        deferred(false, error);
+      }
       PublishError(error);
       return;
     }
@@ -3602,6 +3665,10 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
     }
     if (session_id.isEmpty()) {
       pending_prompt_.clear();
+      auto deferred = std::move(deferred_prompt_callback_);
+      if (deferred) {
+        deferred(false, QStringLiteral("Gateway created no session id"));
+      }
       PublishError(QStringLiteral("Gateway created no session id"));
       return;
     }
@@ -3649,8 +3716,15 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
     }
     qInfo("new session %.12s", qUtf8Printable(session_id));
     const QString prompt = std::exchange(pending_prompt_, QString());
+    auto deferred = std::move(deferred_prompt_callback_);
     if (!prompt.isEmpty()) {
-      SendPrompt(prompt);
+      if (deferred) {
+        SendPromptWithCallback(prompt, std::move(deferred));
+      } else {
+        SendPrompt(prompt);
+      }
+    } else if (deferred) {
+      deferred(false, QStringLiteral("The pending prompt was cleared"));
     }
     return;
   }

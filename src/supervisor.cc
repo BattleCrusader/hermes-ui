@@ -160,6 +160,17 @@ void Supervisor::StartWorker(Entry* entry) {
                      steer_callbacks_.erase(found);
                      done(ok, message);
                    });
+  QObject::connect(entry->worker, &ProfileWorker::PromptFinished,
+                   QCoreApplication::instance(),
+                   [this](quint64 token, bool ok, const QString& message) {
+                     const auto found = prompt_callbacks_.find(token);
+                     if (found == prompt_callbacks_.end()) {
+                       return;
+                     }
+                     SteerCallback done = std::move(found->second);
+                     prompt_callbacks_.erase(found);
+                     done(ok, message);
+                   });
   QObject::connect(
       entry->worker, &ProfileWorker::SpeechFinished,
       QCoreApplication::instance(),
@@ -570,15 +581,37 @@ void Supervisor::SelectSession(int index, const QString& session_id) {
   }
 }
 
-void Supervisor::SendPrompt(int index, const QString& text) {
+void Supervisor::SendPrompt(int index, const QString& text,
+                            SteerCallback done) {
   if (index < 0 || index >= profile_count()) {
+    if (done) {
+      done(false, QStringLiteral("No profile is selected"));
+    }
     return;
   }
   ProfileWorker* worker = entries_[static_cast<std::size_t>(index)].worker;
-  if (worker != nullptr) {
+  if (worker == nullptr) {
+    if (done) {
+      done(false, QStringLiteral("The profile worker is not ready"));
+    }
+    return;
+  }
+  if (!done) {
     QMetaObject::invokeMethod(worker, "SendPrompt", Qt::QueuedConnection,
                               Q_ARG(QString, text));
+    return;
   }
+  const quint64 token = next_prompt_token_++;
+  prompt_callbacks_[token] = std::move(done);
+  QMetaObject::invokeMethod(
+      worker,
+      [worker, text, token]() {
+        worker->SendPromptWithCallback(
+            text, [worker, token](bool ok, const QString& message) {
+              emit worker->PromptFinished(token, ok, message);
+            });
+      },
+      Qt::QueuedConnection);
 }
 
 void Supervisor::QueuePrompt(int index, const QString& text) {

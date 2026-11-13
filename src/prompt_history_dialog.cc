@@ -59,10 +59,11 @@ PromptHistoryDialog::PromptHistoryDialog(const Theme& theme,
   auto* hint = new QLabel(
       QStringLiteral(
           "Queued prompts listed by Hermes can be edited, canceled, or "
-          "steered into the running turn. A new chat in the desktop queue "
-          "stays editable until it starts. Steered history was already "
-          "delivered — editing it updates this history only, but you can "
-          "load it back into the composer."),
+          "injected as a fresh prompt. Injecting a gateway admission removes "
+          "it from the queue first, so it cannot run twice. Steered history "
+          "was already delivered — editing it updates this history only, but "
+          "you can send it again as a new prompt or load it back into the "
+          "composer."),
       this);
   hint->setObjectName(QStringLiteral("queuedPromptsHint"));
   hint->setWordWrap(true);
@@ -93,16 +94,16 @@ PromptHistoryDialog::PromptHistoryDialog(const Theme& theme,
   save_->setObjectName(QStringLiteral("queuedPromptEdit"));
   remove_ = new QPushButton(QStringLiteral("Delete"), this);
   remove_->setObjectName(QStringLiteral("queuedPromptRemove"));
-  steer_ = new QPushButton(QStringLiteral("Inject now"), this);
-  steer_->setObjectName(QStringLiteral("queuedPromptSteer"));
-  steer_->setVisible(false);
+  inject_ = new QPushButton(QStringLiteral("Inject now"), this);
+  inject_->setObjectName(QStringLiteral("queuedPromptSteer"));
+  inject_->setVisible(false);
   load_ = new QPushButton(QStringLiteral("Load into composer"), this);
   load_->setObjectName(QStringLiteral("queuedPromptLoad"));
   auto* close = new QPushButton(QStringLiteral("Close"), this);
   close->setObjectName(QStringLiteral("queuedPromptClose"));
   buttons->addWidget(save_);
   buttons->addWidget(remove_);
-  buttons->addWidget(steer_);
+  buttons->addWidget(inject_);
   buttons->addWidget(load_);
   buttons->addStretch(1);
   buttons->addWidget(close);
@@ -114,8 +115,8 @@ PromptHistoryDialog::PromptHistoryDialog(const Theme& theme,
                    [this]() { SaveSelected(); });
   QObject::connect(remove_, &QPushButton::clicked, this,
                    [this]() { DeleteSelected(); });
-  QObject::connect(steer_, &QPushButton::clicked, this,
-                   [this]() { SteerSelected(); });
+  QObject::connect(inject_, &QPushButton::clicked, this,
+                   [this]() { SendSelected(); });
   QObject::connect(load_, &QPushButton::clicked, this,
                    [this]() { LoadSelected(); });
   QObject::connect(close, &QPushButton::clicked, this, &QDialog::accept);
@@ -240,8 +241,8 @@ void PromptHistoryDialog::RefreshEditor() {
     editor_->setReadOnly(false);
     save_->setEnabled(false);
     remove_->setEnabled(false);
-    steer_->setEnabled(false);
-    steer_->setVisible(false);
+    inject_->setEnabled(false);
+    inject_->setVisible(false);
     load_->setEnabled(false);
     return;
   }
@@ -252,31 +253,31 @@ void PromptHistoryDialog::RefreshEditor() {
     const ServerPrompt& prompt = server_[static_cast<std::size_t>(index)];
     const bool can_replace =
         HasControl(prompt.controls, QStringLiteral("replace"));
-    const bool can_steer =
-        HasControl(prompt.controls, QStringLiteral("steer")) &&
-        !prompt.steering && prompt.status == QStringLiteral("queued");
     selected_admission_ = prompt.admission_id;
     editor_->setPlainText(prompt.text);
     editor_->setReadOnly(!can_replace);
     save_->setEnabled(can_replace);
     remove_->setEnabled(true);
-    steer_->setVisible(true);
-    steer_->setText(QStringLiteral("Inject now"));
-    steer_->setEnabled(can_steer);
+    inject_->setVisible(true);
+    inject_->setText(QStringLiteral("Inject now"));
+    inject_->setEnabled(true);
     load_->setEnabled(true);
     if (prompt.status == QStringLiteral("unknown")) {
       status_->setText(
           QStringLiteral("Admission %1 was lost across an owner restart; "
-                         "resolve it before the FIFO behind it can resume.")
+                         "injecting resolves it and sends the text as a new "
+                         "prompt.")
               .arg(prompt.admission_id));
     } else if (prompt.steering) {
       status_->setText(
-          QStringLiteral("Admission %1 is being delivered as a steer into the "
-                         "running turn; it stays in FIFO until settled.")
+          QStringLiteral("Admission %1 is already steering into the running "
+                         "turn; injecting sends the text again as a new "
+                         "prompt.")
               .arg(prompt.admission_id));
     } else {
       status_->setText(
-          QStringLiteral("Queued admission %1 · controls: %2")
+          QStringLiteral("Queued admission %1 · controls: %2 · inject sends "
+                         "it as a new prompt")
               .arg(prompt.admission_id,
                    prompt.controls.isEmpty()
                        ? QStringLiteral("none")
@@ -295,18 +296,20 @@ void PromptHistoryDialog::RefreshEditor() {
   editor_->setReadOnly(false);
   save_->setEnabled(true);
   remove_->setEnabled(true);
-  steer_->setVisible(true);
-  steer_->setText(kind == Kind::kSteered ? QStringLiteral("Inject again")
+  inject_->setVisible(true);
+  inject_->setText(kind == Kind::kSteered ? QStringLiteral("Inject again")
                                          : QStringLiteral("Inject now"));
-  steer_->setEnabled(true);
+  inject_->setEnabled(true);
   load_->setEnabled(true);
   if (kind == Kind::kSteered) {
     status_->setText(
         QStringLiteral("Steered prompts were already delivered. Changes update "
-                       "this history entry only."));
+                       "this history entry only; injecting sends the text as a "
+                       "new prompt."));
   } else {
     status_->setText(
-        QStringLiteral("Legacy local prompt — sent on the next turn."));
+        QStringLiteral("Legacy local prompt — injecting sends it as a new "
+                       "prompt."));
   }
 }
 
@@ -337,7 +340,7 @@ void PromptHistoryDialog::SaveSelected() {
     }
     save_->setEnabled(false);
     remove_->setEnabled(false);
-    steer_->setEnabled(false);
+    inject_->setEnabled(false);
     status_->setText(QStringLiteral("Replacing queued admission…"));
     const QString admission_id = prompt.admission_id;
     QPointer<PromptHistoryDialog> guard(this);
@@ -398,7 +401,7 @@ void PromptHistoryDialog::DeleteSelected() {
     }
     save_->setEnabled(false);
     remove_->setEnabled(false);
-    steer_->setEnabled(false);
+    inject_->setEnabled(false);
     status_->setText(QStringLiteral("Canceling queued admission…"));
     const QString admission_id = prompt.admission_id;
     QPointer<PromptHistoryDialog> guard(this);
@@ -436,7 +439,7 @@ void PromptHistoryDialog::DeleteSelected() {
                        : QStringLiteral("Steered history entry deleted."));
 }
 
-void PromptHistoryDialog::SteerSelected() {
+void PromptHistoryDialog::SendSelected() {
   Kind kind = Kind::kQueued;
   int index = -1;
   if (!Selected(&kind, &index)) {
@@ -444,34 +447,32 @@ void PromptHistoryDialog::SteerSelected() {
   }
   if (kind == Kind::kServer) {
     ServerPrompt prompt;
-    if (!SelectedServer(&prompt) || !on_steer_server) {
+    if (!SelectedServer(&prompt)) {
       return;
     }
-    if (!HasControl(prompt.controls, QStringLiteral("steer")) ||
-        prompt.steering || prompt.status != QStringLiteral("queued")) {
-      status_->setText(
-          QStringLiteral("This admission can no longer be injected."));
+    if (!on_send_server) {
+      status_->setText(QStringLiteral("No backend send handler is wired."));
       return;
     }
     save_->setEnabled(false);
     remove_->setEnabled(false);
-    steer_->setEnabled(false);
-    status_->setText(QStringLiteral("Injecting queued admission…"));
+    inject_->setEnabled(false);
+    status_->setText(QStringLiteral("Sending admission as a new prompt…"));
     const QString admission_id = prompt.admission_id;
     QPointer<PromptHistoryDialog> guard(this);
-    on_steer_server(prompt, [guard, admission_id](bool ok,
-                                                  const QString& message) {
+    on_send_server(prompt, [guard, admission_id](bool ok,
+                                                 const QString& message) {
       if (guard == nullptr) {
         return;
       }
       if (ok) {
         guard->RemoveServerPrompt(admission_id);
-        guard->SetStatus(
-            QStringLiteral("Admission is steering into the running turn."));
+        guard->SetStatus(QStringLiteral("Sent as a new prompt."));
       } else {
         guard->RefreshEditor();
-        guard->SetStatus(message.isEmpty() ? QStringLiteral("Injection failed.")
-                                           : message);
+        guard->SetStatus(message.isEmpty()
+                             ? QStringLiteral("Could not send the prompt.")
+                             : message);
       }
     });
     return;
@@ -481,30 +482,31 @@ void PromptHistoryDialog::SteerSelected() {
   if (source == nullptr || index < 0 || index >= source->size()) {
     return;
   }
-  if (!on_inject_local) {
-    status_->setText(QStringLiteral("No local inject handler is wired."));
+  if (!on_send_local) {
+    status_->setText(QStringLiteral("No local send handler is wired."));
     return;
   }
   const QString text = source->at(index);
   save_->setEnabled(false);
   remove_->setEnabled(false);
-  steer_->setEnabled(false);
-  status_->setText(QStringLiteral("Injecting into the running turn…"));
+  inject_->setEnabled(false);
+  status_->setText(QStringLiteral("Sending as a new prompt…"));
   QPointer<PromptHistoryDialog> guard(this);
   QStringList* queued = queued_;
   std::function<void()> changed = on_changed;
-  on_inject_local(text, [guard, queued, changed, kind, index, text](
-                            bool ok, const QString& message) {
+  on_send_local(text, [guard, queued, changed, kind, index, text](
+                          bool ok, const QString& message) {
     if (!ok) {
       if (guard != nullptr) {
         guard->RefreshEditor();
-        guard->SetStatus(message.isEmpty() ? QStringLiteral("Injection failed.")
-                                           : message);
+        guard->SetStatus(message.isEmpty()
+                             ? QStringLiteral("Could not send the prompt.")
+                             : message);
       }
       return;
     }
     // The local queue belongs to MainWindow, so retire the entry even if
-    // the modal was dismissed while the steer ACK was in flight.
+    // the modal was dismissed while the send ACK was in flight.
     if (kind == Kind::kQueued && queued != nullptr && index >= 0 &&
         index < queued->size() && queued->at(index) == text) {
       queued->removeAt(index);
@@ -521,8 +523,8 @@ void PromptHistoryDialog::SteerSelected() {
     }
     guard->SetStatus(
         kind == Kind::kQueued
-            ? QStringLiteral("Queued prompt injected into the running turn.")
-            : QStringLiteral("Prompt injected into the running turn again."));
+            ? QStringLiteral("Queued prompt sent as a new prompt.")
+            : QStringLiteral("Prompt sent again as a new prompt."));
   });
 }
 

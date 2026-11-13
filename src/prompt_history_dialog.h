@@ -60,10 +60,13 @@ class PromptHistoryDialog : public QDialog {
   std::function<void(const ServerPrompt&, const QString& text, ActionDone)>
       on_replace_server;
   std::function<void(const ServerPrompt&, ActionDone)> on_cancel_server;
-  std::function<void(const ServerPrompt&, ActionDone)> on_steer_server;
-  // Local queued/steered rows have no backend admission. Injecting sends a
-  // live `session.steer`; a successful local queue entry is removed on ACK.
-  std::function<void(const QString&, ActionDone)> on_inject_local;
+  // Sending removes the backend admission first, then submits its text as a
+  // fresh prompt. A steered admission is already part of the live turn, so it
+  // is sent without a cancel.
+  std::function<void(const ServerPrompt&, ActionDone)> on_send_server;
+  // Local queued/steered rows have no backend admission. Sending submits the
+  // text as a fresh prompt; a successful local queue entry is removed on ACK.
+  std::function<void(const QString&, ActionDone)> on_send_local;
 
  private:
   enum class Kind { kServer, kQueued, kSteered };
@@ -75,7 +78,7 @@ class PromptHistoryDialog : public QDialog {
   void SaveSelected();
   void DeleteSelected();
   void LoadSelected();
-  void SteerSelected();
+  void SendSelected();
   QStringList* queued_ = nullptr;
   QStringList* steered_ = nullptr;
   std::vector<ServerPrompt> server_;
@@ -85,7 +88,7 @@ class PromptHistoryDialog : public QDialog {
   QLabel* status_ = nullptr;
   QPushButton* save_ = nullptr;
   QPushButton* remove_ = nullptr;
-  QPushButton* steer_ = nullptr;
+  QPushButton* inject_ = nullptr;
   QPushButton* load_ = nullptr;
 };
 
