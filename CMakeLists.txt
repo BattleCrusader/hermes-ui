@@ -395,6 +395,7 @@ add_executable(hermes_kanban_tests
   tests/kanban_model_test.cc
   src/kanban_model.cc
   src/kanban_view.cc
+  src/pages_view.cc
   src/theme.cc
   src/theme_presets.cc
   src/paint_utils.cc

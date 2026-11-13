@@ -70,6 +70,7 @@ class KanbanView : public QWidget {
   int VisibleTaskCountForTest() const;
   QStringList SelectionForTest() const;
   void SelectForTest(const QString& task_id);
+  QColor CanvasBackgroundForTest() const;
 
  protected:
   void showEvent(QShowEvent* event) override;

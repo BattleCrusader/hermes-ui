@@ -287,6 +287,7 @@ class KanbanBoardCanvas : public QWidget {
     update();
   }
   QVector<QRectF> TaskRects() const { return task_rects_; }
+  QColor BackgroundForTest() const { return theme_.background; }
   int VisibleTaskCount() const {
     int count = 0;
     for (const auto& column : columns_) {
@@ -3737,6 +3738,10 @@ int KanbanView::VisibleTaskCountForTest() const {
 
 QStringList KanbanView::SelectionForTest() const {
   return canvas_ == nullptr ? QStringList() : canvas_->Selection().values();
+}
+
+QColor KanbanView::CanvasBackgroundForTest() const {
+  return canvas_ == nullptr ? QColor() : canvas_->BackgroundForTest();
 }
 
 void KanbanView::SelectForTest(const QString& task_id) {

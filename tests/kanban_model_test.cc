@@ -6,9 +6,12 @@
 
 #include "src/kanban_model.h"
 #include "src/kanban_view.h"
+#include "src/pages_view.h"
 
 using namespace hermes::kanban;
 using hermes::ui::KanbanView;
+using hermes::ui::PagesView;
+using hermes::ui::Theme;
 
 namespace {
 
@@ -171,6 +174,21 @@ class KanbanModelTest : public QObject {
     QVERIFY(view.TaskRectsForTest().size() >= 3);
   }
 
+  void pagesViewThemeSwitchRepaintsKanbanBoard() {
+    PagesView pages(Theme::Light());
+    pages.resize(900, 600);
+    pages.show();
+    pages.OpenPage(QStringLiteral("kanban"));
+    KanbanView* view = pages.Kanban();
+    QVERIFY(view != nullptr);
+    QCOMPARE(view->CanvasBackgroundForTest(), Theme::Light().background);
+
+    // Regression: PagesView owns the Kanban widget but used to leave its
+    // palette untouched when the app switched between light and dark themes.
+    pages.SetTheme(Theme::Dark());
+    QCOMPARE(view->CanvasBackgroundForTest(), Theme::Dark().background);
+  }
+
   void viewRefreshKeepsSelectionOnlyForLiveCards() {
     KanbanView view(hermes::ui::Theme{});
     KanbanBoard board;
@@ -198,6 +216,15 @@ class KanbanModelTest : public QObject {
     QVERIFY(view.SelectionForTest().isEmpty());
   }
 };
+
+// The Kanban test target links PagesView to exercise theme propagation. The
+// data pages themselves are out of scope here, so satisfy the one factory
+// symbol PagesView calls.
+namespace hermes::ui {
+QWidget* BuildDataPage(const QString&, const PageContext&, QWidget*) {
+  return nullptr;
+}
+}  // namespace hermes::ui
 
 QTEST_MAIN(KanbanModelTest)
 #include "kanban_model_test.moc"

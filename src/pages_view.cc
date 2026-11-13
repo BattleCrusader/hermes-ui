@@ -105,6 +105,12 @@ void PagesView::SetTheme(const Theme& theme) {
                theme_.hover.name()));
   scroll_->setStyleSheet(
       QStringLiteral("QScrollArea { border: none; background: transparent; }"));
+  // Kanban paints its own board and does not inherit the pages stylesheet.
+  // Without this call a theme switch leaves the board on the old palette
+  // (typically a white board inside a dark workspace).
+  if (kanban_ != nullptr) {
+    kanban_->SetTheme(theme_);
+  }
   update();
 }
 
