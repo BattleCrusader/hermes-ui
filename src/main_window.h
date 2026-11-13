@@ -292,6 +292,7 @@ class MainWindow : public QWidget {
   void ToggleCompletionPref(const QString& key, bool* target);
   int last_active_ = -1;
   int last_connected_ = -1;
+  QString last_running_signature_;
   double last_switch_ms_ = 0.0;
   double font_scale_ = 1.0;
   QString theme_preset_;

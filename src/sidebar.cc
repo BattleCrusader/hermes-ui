@@ -241,7 +241,7 @@ void Sidebar::SetProfileChips(const std::vector<ProfileChip>& chips,
                               int active_index) {
   chips_ = chips;
   active_index_ = active_index;
-  update();
+  SyncPulseTimer();
 }
 
 void Sidebar::SetActiveIndex(int active_index) {
@@ -400,11 +400,66 @@ std::vector<ClickTarget> Sidebar::ClickTargets() {
   return targets;
 }
 
-void Sidebar::SetRunning(bool running) {
-  if (running_ == running) {
+void Sidebar::SetRunning(bool running, const QString& session_id) {
+  const QString next_id = session_id.isEmpty() && running
+                              ? selected_session_id_
+                              : session_id;
+  if (running_ == running && running_session_id_ == next_id) {
     return;
   }
   running_ = running;
+  running_session_id_ = running ? next_id : QString();
+  SyncPulseTimer();
+}
+
+bool Sidebar::SessionRunning(const QString& session_id) const {
+  if (!running_ || session_id.isEmpty()) {
+    return false;
+  }
+  const QString running_id = running_session_id_.isEmpty()
+                                 ? snapshot_.selected_session_id
+                                 : running_session_id_;
+  return !running_id.isEmpty() && session_id == running_id;
+}
+
+bool Sidebar::ProjectRunning(const ProjectNode& node) const {
+  if (!running_) {
+    return false;
+  }
+  const QString running_id = running_session_id_.isEmpty()
+                                 ? snapshot_.selected_session_id
+                                 : running_session_id_;
+  if (running_id.isEmpty()) {
+    return false;
+  }
+  if (node.session_ids.contains(running_id)) {
+    return true;
+  }
+  // A freshly created or locally tagged chat may not be in the cached tree
+  // yet. SessionSummary carries the backend project id, so use it as the
+  // fallback rather than dropping the project-level activity indicator.
+  for (const SessionSummary& session : snapshot_.sessions) {
+    if (session.id != running_id) {
+      continue;
+    }
+    if (node.is_no_project) {
+      return session.project_id.isEmpty();
+    }
+    return session.project_id == node.id;
+  }
+  return false;
+}
+
+bool Sidebar::AnyChipRunning() const {
+  for (const ProfileChip& chip : chips_) {
+    if (chip.running) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void Sidebar::SyncPulseTimer() {
   if (pulse_timer_ == nullptr) {
     pulse_timer_ = new QTimer(this);
     pulse_timer_->setInterval(170);
@@ -413,10 +468,15 @@ void Sidebar::SetRunning(bool running) {
       update();
     });
   }
-  if (running_) {
-    pulse_timer_->start();
+  const bool active = running_ || AnyChipRunning();
+  if (active) {
+    if (!pulse_timer_->isActive()) {
+      pulse_timer_->start();
+    }
   } else {
-    pulse_timer_->stop();
+    if (pulse_timer_->isActive()) {
+      pulse_timer_->stop();
+    }
     pulse_ = 0;
   }
   update();
@@ -888,6 +948,8 @@ void Sidebar::paintEvent(QPaintEvent* event) {
     const int count = all ? static_cast<int>(snapshot_.sessions.size())
                           : (node != nullptr ? node->session_count : 0);
     const bool active = !all && row.id == active_project_id_;
+    const bool project_running =
+        all ? running_ : (node != nullptr && ProjectRunning(*node));
     qreal icon_left = row.rect.left() + 8;
     qreal label_left = row.rect.left() + 28;
     if (!all) {
@@ -922,11 +984,18 @@ void Sidebar::paintEvent(QPaintEvent* event) {
         selected ? theme_.foreground : theme_.text_secondary,
         theme_.UiFont(12,
                       selected || active ? QFont::DemiBold : QFont::Normal));
-    if (active) {
+    if (active || project_running) {
+      const qreal phase = (pulse_ % 8) / 8.0;
+      const qreal wave = phase < 0.5 ? phase * 2 : (1.0 - phase) * 2;
+      QColor dot = theme_.accent;
+      const qreal radius = project_running ? 2.2 + wave : 2.2;
+      if (project_running) {
+        dot.setAlphaF(0.35 + 0.65 * wave);
+      }
       painter.setPen(Qt::NoPen);
-      painter.setBrush(theme_.accent);
-      painter.drawEllipse(QPointF(icon_left + 12, row.rect.center().y()), 2.2,
-                          2.2);
+      painter.setBrush(dot);
+      painter.drawEllipse(QPointF(icon_left + 12, row.rect.center().y()),
+                          radius, radius);
     }
     DrawElidedText(
         painter,
@@ -960,7 +1029,7 @@ void Sidebar::paintEvent(QPaintEvent* event) {
     // The session that is generating right now gets a pulsing accent dot, so
     // the sidebar shows work in progress even when the transcript is scrolled
     // away from the streaming row.
-    if (running_ && session.id == snapshot_.selected_session_id) {
+    if (SessionRunning(session.id)) {
       const qreal phase = (pulse_ % 8) / 8.0;
       const qreal wave = phase < 0.5 ? phase * 2 : (1.0 - phase) * 2;
       QColor dot = theme_.accent;
@@ -1054,6 +1123,21 @@ void Sidebar::paintEvent(QPaintEvent* event) {
       painter.setBrush(theme_.warning);
       painter.drawEllipse(
           QPointF(chip_row.rect.left() + 1, chip_row.rect.bottom() - 1), 2, 2);
+    }
+    if (chip.running) {
+      // A profile can keep working while another profile is in front, so the
+      // rail itself has to carry the activity signal. Keep the pulse at full
+      // opacity even when the inactive chip body is dimmed.
+      const qreal phase = (pulse_ % 8) / 8.0;
+      const qreal wave = phase < 0.5 ? phase * 2 : (1.0 - phase) * 2;
+      QColor dot = theme_.accent;
+      dot.setAlphaF(0.35 + 0.65 * wave);
+      painter.setOpacity(1.0);
+      painter.setPen(Qt::NoPen);
+      painter.setBrush(dot);
+      painter.drawEllipse(
+          QPointF(chip_row.rect.right() - 1, chip_row.rect.bottom() - 1),
+          2.2 + wave * 0.8, 2.2 + wave * 0.8);
     }
     painter.restore();
   }

@@ -29,6 +29,7 @@ struct ProfileChip {
   QColor color;
   bool is_default = false;
   bool connected = false;
+  bool running = false;
   int unread = 0;
 };
 
@@ -46,7 +47,9 @@ class Sidebar : public QWidget {
   // up the row whose page is showing.
   void SetActivePage(const QString& page_id);
   void SetShowArchived(bool show);
-  void SetRunning(bool running);
+  // The session id is the turn that is actually busy; it may belong to a chat
+  // other than the selected one. An empty id falls back to the selected chat.
+  void SetRunning(bool running, const QString& session_id = QString());
   // Backend-authoritative project tree. `scope_id` is either AllProjectsId()
   // or one project id from the tree; session filtering uses the node's
   // sessionIds, never a client-side membership guess.
@@ -125,6 +128,10 @@ class Sidebar : public QWidget {
                        bool pinned, bool archived);
   void ShowProjectMenu(const QPoint& global_position,
                        const QString& project_id);
+  bool SessionRunning(const QString& session_id) const;
+  bool ProjectRunning(const ProjectNode& node) const;
+  bool AnyChipRunning() const;
+  void SyncPulseTimer();
   void ApplySearchStyle();
   void ApplyScrollBarStyle();
   void SyncSessionScrollBar();
@@ -154,6 +161,7 @@ class Sidebar : public QWidget {
   int session_scroll_ = 0;
   bool show_archived_ = false;
   bool running_ = false;
+  QString running_session_id_;
   int pulse_ = 0;
   QTimer* pulse_timer_ = nullptr;
   int session_scroll_max_ = 0;

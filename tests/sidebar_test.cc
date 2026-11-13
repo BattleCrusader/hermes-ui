@@ -8,6 +8,7 @@
 
 #include <QCompleter>
 #include <QCoreApplication>
+#include <QImage>
 #include <QLineEdit>
 #include <QScrollBar>
 #include <QtTest>
@@ -42,6 +43,9 @@ class SidebarTest : public QObject {
  private slots:
   void navRowsRouteToWorkspacePages();
   void addProfileButtonInvokesCallback();
+  void activityPulseTracksBackgroundSession();
+  void activityPulseTracksBackgroundProfile();
+  void activityPulseTracksBackgroundProject();
   void sessionRowSelectsSession();
   void projectRowsScopeSessionsAndAdd();
   void scopedProjectKeepsNewLocalChatVisible();
@@ -274,6 +278,105 @@ void SidebarTest::addProfileButtonInvokesCallback() {
   QTest::mouseClick(&sidebar, Qt::LeftButton, Qt::NoModifier,
                     QPoint(8 + 2 * 24 + 10, 720 - 30 + 10));
   QCOMPARE(added, 1);
+}
+
+void SidebarTest::activityPulseTracksBackgroundSession() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::Sidebar sidebar(theme);
+  sidebar.resize(theme.sidebar_width, 500);
+  sidebar.show();
+
+  hermes::ui::ProfileSnapshot snapshot = SnapshotWithSessions();
+  snapshot.selected_session_id = QStringLiteral("s1");
+  snapshot.sessions[0].title.clear();
+  sidebar.SetSnapshot(snapshot);
+  QCoreApplication::processEvents();
+
+  QRectF row;
+  for (const hermes::ui::ClickTarget& target : sidebar.ClickTargets()) {
+    if (target.name == QStringLiteral("sidebar:session:s0")) {
+      row = target.rect;
+    }
+  }
+  QVERIFY(!row.isNull());
+
+  const QImage before = sidebar.grab().toImage();
+  sidebar.SetRunning(true, QStringLiteral("s0"));
+  sidebar.repaint();
+  QCoreApplication::processEvents();
+  const QImage after = sidebar.grab().toImage();
+  const qreal dpr = after.devicePixelRatio();
+  const QPoint sample(qRound((row.left() + 8) * dpr),
+                      qRound(row.center().y() * dpr));
+  // The turn belongs to s0 while s1 is selected: the dot must follow the
+  // working session, not the selection.
+  QVERIFY(before.pixelColor(sample) != after.pixelColor(sample));
+}
+
+void SidebarTest::activityPulseTracksBackgroundProfile() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::Sidebar sidebar(theme);
+  sidebar.resize(theme.sidebar_width, 500);
+  sidebar.show();
+
+  std::vector<hermes::ui::ProfileChip> chips(2);
+  chips[0].label = QStringLiteral("default");
+  chips[0].color = theme.accent;
+  chips[1].label = QStringLiteral("work");
+  chips[1].color = theme.accent;
+  sidebar.SetProfileChips(chips, 0);
+  QCoreApplication::processEvents();
+
+  const QImage before = sidebar.grab().toImage();
+  chips[1].running = true;
+  sidebar.SetProfileChips(chips, 0);
+  sidebar.repaint();
+  QCoreApplication::processEvents();
+  const QImage after = sidebar.grab().toImage();
+  const qreal dpr = after.devicePixelRatio();
+  // Second chip on the rail: 8px left padding + one 20px chip + 4px gap.
+  const QPoint sample(qRound((8 + 20 + 4 + 19) * dpr),
+                      qRound((sidebar.height() - 30 + 19) * dpr));
+  QVERIFY(before.pixelColor(sample) != after.pixelColor(sample));
+}
+
+void SidebarTest::activityPulseTracksBackgroundProject() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::Sidebar sidebar(theme);
+  sidebar.resize(theme.sidebar_width, 500);
+  sidebar.show();
+
+  hermes::ui::ProfileSnapshot snapshot = SnapshotWithSessions();
+  snapshot.selected_session_id = QStringLiteral("s1");
+  sidebar.SetSnapshot(snapshot);
+
+  hermes::ui::ProjectNode project;
+  project.id = QStringLiteral("p1");
+  project.label = QStringLiteral("Project");
+  project.session_count = 1;
+  project.session_ids = {QStringLiteral("s0")};
+  sidebar.SetProjects({project}, hermes::ui::AllProjectsId(), QString(), true);
+  QCoreApplication::processEvents();
+
+  QRectF row;
+  for (const hermes::ui::ClickTarget& target : sidebar.ClickTargets()) {
+    if (target.name == QStringLiteral("sidebar:project:p1")) {
+      row = target.rect;
+    }
+  }
+  QVERIFY(!row.isNull());
+
+  const QImage before = sidebar.grab().toImage();
+  sidebar.SetRunning(true, QStringLiteral("s0"));
+  sidebar.repaint();
+  QCoreApplication::processEvents();
+  const QImage after = sidebar.grab().toImage();
+  const qreal dpr = after.devicePixelRatio();
+  const QPoint sample(qRound((row.left() + 36) * dpr),
+                      qRound(row.center().y() * dpr));
+  // The project bullet aggregates the busy session even when the project
+  // itself is not the active scope.
+  QVERIFY(before.pixelColor(sample) != after.pixelColor(sample));
 }
 
 void SidebarTest::sessionRowSelectsSession() {

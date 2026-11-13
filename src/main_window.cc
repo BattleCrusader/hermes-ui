@@ -3556,6 +3556,7 @@ void MainWindow::UpdateSidebarChips() {
   }
   int unread_sum = 0;
   int connected_count = 0;
+  QString running_signature;
   std::vector<ProfileChip> chips;
   chips.reserve(static_cast<std::size_t>(supervisor_.profile_count()));
   for (int index = 0; index < supervisor_.profile_count(); ++index) {
@@ -3566,6 +3567,13 @@ void MainWindow::UpdateSidebarChips() {
     chip.is_default = supervisor_.IsDefault(index);
     chip.unread = snapshot ? snapshot->unread : 0;
     chip.connected = snapshot ? snapshot->connected : false;
+    const bool streaming =
+        snapshot && !snapshot->messages.empty() &&
+        (snapshot->messages.back().streaming ||
+         snapshot->messages.back().reasoning_streaming);
+    chip.running = snapshot && (snapshot->running || streaming);
+    running_signature.append(chip.running ? QLatin1Char('1')
+                                          : QLatin1Char('0'));
     unread_sum += chip.unread;
     if (chip.connected) {
       ++connected_count;
@@ -3574,12 +3582,14 @@ void MainWindow::UpdateSidebarChips() {
   }
   const int active = supervisor_.active_index();
   if (unread_sum == last_unread_sum_ && active == last_active_ &&
-      connected_count == last_connected_) {
+      connected_count == last_connected_ &&
+      running_signature == last_running_signature_) {
     return;
   }
   last_unread_sum_ = unread_sum;
   last_active_ = active;
   last_connected_ = connected_count;
+  last_running_signature_ = running_signature;
   sidebar_->SetProfileChips(chips, active);
 }
 
@@ -4875,7 +4885,14 @@ void MainWindow::ApplyRunIndicators(const ProfileSnapshot& snapshot) {
                              : 0;
   composer_->SetRunning(selected_running, started);
   SyncComposerQueueBadge();
-  sidebar_->SetRunning(snapshot.running || selected_streaming);
+  const bool running = snapshot.running || selected_streaming;
+  QString running_session_id;
+  if (snapshot.running && !snapshot.running_session_id.isEmpty()) {
+    running_session_id = snapshot.running_session_id;
+  } else if (running) {
+    running_session_id = snapshot.selected_session_id;
+  }
+  sidebar_->SetRunning(running, running_session_id);
   status_bar_->SetWorkState(selected_running, started,
                             PendingQueueCount(snapshot));
 
