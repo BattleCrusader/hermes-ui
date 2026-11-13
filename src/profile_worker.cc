@@ -3872,6 +3872,9 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
           state_.running ? state_.selected_session_id : QString();
     }
     if (!info.isEmpty()) {
+      // Start the quiet-stream clock from the fresh resume report; otherwise a
+      // UI that attaches mid-turn with no subsequent event never reconciles.
+      last_event_ms_ = QDateTime::currentMSecsSinceEpoch();
       PublishLocked();
     }
   }
