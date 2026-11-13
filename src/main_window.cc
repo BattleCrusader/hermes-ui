@@ -3772,33 +3772,49 @@ void MainWindow::ShowQueuedPromptsDialog() {
     queue_done(QStringLiteral("prompt.cancel"), params, forget_and_finish);
   };
   dialog.on_cancel_server = cancel_server;
+  // Injecting is an explicit jump to a fresh turn. Follow it even when the
+  // transcript was scrolled up so the new user bubble is visible immediately.
+  const auto follow_injected =
+      [this](PromptHistoryDialog::ActionDone done) {
+        return [this, done = std::move(done)](bool ok,
+                                              const QString& message) {
+          if (ok) {
+            chat_view_->SetFollowBottom(true);
+            chat_view_->ScrollToBottom();
+          }
+          done(ok, message);
+        };
+      };
   dialog.on_send_server =
-      [this, cancel_server, profile_index](
+      [this, cancel_server, follow_injected, profile_index](
           const PromptHistoryDialog::ServerPrompt& prompt,
           PromptHistoryDialog::ActionDone done) {
         const QString text = prompt.text;
         const bool queued =
             !prompt.steering && prompt.status != QStringLiteral("terminal");
         if (!queued) {
-          supervisor_.SendPrompt(profile_index, text, done);
+          supervisor_.SendPrompt(profile_index, text, follow_injected(done));
           return;
         }
         // Remove the gateway-owned admission before submitting the same text
         // as a fresh prompt; otherwise it would run once from the queue and
         // again from this send.
-        cancel_server(prompt, [this, profile_index, text, done](
-                                   bool ok, const QString& message) {
-          if (!ok) {
-            done(false, message);
-            return;
-          }
-          supervisor_.SendPrompt(profile_index, text, done);
-        });
+        cancel_server(
+            prompt,
+            [this, profile_index, text, follow_injected, done](
+                bool ok, const QString& message) {
+              if (!ok) {
+                done(false, message);
+                return;
+              }
+              supervisor_.SendPrompt(profile_index, text,
+                                     follow_injected(done));
+            });
       };
-  dialog.on_send_local = [this, profile_index](
+  dialog.on_send_local = [this, follow_injected, profile_index](
                              const QString& text,
                              PromptHistoryDialog::ActionDone done) {
-    supervisor_.SendPrompt(profile_index, text, done);
+    supervisor_.SendPrompt(profile_index, text, follow_injected(done));
   };
 
   // The backend queue changes while the modal is open (a queued prompt drains,

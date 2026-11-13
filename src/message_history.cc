@@ -74,6 +74,20 @@ bool SameAssistant(const ChatMessage& hydrated, const ChatMessage& live) {
   return std::abs(hydrated.timestamp.secsTo(live.timestamp)) <= 15 * 60;
 }
 
+QString UserText(const ChatMessage& message) {
+  if (!message.raw_text.trimmed().isEmpty()) {
+    return message.raw_text.trimmed();
+  }
+  QStringList parts;
+  for (const MessageBlock& block : message.blocks) {
+    const QString text = block.text.trimmed();
+    if (!text.isEmpty()) {
+      parts.append(text);
+    }
+  }
+  return parts.join(QLatin1Char('\n'));
+}
+
 }  // namespace
 
 QString ReasoningTextFromDetails(const QJsonValue& details) {
@@ -172,6 +186,39 @@ void PreserveLiveReasoning(std::vector<ChatMessage>* hydrated,
     }
     return;
   }
+}
+
+void PreservePendingUserMessages(std::vector<ChatMessage>* hydrated,
+                                 const std::vector<ChatMessage>& live) {
+  if (hydrated == nullptr) {
+    return;
+  }
+  const ChatMessage* pending = nullptr;
+  for (auto it = live.rbegin(); it != live.rend(); ++it) {
+    if (it->role == MessageRole::kUser && it->row_id <= 0 &&
+        !UserText(*it).isEmpty()) {
+      pending = &*it;
+      break;
+    }
+  }
+  if (pending == nullptr) {
+    return;
+  }
+  // Skip ancient local rows left over from a failed send long ago; only the
+  // prompt that can still belong to the visible tail of the transcript is
+  // worth carrying across.
+  if (!hydrated->empty() && pending->timestamp.isValid() &&
+      hydrated->back().timestamp.isValid() &&
+      hydrated->back().timestamp.secsTo(pending->timestamp) < -2 * 60) {
+    return;
+  }
+  const QString text = UserText(*pending);
+  for (const ChatMessage& existing : *hydrated) {
+    if (existing.role == MessageRole::kUser && UserText(existing) == text) {
+      return;
+    }
+  }
+  hydrated->push_back(*pending);
 }
 
 }  // namespace hermes::ui

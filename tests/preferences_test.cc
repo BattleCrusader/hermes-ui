@@ -3462,6 +3462,7 @@ void PreferencesTest::historyHydratesAndPreservesDisplayReasoning() {
   using hermes::ui::HistoryContainsAssistant;
   using hermes::ui::MessageRole;
   using hermes::ui::PreserveLiveReasoning;
+  using hermes::ui::PreservePendingUserMessages;
   using hermes::ui::ReasoningTextFromDetails;
   using hermes::ui::ReasoningTextFromRow;
 
@@ -3524,6 +3525,24 @@ void PreferencesTest::historyHydratesAndPreservesDisplayReasoning() {
   rows = {hydrated};
   PreserveLiveReasoning(&rows, {live});
   QCOMPARE(rows.front().reasoning, QStringLiteral("Persisted reasoning."));
+
+  // A history page fetched right after an injected prompt can predate the
+  // user row commit. Keep the optimistic bubble; once history carries the
+  // same text, do not append a duplicate.
+  ChatMessage pending_user;
+  pending_user.role = MessageRole::kUser;
+  pending_user.timestamp = now.addSecs(-10);
+  pending_user.raw_text = QStringLiteral("injected prompt");
+  rows = {hydrated};
+  PreservePendingUserMessages(&rows, {pending_user});
+  QCOMPARE(rows.size(), std::size_t{2});
+  QCOMPARE(rows.back().raw_text, QStringLiteral("injected prompt"));
+
+  ChatMessage persisted_user = pending_user;
+  persisted_user.row_id = 42;
+  rows = {persisted_user, hydrated};
+  PreservePendingUserMessages(&rows, {pending_user});
+  QCOMPARE(rows.size(), std::size_t{2});
 }
 
 QTEST_MAIN(PreferencesTest)

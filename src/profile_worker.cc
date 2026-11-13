@@ -647,6 +647,7 @@ void ProfileWorker::SendPromptInternal(const QString& text,
       message.role = MessageRole::kUser;
       message.author = QStringLiteral("You");
       message.timestamp = QDateTime::currentDateTime();
+      message.raw_text = trimmed;
       message.blocks = ParseMarkdown(trimmed);
       state_.messages.push_back(std::move(message));
       state_.running = true;
@@ -719,6 +720,37 @@ void ProfileWorker::Refresh() {
     return;
   }
   FetchSessions();
+  // The socket event stream is the fast path, but a dropped/detached stream
+  // used to freeze the visible turn forever: the 700 ms post-turn refresh is
+  // the only history read, and it may race the prompt commit. Reconcile a
+  // running foreground session when no event has arrived for a while. The
+  // history page is authoritative, so this also recovers turns that started
+  // during an Inject cancel/resubmit.
+  QString selected;
+  bool stale = false;
+  const qint64 now = QDateTime::currentMSecsSinceEpoch();
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    selected = state_.selected_session_id;
+    stale = foreground_ && history_loaded_ && state_.running &&
+            !selected.isEmpty() && last_event_ms_ > 0 &&
+            now - last_event_ms_ > 15000;
+    if (stale) {
+      last_event_ms_ = now;
+    }
+  }
+  if (stale) {
+    qInfo("profile %s: reconciling stalled session=%s", qUtf8Printable(name_),
+          qUtf8Printable(selected));
+    FetchMessages(selected);
+    // Re-attach as well: the REST page repairs durable rows, while resume
+    // re-delivers the event ring and reports `running`/pending so the spinner
+    // and queued rows converge even if the old subscription went silent.
+    if (socket_ != nullptr && socket_->IsConnected()) {
+      socket_->ResumeSession(selected);
+      attached_session_id_ = selected;
+    }
+  }
 }
 
 void ProfileWorker::LoadCachedState() {
@@ -2286,6 +2318,7 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
       message.role = MessageRole::kUser;
       message.author = QStringLiteral("You");
       message.timestamp = timestamp;
+      message.raw_text = content;
       message.blocks = ParseMarkdown(content);
       message.reactions = reactions;
       messages.push_back(std::move(message));
@@ -2370,6 +2403,8 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
     // the normal hydration path takes over; reasoning omitted from that row is
     // carried across below.
     const QDateTime now = QDateTime::currentDateTime();
+    const QDateTime newest_hydrated =
+        messages.empty() ? QDateTime() : messages.back().timestamp;
     bool keep_live = false;
     for (auto it = state_.messages.rbegin(); it != state_.messages.rend();
          ++it) {
@@ -2381,10 +2416,22 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
           HistoryContainsAssistant(messages, *it)) {
         continue;
       }
+      // If REST already carries rows well past this live assistant, the
+      // stream is stale (a dropped subscription or a replaced turn). Prefer
+      // the page so reconciliation can repair the transcript instead of
+      // keeping the frozen live tail.
+      if (newest_hydrated.isValid() &&
+          it->timestamp.secsTo(newest_hydrated) > 30) {
+        continue;
+      }
       keep_live = true;
       break;
     }
     PreserveLiveReasoning(&messages, state_.messages);
+    // A REST page can be older than the prompt that just went out (the
+    // `message.complete` refresh races the commit). Keep the optimistic user
+    // row so an injected prompt never disappears after it was accepted.
+    PreservePendingUserMessages(&messages, state_.messages);
     if (!keep_live) {
       state_.messages = std::move(messages);
     }
@@ -3014,6 +3061,10 @@ void ProfileWorker::OnSocketEvent(const QString& type,
       session_id != runtime_session_id_) {
     return;
   }
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    last_event_ms_ = QDateTime::currentMSecsSinceEpoch();
+  }
 
   if (type == QStringLiteral("session.control.update")) {
     const QString summary = SessionControlSummary(
@@ -3354,7 +3405,7 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
       callback != pending_prompt_callbacks_.end()) {
     SteerCallback done = std::move(callback->second);
     pending_prompt_callbacks_.erase(callback);
-    done(!error.isEmpty(), error);
+    done(error.isEmpty(), error);
   }
   if (pending_attached_prompt_ != nullptr) {
     auto attachment = pending_attached_prompt_->request_ids.find(id);
@@ -3421,6 +3472,12 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
       pending_prompts_.ClaimAnnouncement(admission_id_);
     }
     pending_prompt_queued_ = false;
+    // A cancel-then-send (Inject) can interrupt the old generation and start a
+    // queued one on a freshly re-bound subscription. Re-attach after every
+    // submit so the stream follows the new turn and replays anything the old
+    // subscription missed.
+    attached_session_id_.clear();
+    AttachIfForeground();
     return;
   }
   if (id == pending_receipt_id_) {
@@ -3978,15 +4035,29 @@ void ProfileWorker::AppendMoaReasoning(const QString& text, bool replace) {
 }
 
 void ProfileWorker::CompleteAssistant(const QString& text, bool error) {
+  bool superseded = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     ChatMessage* target = nullptr;
+    // Walk backwards: a user row newer than the streaming answer means this
+    // completion belongs to a turn that Inject already replaced. Cancelling a
+    // started admission interrupts it, but its `message.complete` can arrive
+    // after the replacement prompt was submitted; letting it clear `running`
+    // and `admission_id_` here would make the new turn look dead.
     for (auto it = state_.messages.rbegin(); it != state_.messages.rend();
          ++it) {
+      if (it->role == MessageRole::kUser) {
+        superseded = true;
+      }
       if (it->streaming) {
         target = &(*it);
         break;
       }
+    }
+    if (target == nullptr && superseded) {
+      qInfo("ignoring completion for superseded turn session=%.12s",
+            qUtf8Printable(state_.selected_session_id));
+      return;
     }
     if (target == nullptr) {
       ChatMessage message;
@@ -4011,6 +4082,15 @@ void ProfileWorker::CompleteAssistant(const QString& text, bool error) {
     }
     target->streaming = false;
     target->reasoning_streaming = false;
+    if (superseded) {
+      // Keep the replacement turn's running/admission bookkeeping intact.
+      NoteActivityLocked();
+      PublishLocked();
+      qInfo("turn complete (superseded) session=%.12s chars=%lld error=%d",
+            qUtf8Printable(state_.selected_session_id),
+            static_cast<qint64>(text.size()), error ? 1 : 0);
+      return;
+    }
     state_.running = false;
     state_.running_session_id.clear();
     if (error) {

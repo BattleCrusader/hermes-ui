@@ -247,6 +247,9 @@ class ProfileWorker : public QObject {
   bool shutting_down_ = false;
   qint64 last_publish_ms_ = 0;
   qint64 last_reparse_ms_ = 0;
+  // Last event accepted for the selected session. Refresh() uses it to refetch
+  // history when the socket stream goes quiet mid-turn.
+  qint64 last_event_ms_ = 0;
   QString pending_prompt_;
   QString attached_session_id_;
   QString runtime_session_id_;

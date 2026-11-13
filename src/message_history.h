@@ -36,6 +36,13 @@ bool HistoryContainsAssistant(const std::vector<ChatMessage>& hydrated,
 void PreserveLiveReasoning(std::vector<ChatMessage>* hydrated,
                            const std::vector<ChatMessage>& live);
 
+// Carries an optimistic user prompt across a REST refresh whose page predates
+// the commit that persisted it. Only a trailing local row (row_id 0) that is
+// not already present by text is appended; completed history stays
+// authoritative for ordering and duplicates.
+void PreservePendingUserMessages(std::vector<ChatMessage>* hydrated,
+                                 const std::vector<ChatMessage>& live);
+
 }  // namespace hermes::ui
 
 #endif  // HERMES_UI_MESSAGE_HISTORY_H_
