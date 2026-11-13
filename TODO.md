@@ -168,6 +168,30 @@ REST.**
   `/api/config` request still succeeds after rediscovery.
 - [x] Full native suite: **9/9 passed** in 33.47 s.
 
+## Status update — 2026-11-13 (seventy-first pass)
+
+**Typing and drag-selection stay responsive on long conversations.**
+
+- [x] **Plain keystrokes skip the shortcut converter.** The application-wide
+  event filter called `QKeyEvent::shortcut()` and `QKeyCombination` for every
+  key, including ordinary letters. Character input now returns before any
+  shortcut conversion; modified keys still reach bindings, and a focused text
+  editor keeps its own keys.
+- [x] **The composer stops flattening the draft on every key.** Slash and
+  mention detection now inspect only the cursor's text block and use the block
+  count for the empty check, instead of `toPlainText()` / `contains('\n')` over
+  the whole draft. The paste probe only calls `matches(QKeySequence::Paste)`
+  when the key can actually be a paste.
+- [x] **Selection repaint is clipped to the drag band.** `PaintSelection` used
+  to rebuild every highlight rectangle in the transcript on each mouse move,
+  even though Qt asked only for the newly dirtied band. It now binary-searches
+  the vertically ordered text runs and builds only fragments intersecting the
+  painter clip; the full selection bounds are computed only on the rare
+  invalid-release fallback.
+- [x] **Regression coverage.** Full native suite: **10/10 passed** in 19.12 s,
+  including wrapped-line/URL selection, streaming-update selection retention,
+  and detached-window composer sharing.
+
 ## Status update — 2026-11-13 (seventieth pass)
 
 **The Visible models dialog now themes its scrolling surface.**
@@ -188,6 +212,30 @@ REST.**
 - [x] Dark-theme screenshot OCR reads every provider, model, and button; the
   dialog is uniformly dark instead of a dark frame around a white list.
 - [x] Full native suite: **9/9 passed** in 28.20 s.
+
+## Status update — 2026-11-13 (seventy-first pass)
+
+**Typing and drag-selection stay responsive on long conversations.**
+
+- [x] **Plain keystrokes skip the shortcut converter.** The application-wide
+  event filter called `QKeyEvent::shortcut()` and `QKeyCombination` for every
+  key, including ordinary letters. Character input now returns before any
+  shortcut conversion; modified keys still reach bindings, and a focused text
+  editor keeps its own keys.
+- [x] **The composer stops flattening the draft on every key.** Slash and
+  mention detection now inspect only the cursor's text block and use the block
+  count for the empty check, instead of `toPlainText()` / `contains('\n')` over
+  the whole draft. The paste probe only calls `matches(QKeySequence::Paste)`
+  when the key can actually be a paste.
+- [x] **Selection repaint is clipped to the drag band.** `PaintSelection` used
+  to rebuild every highlight rectangle in the transcript on each mouse move,
+  even though Qt asked only for the newly dirtied band. It now binary-searches
+  the vertically ordered text runs and builds only fragments intersecting the
+  painter clip; the full selection bounds are computed only on the rare
+  invalid-release fallback.
+- [x] **Regression coverage.** Full native suite: **10/10 passed** in 19.12 s,
+  including wrapped-line/URL selection, streaming-update selection retention,
+  and detached-window composer sharing.
 
 ## Status update — 2026-11-13 (seventieth pass)
 
