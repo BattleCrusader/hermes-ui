@@ -126,6 +126,22 @@ REST.**
   auxiliary save/MoA render, provider collapse/refresh, fallback rows.
 - [x] Full native suite: **9/9 passed** in 32.09 s.
 
+## Status update — 2026-11-13 (seventy-third pass)
+
+**Session switches always open at the latest reply.**
+
+- [x] **Root cause:** `ChatView::SetSnapshot` only followed the bottom when the
+  previous transcript was already within 6 px of its end. Switching from a
+  session the user had scrolled up left the new transcript at the same stale
+  offset, often halfway through the conversation.
+- [x] **Fix:** track the selected session id in `ChatView`. When it changes,
+  re-enable follow-bottom and scroll to the end regardless of the previous
+  offset. Streaming in the newly opened session stays pinned to the bottom.
+- [x] **Regression coverage:** `sessionSwitchScrollsToLatestReply` renders two
+  long sessions, leaves the first at the top, switches, and asserts the
+  scrollbar lands at its maximum.
+- [x] Native chat suite: **31/31 passed**; full suite: **10/10 passed**.
+
 ## Status update — 2026-11-13 (seventy-second pass)
 
 **Router headers select or clear every model in one click.**
@@ -144,6 +160,22 @@ REST.**
   `modelVisibilityProviderToggleSelectsGroup` covers mixed/empty/checked
   headers, child-to-header updates, the second router, and **Show all**.
 - [x] Full native suite: **9/9 passed** in 33.63 s.
+
+## Status update — 2026-11-13 (seventy-third pass)
+
+**Session switches always open at the latest reply.**
+
+- [x] **Root cause:** `ChatView::SetSnapshot` only followed the bottom when the
+  previous transcript was already within 6 px of its end. Switching from a
+  session the user had scrolled up left the new transcript at the same stale
+  offset, often halfway through the conversation.
+- [x] **Fix:** track the selected session id in `ChatView`. When it changes,
+  re-enable follow-bottom and scroll to the end regardless of the previous
+  offset. Streaming in the newly opened session stays pinned to the bottom.
+- [x] **Regression coverage:** `sessionSwitchScrollsToLatestReply` renders two
+  long sessions, leaves the first at the top, switches, and asserts the
+  scrollbar lands at its maximum.
+- [x] Native chat suite: **31/31 passed**; full suite: **10/10 passed**.
 
 ## Status update — 2026-11-13 (seventy-second pass)
 
@@ -184,6 +216,22 @@ REST.**
   `GatewayHttp` at a deliberately stale instance id and verifies a normal
   `/api/config` request still succeeds after rediscovery.
 - [x] Full native suite: **9/9 passed** in 33.47 s.
+
+## Status update — 2026-11-13 (seventy-third pass)
+
+**Session switches always open at the latest reply.**
+
+- [x] **Root cause:** `ChatView::SetSnapshot` only followed the bottom when the
+  previous transcript was already within 6 px of its end. Switching from a
+  session the user had scrolled up left the new transcript at the same stale
+  offset, often halfway through the conversation.
+- [x] **Fix:** track the selected session id in `ChatView`. When it changes,
+  re-enable follow-bottom and scroll to the end regardless of the previous
+  offset. Streaming in the newly opened session stays pinned to the bottom.
+- [x] **Regression coverage:** `sessionSwitchScrollsToLatestReply` renders two
+  long sessions, leaves the first at the top, switches, and asserts the
+  scrollbar lands at its maximum.
+- [x] Native chat suite: **31/31 passed**; full suite: **10/10 passed**.
 
 ## Status update — 2026-11-13 (seventy-second pass)
 
@@ -246,6 +294,22 @@ REST.**
 - [x] Dark-theme screenshot OCR reads every provider, model, and button; the
   dialog is uniformly dark instead of a dark frame around a white list.
 - [x] Full native suite: **9/9 passed** in 28.20 s.
+
+## Status update — 2026-11-13 (seventy-third pass)
+
+**Session switches always open at the latest reply.**
+
+- [x] **Root cause:** `ChatView::SetSnapshot` only followed the bottom when the
+  previous transcript was already within 6 px of its end. Switching from a
+  session the user had scrolled up left the new transcript at the same stale
+  offset, often halfway through the conversation.
+- [x] **Fix:** track the selected session id in `ChatView`. When it changes,
+  re-enable follow-bottom and scroll to the end regardless of the previous
+  offset. Streaming in the newly opened session stays pinned to the bottom.
+- [x] **Regression coverage:** `sessionSwitchScrollsToLatestReply` renders two
+  long sessions, leaves the first at the top, switches, and asserts the
+  scrollbar lands at its maximum.
+- [x] Native chat suite: **31/31 passed**; full suite: **10/10 passed**.
 
 ## Status update — 2026-11-13 (seventy-second pass)
 
