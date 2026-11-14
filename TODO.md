@@ -42,6 +42,40 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-14 (ordered prompt, queue and steer operations)
+
+**Every prompt, run-after queue, attachment-backed send, deferred new-chat send
+and steer now travels through one FIFO and waits for its own response.**
+
+- [x] Added `PromptOperationQueue` (`src/prompt_operation_queue.h`) with a
+      single active head, FIFO `PushBack`, and `PushAfterActive` for an idle
+      steer that must become a prompt immediately after the active operation.
+- [x] Replaced the singular `pending_prompt_request_id_`,
+      `pending_prompt_queued_`, `pending_attached_prompt_`,
+      `deferred_prompt_callback_`, `pending_steers_` and
+      `pending_steer_callbacks_` slots. Each operation carries its own text,
+      truncation flags, queued mode, attachment request ids, request id and
+      completion callback.
+- [x] Attachment RPCs for one operation finish before that operation submits
+      `prompt.submit`; the next operation does not start until the response is
+      handled. Multiple attachment-bearing sends can no longer overwrite each
+      other.
+- [x] Prompts submitted before `session.create` returns are held in a deque
+      and flushed in submission order instead of the last one replacing the
+      rest.
+- [x] Steers share the prompt queue, so a steer response cannot overtake an
+      earlier prompt response or reorder locally appended user bubbles. A
+      finished-turn steer fallback is inserted immediately after the active
+      steer, before later queued sends.
+- [x] A rejected queued admission no longer calls `PublishError(..., true)`;
+      only a normal prompt submit owns the turn it starts, so a failed
+      run-after request cannot raise “Turn failed” for the live turn.
+- [x] Added `promptOperationsStayFifoAndWaitForAck` and
+      `promptFallbackKeepsPlaceAheadOfLaterSends`. Full native suite **10/10
+      passed** in 23.70 s. A live `--probe-steer` run confirmed the queued
+      steer response and agent processing order. Commit `d91399e`, pushed to
+      `main`.
+
 ## Status update — 2026-11-14 (collapsible Git repo cards)
 
 **Each project repository can now collapse, and a changed repo still shows a
