@@ -38,6 +38,19 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-14 (kanban lane scroll)
+
+**The done lane is reachable again on boards wider than the viewport.**
+
+- [x] The canvas computed `content_width_` from a paint origin already shifted
+      by `h_offset_`, so every scroll step shrank the scrollbar range and the
+      range collapsed toward zero before the last lane. Content width is now
+      offset-independent.
+- [x] Added `viewKeepsHorizontalRangeAtRightEdge`: eight workflow lanes, scroll
+      to the right edge, refresh, and verify the maximum and value stay put.
+- [x] Full native suite **10/10 passed** in 23.14 s. Commit `6405454`, pushed
+      to `main`.
+
 ## Status update — 2026-11-14 (git review rail)
 
 **The right-rail Git card is now usable without a terminal.**
