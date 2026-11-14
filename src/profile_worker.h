@@ -178,7 +178,8 @@ class ProfileWorker : public QObject {
                           bool confirm_deep_truncate,
                           const QStringList& attachments = {},
                           bool queued = false, SteerCallback done = {},
-                          bool after_active = false);
+                          bool after_active = false,
+                          bool user_row_already_appended = false);
   void StartNextPromptOperation();
   void SendActivePromptAttachments();
   void SubmitActivePromptOperation();
@@ -218,7 +219,11 @@ class ProfileWorker : public QObject {
                      const QString& detail);
   void UpdateToolRow(const QString& id, const QString& detail);
   void AppendAssistantDelta(const QString& text);
-  void AppendUserPromptLocked(const QString& text);
+  void AppendUserPromptLocked(const QString& text,
+                              const QString& local_bubble_id = {},
+                              bool begin_turn = true);
+  bool HasLocalPromptBubbleLocked(const QString& local_bubble_id) const;
+  void RemoveLocalPromptBubbleLocked(const QString& local_bubble_id);
   void AppendReasoningDelta(const QString& text, bool streaming);
   void AppendMoaReasoning(const QString& text, bool replace);
   ChatMessage* StreamingAssistantLocked();

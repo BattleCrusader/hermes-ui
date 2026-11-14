@@ -33,6 +33,11 @@ struct PromptOperation {
   std::set<int> attachment_request_ids;
   // The prompt.submit or session.steer RPC currently awaiting a response.
   int request_id = -1;
+  // A steer appends its user row at submit time so later prompts cannot jump
+  // ahead of it in the transcript. The id lets a rejected steer remove that
+  // optimistic row, and lets fallback reuse it instead of appending twice.
+  QString local_bubble_id;
+  bool user_row_already_appended = false;
   std::function<void(bool, const QString&)> done;
 };
 

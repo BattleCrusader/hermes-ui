@@ -518,7 +518,8 @@ void ProfileWorker::SendPromptInternal(const QString& text,
                                        bool confirm_deep_truncate,
                                        const QStringList& attachments,
                                        bool queued, SteerCallback done,
-                                       bool after_active) {
+                                       bool after_active,
+                                       bool user_row_already_appended) {
   const QString trimmed = text.trimmed();
   if (trimmed.isEmpty()) {
     if (done) {
@@ -568,13 +569,15 @@ void ProfileWorker::SendPromptInternal(const QString& text,
         }
       }
       if (!queued) {
-        ChatMessage message;
-        message.role = MessageRole::kUser;
-        message.author = QStringLiteral("You");
-        message.timestamp = QDateTime::currentDateTime();
-        message.raw_text = trimmed;
-        message.blocks = ParseMarkdown(trimmed);
-        state_.messages.push_back(std::move(message));
+        if (!user_row_already_appended) {
+          ChatMessage message;
+          message.role = MessageRole::kUser;
+          message.author = QStringLiteral("You");
+          message.timestamp = QDateTime::currentDateTime();
+          message.raw_text = trimmed;
+          message.blocks = ParseMarkdown(trimmed);
+          state_.messages.push_back(std::move(message));
+        }
         BeginTurn(&state_);
         foreground_ = true;
         state_.unread = 0;
@@ -610,6 +613,7 @@ void ProfileWorker::SendPromptInternal(const QString& text,
   operation.confirm_deep_truncate = confirm_deep_truncate;
   operation.queued = queued;
   operation.attachments = attachments;
+  operation.user_row_already_appended = user_row_already_appended;
   operation.done = std::move(done);
   if (after_active) {
     prompt_operations_.PushAfterActive(std::move(operation));
@@ -627,6 +631,7 @@ void ProfileWorker::StartNextPromptOperation() {
   if (socket_ == nullptr || !socket_->IsConnected()) {
     const QString error = QStringLiteral("Gateway socket is not connected");
     std::vector<SteerCallback> callbacks;
+    QStringList local_bubbles;
     bool ends_turn = false;
     while (true) {
       PromptOperation* operation = prompt_operations_.Active();
@@ -645,9 +650,18 @@ void ProfileWorker::StartNextPromptOperation() {
       if (operation->done) {
         callbacks.push_back(std::move(operation->done));
       }
+      if (!operation->local_bubble_id.isEmpty()) {
+        local_bubbles.push_back(operation->local_bubble_id);
+      }
       prompt_operations_.FinishActive();
     }
     prompt_operations_.Clear();
+    if (!local_bubbles.isEmpty()) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      for (const QString& id : local_bubbles) {
+        RemoveLocalPromptBubbleLocked(id);
+      }
+    }
     for (SteerCallback& done : callbacks) {
       done(false, error);
     }
@@ -748,9 +762,14 @@ void ProfileWorker::FailActivePromptOperation(const QString& error,
   if (operation == nullptr) {
     return;
   }
+  const QString local_bubble_id = operation->local_bubble_id;
   SteerCallback done = std::move(operation->done);
   if (done) {
     done(false, error);
+  }
+  if (!local_bubble_id.isEmpty()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    RemoveLocalPromptBubbleLocked(local_bubble_id);
   }
   PublishError(error, ends_turn);
   FinishActivePromptOperation();
@@ -774,6 +793,7 @@ bool ProfileWorker::HandleActivePromptResponse(int id,
       return false;
     }
     const QString text = operation->text;
+    const QString local_bubble_id = operation->local_bubble_id;
     SteerCallback done = std::move(operation->done);
     auto finish = [&done](bool ok, const QString& message) {
       if (done) {
@@ -792,6 +812,10 @@ bool ProfileWorker::HandleActivePromptResponse(int id,
         execution_generation_ = -1;
       }
       Note(QStringLiteral("steer failed: %1").arg(error));
+      if (!local_bubble_id.isEmpty()) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        RemoveLocalPromptBubbleLocked(local_bubble_id);
+      }
       qInfo("steer result profile=%s status=%s error=%s", qUtf8Printable(name_),
             qUtf8Printable(status), qUtf8Printable(error));
       finish(false, error);
@@ -803,10 +827,16 @@ bool ProfileWorker::HandleActivePromptResponse(int id,
       // The claim was already gone (a turn that finished between our snapshot
       // and the request): keep the words, deliver them as the next prompt.
       execution_generation_ = -1;
+      bool bubble_present = false;
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        bubble_present = HasLocalPromptBubbleLocked(local_bubble_id);
+      }
       Note(
           QStringLiteral("Steer: the turn had already finished, so the text "
                          "was sent as a new prompt"));
-      SendPromptInternal(text, 0, false, false, {}, false, {}, true);
+      SendPromptInternal(text, 0, false, false, {}, false, {}, true,
+                         bubble_present);
       qInfo("steer fallback profile=%s status=%s delivered=%d",
             qUtf8Printable(name_), qUtf8Printable(status), delivered ? 1 : 0);
       finish(true, QStringLiteral("sent as a new prompt"));
@@ -816,8 +846,12 @@ bool ProfileWorker::HandleActivePromptResponse(int id,
     }
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      if (state_.selected_session_id == operation->session_id) {
-        AppendUserPromptLocked(text);
+      // The optimistic steer row is normally already in place. If a history
+      // reload replaced the transcript while the request was in flight, add
+      // the accepted words back rather than losing them.
+      if (state_.selected_session_id == operation->session_id &&
+          !HasLocalPromptBubbleLocked(local_bubble_id)) {
+        AppendUserPromptLocked(text, local_bubble_id, false);
         PublishLocked();
       }
     }
@@ -2078,7 +2112,9 @@ void ProfileWorker::Note(const QString& text) {
   PublishLocked();
 }
 
-void ProfileWorker::AppendUserPromptLocked(const QString& text) {
+void ProfileWorker::AppendUserPromptLocked(const QString& text,
+                                           const QString& local_bubble_id,
+                                           bool begin_turn) {
   const QString trimmed = text.trimmed();
   if (trimmed.isEmpty()) {
     return;
@@ -2095,15 +2131,45 @@ void ProfileWorker::AppendUserPromptLocked(const QString& text) {
     }
   }
   ChatMessage message;
+  message.id = local_bubble_id;
   message.role = MessageRole::kUser;
   message.author = QStringLiteral("You");
   message.timestamp = QDateTime::currentDateTime();
   message.blocks = ParseMarkdown(trimmed);
   state_.messages.push_back(std::move(message));
-  BeginTurn(&state_);
+  if (begin_turn) {
+    BeginTurn(&state_);
+  }
   foreground_ = true;
   state_.unread = 0;
   NoteActivityLocked();
+}
+
+bool ProfileWorker::HasLocalPromptBubbleLocked(
+    const QString& local_bubble_id) const {
+  if (local_bubble_id.isEmpty()) {
+    return false;
+  }
+  return std::any_of(state_.messages.begin(), state_.messages.end(),
+                     [&local_bubble_id](const ChatMessage& message) {
+                       return message.id == local_bubble_id;
+                     });
+}
+
+void ProfileWorker::RemoveLocalPromptBubbleLocked(
+    const QString& local_bubble_id) {
+  if (local_bubble_id.isEmpty()) {
+    return;
+  }
+  const auto target =
+      std::find_if(state_.messages.begin(), state_.messages.end(),
+                   [&local_bubble_id](const ChatMessage& message) {
+                     return message.id == local_bubble_id;
+                   });
+  if (target != state_.messages.end()) {
+    state_.messages.erase(target);
+    PublishLocked();
+  }
 }
 
 void ProfileWorker::RecordInjectedPrompt(const QString& text,
@@ -2172,6 +2238,20 @@ void ProfileWorker::SteerWithCallback(const QString& text, SteerCallback done) {
   operation.text = text.trimmed();
   operation.execution_generation = generation;
   operation.done = std::move(done);
+  operation.local_bubble_id =
+      QUuid::createUuid().toString(QUuid::WithoutBraces);
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (state_.selected_session_id == session_id) {
+      // Append at submit time, not on the steer ACK. A prompt submitted while
+      // the steer waits must appear after it, never before it. The running
+      // turn already owns the turn state; do not start a new one here.
+      AppendUserPromptLocked(operation.text, operation.local_bubble_id, false);
+      PublishLocked();
+    } else {
+      operation.local_bubble_id.clear();
+    }
+  }
   // Steers share the prompt queue so an attachment-backed prompt and a steer
   // can never race on the socket. The callback fires from the response handler,
   // in exactly the order the user submitted them.
@@ -2723,12 +2803,22 @@ void ProfileWorker::OnSocketDisconnected() {
     return;
   }
   std::vector<SteerCallback> prompt_callbacks;
+  QStringList local_bubbles;
   for (PromptOperation& operation : prompt_operations_.operations()) {
     if (operation.done) {
       prompt_callbacks.push_back(std::move(operation.done));
     }
+    if (!operation.local_bubble_id.isEmpty()) {
+      local_bubbles.push_back(operation.local_bubble_id);
+    }
   }
   prompt_operations_.Clear();
+  if (!local_bubbles.isEmpty()) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const QString& id : local_bubbles) {
+      RemoveLocalPromptBubbleLocked(id);
+    }
+  }
   pending_interrupts_.clear();
   for (DeferredPrompt& prompt : deferred_prompts_) {
     if (prompt.done) {
