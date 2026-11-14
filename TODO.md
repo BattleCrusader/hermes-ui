@@ -38,6 +38,29 @@ not enough; only then is the row removed.
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-14 (false turn-failed notifications)
+
+**Background sync errors no longer end a live turn or raise “Turn failed”.**
+
+- [x] Root cause: `ProfileWorker::PublishError` cleared `running` for every
+      error, including the 10 s `FetchSessions` refresh. A control-socket
+      timeout during a live turn therefore looked like a completion, and
+      `OnGenerationFinished` chose `kTurnError` from any non-empty
+      `error_text`.
+- [x] Added `turn_failed` / `turn_error_text` to `ProfileSnapshot`. Only a
+      `message.complete status=error` or a fatal prompt/stream error sets them;
+      background fetch, control-socket, settings, and artifact errors only
+      update the status-bar `error_text`.
+- [x] `PublishError(error, ends_turn)` now ends a turn only for prompt-submit,
+      gateway `error` events, and similar fatal paths. Success completion
+      clears stale background errors before the next notification.
+- [x] Fatal stream errors close the streaming bubble so the completion
+      transition is visible even without a later `message.complete`.
+- [x] Added `turnOutcomeSeparatesSyncErrorsFromTurnFailures` covering
+      control-socket timeouts during a turn, fatal submit errors, idle errors,
+      and streaming shutdown. Full native suite **10/10 passed** in 25.41 s.
+- [x] Commit `325f902`, pushed to `main`.
+
 ## Status update — 2026-11-14 (kanban lane scroll)
 
 **The done lane is reachable again on boards wider than the viewport.**
