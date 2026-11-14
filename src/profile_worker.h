@@ -9,6 +9,7 @@
 #include <QObject>
 #include <QString>
 #include <atomic>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -18,6 +19,7 @@
 #include "src/gateway_endpoint.h"
 #include "src/model.h"
 #include "src/pending_prompt_tracker.h"
+#include "src/prompt_operation_queue.h"
 
 class QTimer;
 
@@ -175,18 +177,17 @@ class ProfileWorker : public QObject {
                           bool confirm_empty_truncate,
                           bool confirm_deep_truncate,
                           const QStringList& attachments = {},
-                          bool queued = false, SteerCallback done = {});
-  void SubmitPromptFrame(const QString& session_id, const QString& text,
-                         qint64 truncate_before_row_id,
-                         bool confirm_empty_truncate,
-                         bool confirm_deep_truncate, bool queued,
-                         SteerCallback done = {});
-  bool QueuePromptAttachments(const QString& session_id, const QString& text,
-                              qint64 truncate_before_row_id,
-                              bool confirm_empty_truncate,
-                              bool confirm_deep_truncate,
-                              const QStringList& attachments,
-                              SteerCallback done = {});
+                          bool queued = false, SteerCallback done = {},
+                          bool after_active = false);
+  void StartNextPromptOperation();
+  void SendActivePromptAttachments();
+  void SubmitActivePromptOperation();
+  bool HandleActivePromptResponse(int id, const QJsonObject& result,
+                                  const QString& error);
+  void FailActivePromptOperation(const QString& error, bool ends_turn);
+  void FinishActivePromptOperation();
+  void FlushDeferredPrompts();
+  void FailDeferredPrompts(const QString& error);
   void FetchSessions();
   void LoadCachedState();
   void FlushSessionCache();
@@ -254,7 +255,6 @@ class ProfileWorker : public QObject {
   // Last event accepted for the selected session. Refresh() uses it to refetch
   // history when the socket stream goes quiet mid-turn.
   qint64 last_event_ms_ = 0;
-  QString pending_prompt_;
   QString attached_session_id_;
   QString runtime_session_id_;
   int pending_create_id_ = -1;
@@ -269,9 +269,6 @@ class ProfileWorker : public QObject {
   // session.interrupt answers are not user-facing: a turn that settled between
   // the click and the RPC is a normal race, not an error.
   std::set<int> pending_interrupts_;
-  std::map<int, QString> pending_steers_;
-  std::map<int, SteerCallback> pending_steer_callbacks_;
-  std::map<int, SteerCallback> pending_prompt_callbacks_;
   std::map<int, quint64> pending_rpc_;
   struct PendingSessionMutation {
     QString session_id;
@@ -280,27 +277,22 @@ class ProfileWorker : public QObject {
     bool remove = false;
   };
   std::map<int, PendingSessionMutation> pending_session_mutations_;
-  int pending_prompt_request_id_ = -1;
-  // prompt.submit mode for the request above. Normal sends already rendered
-  // their user row locally, so the admission must not be announced again.
-  bool pending_prompt_queued_ = false;
-  SteerCallback deferred_prompt_callback_;
-  QString pending_prompt_session_id_;
+  // Outbound prompt/steer work is serialized: one RPC acknowledgement at a
+  // time, in submission order. Deferred prompts wait for session.create, then
+  // enter the same queue.
+  PromptOperationQueue prompt_operations_;
+  struct DeferredPrompt {
+    QString text;
+    bool queued = false;
+    QStringList attachments;
+    SteerCallback done;
+  };
+  std::deque<DeferredPrompt> deferred_prompts_;
   QString admission_id_;
   QString admission_status_;
   PendingPromptTracker pending_prompts_;
   bool pending_prompts_baseline_ready_ = false;
   int pending_receipt_id_ = -1;
-  struct PendingAttachedPrompt {
-    QString session_id;
-    QString text;
-    qint64 truncate_before_row_id = 0;
-    bool confirm_empty_truncate = false;
-    bool confirm_deep_truncate = false;
-    SteerCallback done;
-    std::set<int> request_ids;
-  };
-  std::unique_ptr<PendingAttachedPrompt> pending_attached_prompt_;
   bool history_loaded_ = false;
   bool cache_dirty_ = false;
   bool pending_new_session_ = false;

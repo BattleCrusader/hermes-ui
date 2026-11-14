@@ -459,7 +459,6 @@ void ProfileWorker::SelectSession(const QString& session_id) {
     history_loaded_ = false;
     attached_session_id_.clear();
     runtime_session_id_.clear();
-    pending_attached_prompt_.reset();
     state_.requests.clear();
     state_.todos.clear();
     state_.todo_revision = 0;
@@ -513,84 +512,13 @@ void ProfileWorker::SendPromptAtWithAttachments(
                      confirm_deep_truncate, attachments);
 }
 
-void ProfileWorker::SubmitPromptFrame(const QString& session_id,
-                                      const QString& text,
-                                      qint64 truncate_before_row_id,
-                                      bool confirm_empty_truncate,
-                                      bool confirm_deep_truncate, bool queued,
-                                      SteerCallback done) {
-  if (socket_ == nullptr || !socket_->IsConnected()) {
-    if (done) {
-      done(false, QStringLiteral("Gateway socket is not connected"));
-    }
-    PublishError(QStringLiteral("Gateway socket is not connected"), true);
-    return;
-  }
-  qInfo("send session=%.12s chars=%lld truncate_row=%lld",
-        qUtf8Printable(session_id), static_cast<qint64>(text.size()),
-        truncate_before_row_id);
-  pending_prompt_queued_ = queued;
-  if (truncate_before_row_id > 0) {
-    pending_prompt_request_id_ =
-        socket_->SendPromptAt(session_id, text, truncate_before_row_id,
-                              confirm_empty_truncate, confirm_deep_truncate);
-  } else {
-    pending_prompt_request_id_ = socket_->SendPrompt(session_id, text, queued);
-  }
-  pending_prompt_session_id_ = session_id;
-  if (pending_prompt_request_id_ < 0) {
-    if (done) {
-      done(false, QStringLiteral("Could not submit the prompt"));
-    }
-    PublishError(QStringLiteral("Could not submit the prompt"), true);
-    return;
-  }
-  if (done) {
-    pending_prompt_callbacks_[pending_prompt_request_id_] = std::move(done);
-  }
-}
-
-bool ProfileWorker::QueuePromptAttachments(const QString& session_id,
-                                           const QString& text,
-                                           qint64 truncate_before_row_id,
-                                           bool confirm_empty_truncate,
-                                           bool confirm_deep_truncate,
-                                           const QStringList& attachments,
-                                           SteerCallback done) {
-  if (attachments.isEmpty() || socket_ == nullptr || !socket_->IsConnected()) {
-    return false;
-  }
-  auto pending = std::make_unique<PendingAttachedPrompt>();
-  pending->session_id = session_id;
-  pending->text = text;
-  pending->truncate_before_row_id = truncate_before_row_id;
-  pending->confirm_empty_truncate = confirm_empty_truncate;
-  pending->confirm_deep_truncate = confirm_deep_truncate;
-  for (const QString& path : attachments) {
-    if (path.trimmed().isEmpty()) {
-      continue;
-    }
-    const int id =
-        socket_->RequestRpc(AttachmentAttachMethod(path),
-                            BuildAttachmentAttachParams(path, session_id));
-    if (id >= 0) {
-      pending->request_ids.insert(id);
-    }
-  }
-  if (pending->request_ids.empty()) {
-    return false;
-  }
-  pending->done = std::move(done);
-  pending_attached_prompt_ = std::move(pending);
-  return true;
-}
-
 void ProfileWorker::SendPromptInternal(const QString& text,
                                        qint64 truncate_before_row_id,
                                        bool confirm_empty_truncate,
                                        bool confirm_deep_truncate,
                                        const QStringList& attachments,
-                                       bool queued, SteerCallback done) {
+                                       bool queued, SteerCallback done,
+                                       bool after_active) {
   const QString trimmed = text.trimmed();
   if (trimmed.isEmpty()) {
     if (done) {
@@ -598,8 +526,11 @@ void ProfileWorker::SendPromptInternal(const QString& text,
     }
     return;
   }
+
   QString session_id;
   bool missing_session = false;
+  bool defer = false;
+  bool need_new_session = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     if (pending_new_session_ || pending_create_id_ >= 0) {
@@ -609,24 +540,49 @@ void ProfileWorker::SendPromptInternal(const QString& text,
       if (truncate_before_row_id > 0) {
         missing_session = true;
       } else {
-        pending_prompt_ = trimmed;
-        deferred_prompt_callback_ = std::move(done);
-        return;
+        defer = true;
       }
-    }
-    if (!missing_session) {
+    } else {
       session_id = state_.selected_session_id;
-    }
-    if (session_id.isEmpty()) {
-      // A rewind without a session is an error; otherwise hold ordinary
-      // prompts until NewSession's ACK arrives.
-      missing_session = truncate_before_row_id > 0;
-      if (!missing_session) {
-        pending_prompt_ = trimmed;
-        deferred_prompt_callback_ = std::move(done);
+      if (session_id.isEmpty()) {
+        // A rewind without a session is an error; otherwise hold ordinary
+        // prompts until NewSession's ACK arrives.
+        if (truncate_before_row_id > 0) {
+          missing_session = true;
+        } else {
+          defer = true;
+          need_new_session = true;
+        }
       }
+    }
+    if (!defer && !missing_session) {
+      if (truncate_before_row_id > 0) {
+        auto target = std::find_if(
+            state_.messages.begin(), state_.messages.end(),
+            [truncate_before_row_id](const ChatMessage& message) {
+              return message.role == MessageRole::kUser &&
+                     message.row_id == truncate_before_row_id;
+            });
+        if (target != state_.messages.end()) {
+          state_.messages.erase(target, state_.messages.end());
+        }
+      }
+      if (!queued) {
+        ChatMessage message;
+        message.role = MessageRole::kUser;
+        message.author = QStringLiteral("You");
+        message.timestamp = QDateTime::currentDateTime();
+        message.raw_text = trimmed;
+        message.blocks = ParseMarkdown(trimmed);
+        state_.messages.push_back(std::move(message));
+        BeginTurn(&state_);
+        foreground_ = true;
+        state_.unread = 0;
+      }
+      PublishLocked();
     }
   }
+
   if (missing_session) {
     if (done) {
       done(false, QStringLiteral("No session is selected to edit"));
@@ -634,47 +590,328 @@ void ProfileWorker::SendPromptInternal(const QString& text,
     PublishError(QStringLiteral("No session is selected to edit"));
     return;
   }
-  if (session_id.isEmpty()) {
-    NewSession();
+  if (defer) {
+    // Keep every prompt submitted before session.create succeeds, in order.
+    // The old single pending slot silently dropped all but the last one.
+    deferred_prompts_.push_back(
+        DeferredPrompt{trimmed, queued, attachments, std::move(done)});
+    if (need_new_session) {
+      NewSession();
+    }
     return;
   }
 
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (truncate_before_row_id > 0) {
-      auto target =
-          std::find_if(state_.messages.begin(), state_.messages.end(),
-                       [truncate_before_row_id](const ChatMessage& message) {
-                         return message.role == MessageRole::kUser &&
-                                message.row_id == truncate_before_row_id;
-                       });
-      if (target != state_.messages.end()) {
-        state_.messages.erase(target, state_.messages.end());
+  PromptOperation operation;
+  operation.kind = PromptOperation::Kind::kPrompt;
+  operation.session_id = session_id;
+  operation.text = trimmed;
+  operation.truncate_before_row_id = truncate_before_row_id;
+  operation.confirm_empty_truncate = confirm_empty_truncate;
+  operation.confirm_deep_truncate = confirm_deep_truncate;
+  operation.queued = queued;
+  operation.attachments = attachments;
+  operation.done = std::move(done);
+  if (after_active) {
+    prompt_operations_.PushAfterActive(std::move(operation));
+  } else {
+    prompt_operations_.PushBack(std::move(operation));
+  }
+  StartNextPromptOperation();
+}
+
+void ProfileWorker::StartNextPromptOperation() {
+  if (shutting_down_ || prompt_operations_.active() ||
+      !prompt_operations_.BeginNext()) {
+    return;
+  }
+  if (socket_ == nullptr || !socket_->IsConnected()) {
+    const QString error = QStringLiteral("Gateway socket is not connected");
+    std::vector<SteerCallback> callbacks;
+    bool ends_turn = false;
+    while (true) {
+      PromptOperation* operation = prompt_operations_.Active();
+      if (operation == nullptr) {
+        if (!prompt_operations_.BeginNext()) {
+          break;
+        }
+        operation = prompt_operations_.Active();
       }
+      if (operation == nullptr) {
+        break;
+      }
+      ends_turn = ends_turn ||
+                  (operation->kind == PromptOperation::Kind::kPrompt &&
+                   !operation->queued);
+      if (operation->done) {
+        callbacks.push_back(std::move(operation->done));
+      }
+      prompt_operations_.FinishActive();
+    }
+    prompt_operations_.Clear();
+    for (SteerCallback& done : callbacks) {
+      done(false, error);
+    }
+    PublishError(error, ends_turn);
+    return;
+  }
+
+  PromptOperation* operation = prompt_operations_.Active();
+  if (operation == nullptr) {
+    return;
+  }
+  if (!operation->attachments.isEmpty()) {
+    SendActivePromptAttachments();
+    return;
+  }
+  SubmitActivePromptOperation();
+}
+
+void ProfileWorker::SendActivePromptAttachments() {
+  PromptOperation* operation = prompt_operations_.Active();
+  if (operation == nullptr) {
+    return;
+  }
+  if (socket_ == nullptr || !socket_->IsConnected()) {
+    FailActivePromptOperation(
+        QStringLiteral("Gateway socket is not connected"), false);
+    return;
+  }
+  for (const QString& path : operation->attachments) {
+    if (path.trimmed().isEmpty()) {
+      continue;
+    }
+    const int id =
+        socket_->RequestRpc(AttachmentAttachMethod(path),
+                            BuildAttachmentAttachParams(path,
+                                                        operation->session_id));
+    if (id >= 0) {
+      operation->attachment_request_ids.insert(id);
+    }
+  }
+  // No attachment verb could be sent: keep the text and submit it without
+  // inline tickets rather than dropping the prompt.
+  if (operation->attachment_request_ids.empty()) {
+    SubmitActivePromptOperation();
+  }
+}
+
+void ProfileWorker::SubmitActivePromptOperation() {
+  PromptOperation* operation = prompt_operations_.Active();
+  if (operation == nullptr) {
+    return;
+  }
+  if (socket_ == nullptr || !socket_->IsConnected()) {
+    FailActivePromptOperation(
+        QStringLiteral("Gateway socket is not connected"),
+        operation->kind == PromptOperation::Kind::kPrompt &&
+            !operation->queued);
+    return;
+  }
+
+  if (operation->kind == PromptOperation::Kind::kSteer) {
+    const int id = socket_->SteerSession(operation->session_id, operation->text,
+                                         operation->execution_generation);
+    if (id < 0) {
+      FailActivePromptOperation(QStringLiteral("gateway is not connected"),
+                                false);
+      return;
+    }
+    operation->request_id = id;
+    return;
+  }
+
+  qInfo("send session=%.12s chars=%lld truncate_row=%lld queued=%d",
+        qUtf8Printable(operation->session_id),
+        static_cast<qint64>(operation->text.size()),
+        operation->truncate_before_row_id, operation->queued ? 1 : 0);
+  int id = -1;
+  if (operation->truncate_before_row_id > 0) {
+    id = socket_->SendPromptAt(operation->session_id, operation->text,
+                               operation->truncate_before_row_id,
+                               operation->confirm_empty_truncate,
+                               operation->confirm_deep_truncate);
+  } else {
+    id = socket_->SendPrompt(operation->session_id, operation->text,
+                             operation->queued);
+  }
+  if (id < 0) {
+    FailActivePromptOperation(QStringLiteral("Could not submit the prompt"),
+                              !operation->queued);
+    return;
+  }
+  operation->request_id = id;
+}
+
+void ProfileWorker::FailActivePromptOperation(const QString& error,
+                                              bool ends_turn) {
+  PromptOperation* operation = prompt_operations_.Active();
+  if (operation == nullptr) {
+    return;
+  }
+  SteerCallback done = std::move(operation->done);
+  if (done) {
+    done(false, error);
+  }
+  PublishError(error, ends_turn);
+  FinishActivePromptOperation();
+  StartNextPromptOperation();
+}
+
+void ProfileWorker::FinishActivePromptOperation() {
+  prompt_operations_.FinishActive();
+}
+
+bool ProfileWorker::HandleActivePromptResponse(int id,
+                                               const QJsonObject& result,
+                                               const QString& error) {
+  PromptOperation* operation = prompt_operations_.Active();
+  if (operation == nullptr) {
+    return false;
+  }
+
+  if (operation->kind == PromptOperation::Kind::kSteer) {
+    if (id != operation->request_id) {
+      return false;
+    }
+    const QString text = operation->text;
+    SteerCallback done = std::move(operation->done);
+    auto finish = [&done](bool ok, const QString& message) {
+      if (done) {
+        done(ok, message);
+      }
+    };
+    const QString status = result.value(QStringLiteral("status")).toString();
+    const bool delivered =
+        result.value(QStringLiteral("delivered")).toBool(true);
+    const bool queued = status == QStringLiteral("queued");
+    if (!error.isEmpty()) {
+      // Never replay failed steer input as a fresh prompt: the gateway may
+      // have delivered it despite the error, and a failure is not consent to
+      // start a new turn.
+      if (error.contains(QStringLiteral("stale_generation"))) {
+        execution_generation_ = -1;
+      }
+      Note(QStringLiteral("steer failed: %1").arg(error));
+      qInfo("steer result profile=%s status=%s error=%s", qUtf8Printable(name_),
+            qUtf8Printable(status), qUtf8Printable(error));
+      finish(false, error);
+      FinishActivePromptOperation();
+      StartNextPromptOperation();
+      return true;
     }
     if (!queued) {
-      ChatMessage message;
-      message.role = MessageRole::kUser;
-      message.author = QStringLiteral("You");
-      message.timestamp = QDateTime::currentDateTime();
-      message.raw_text = trimmed;
-      message.blocks = ParseMarkdown(trimmed);
-      state_.messages.push_back(std::move(message));
-      BeginTurn(&state_);
-      foreground_ = true;
-      state_.unread = 0;
+      // The claim was already gone (a turn that finished between our snapshot
+      // and the request): keep the words, deliver them as the next prompt.
+      execution_generation_ = -1;
+      Note(
+          QStringLiteral("Steer: the turn had already finished, so the text "
+                         "was sent as a new prompt"));
+      SendPromptInternal(text, 0, false, false, {}, false, {}, true);
+      qInfo("steer fallback profile=%s status=%s delivered=%d",
+            qUtf8Printable(name_), qUtf8Printable(status), delivered ? 1 : 0);
+      finish(true, QStringLiteral("sent as a new prompt"));
+      FinishActivePromptOperation();
+      StartNextPromptOperation();
+      return true;
     }
-    PublishLocked();
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (state_.selected_session_id == operation->session_id) {
+        AppendUserPromptLocked(text);
+        PublishLocked();
+      }
+    }
+    Note(
+        QStringLiteral("Steer queued — the model reads it after the current "
+                       "tool call"));
+    qInfo("steer result profile=%s status=%s error=%s", qUtf8Printable(name_),
+          qUtf8Printable(status), qUtf8Printable(error));
+    qInfo("steer profile=%s text=%s", qUtf8Printable(name_),
+          qUtf8Printable(text));
+    finish(true, QString());
+    FinishActivePromptOperation();
+    StartNextPromptOperation();
+    return true;
   }
 
-  if (QueuePromptAttachments(session_id, trimmed, truncate_before_row_id,
-                             confirm_empty_truncate, confirm_deep_truncate,
-                             attachments, std::move(done))) {
-    return;
+  if (operation->attachment_request_ids.erase(id) > 0) {
+    if (!error.isEmpty()) {
+      // The prompt text already carries the staged paths, and the gateway can
+      // still read them, so a failed inline attach is a downgrade rather than
+      // a failed send. Do not surface it as an attachment error.
+      qWarning("profile %s: inline attachment downgraded: %s",
+               qUtf8Printable(name_), qUtf8Printable(error));
+    }
+    if (operation->attachment_request_ids.empty()) {
+      SubmitActivePromptOperation();
+    }
+    return true;
   }
-  SubmitPromptFrame(session_id, trimmed, truncate_before_row_id,
-                    confirm_empty_truncate, confirm_deep_truncate, queued,
-                    std::move(done));
+
+  if (id != operation->request_id) {
+    return false;
+  }
+  const bool queued = operation->queued;
+  SteerCallback done = std::move(operation->done);
+  if (!error.isEmpty()) {
+    if (done) {
+      done(false, error);
+    }
+    // A rejected run-after admission must not end the turn that is already
+    // running. Only a normal prompt submit owns the turn it starts.
+    PublishError(error, !queued);
+    FinishActivePromptOperation();
+    StartNextPromptOperation();
+    return true;
+  }
+  // prompt.submit returns an admission receipt. Keep it so a reconnect can
+  // ask whether the turn started, finished, or was lost.
+  admission_id_ = result.value(QStringLiteral("admission_id")).toString();
+  admission_status_ = result.value(QStringLiteral("status")).toString();
+  // A normal send already appended its user row optimistically. Mark its
+  // admission as surfaced so the queued -> started transition does not add a
+  // second bubble. Queued sends have no user row yet, so they stay
+  // announceable and appear exactly when the gateway starts them.
+  if (!queued && !admission_id_.isEmpty()) {
+    pending_prompts_.ClaimAnnouncement(admission_id_);
+  }
+  // A cancel-then-send (Inject) can interrupt the old generation and start a
+  // queued one on a freshly re-bound subscription. Re-attach after every
+  // submit so the stream follows the new turn and replays anything the old
+  // subscription missed.
+  attached_session_id_.clear();
+  AttachIfForeground();
+  if (done) {
+    done(true, QString());
+  }
+  FinishActivePromptOperation();
+  StartNextPromptOperation();
+  return true;
+}
+
+void ProfileWorker::FlushDeferredPrompts() {
+  std::deque<DeferredPrompt> deferred = std::move(deferred_prompts_);
+  deferred_prompts_.clear();
+  for (DeferredPrompt& prompt : deferred) {
+    if (prompt.text.trimmed().isEmpty()) {
+      if (prompt.done) {
+        prompt.done(false, QStringLiteral("A prompt cannot be empty"));
+      }
+      continue;
+    }
+    SendPromptInternal(prompt.text, 0, false, false, prompt.attachments,
+                       prompt.queued, std::move(prompt.done));
+  }
+}
+
+void ProfileWorker::FailDeferredPrompts(const QString& error) {
+  std::deque<DeferredPrompt> deferred = std::move(deferred_prompts_);
+  deferred_prompts_.clear();
+  for (DeferredPrompt& prompt : deferred) {
+    if (prompt.done) {
+      prompt.done(false, error);
+    }
+  }
 }
 
 void ProfileWorker::NewSession() { NewSessionInDir(QString()); }
@@ -696,12 +933,8 @@ void ProfileWorker::NewSessionInDir(const QString& cwd,
   pending_create_id_ = socket_->CreateSession(QString(), cwd);
   if (pending_create_id_ < 0) {
     pending_create_project_id_.clear();
+    FailDeferredPrompts(QStringLiteral("Could not request a new session"));
     PublishError(QStringLiteral("Could not request a new session"));
-    pending_prompt_.clear();
-    auto deferred = std::move(deferred_prompt_callback_);
-    if (deferred) {
-      deferred(false, QStringLiteral("Could not request a new session"));
-    }
     return;
   }
   std::lock_guard<std::mutex> lock(mutex_);
@@ -1909,32 +2142,41 @@ void ProfileWorker::SteerWithCallback(const QString& text, SteerCallback done) {
     return;
   }
   QString session_id;
+  int generation = -1;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     session_id = state_.selected_session_id;
+    generation = execution_generation_;
   }
-  if (execution_generation_ < 0) {
+  if (generation < 0) {
     // Nothing has claimed this session since we attached, so there is no turn
     // to steer: send the words as the next prompt instead of erroring (the
-    // desktop queues a steer typed at an idle chat the same way).
+    // desktop queues a steer typed at an idle chat the same way). Append now,
+    // behind any prompt the user submitted earlier while the steer waits.
     Note(
         QStringLiteral("/steer: no turn is running, so the text was sent as "
                        "a new prompt"));
-    SendPrompt(text);
-    finish(true, QStringLiteral("sent as a new prompt"));
+    SendPromptInternal(text, 0, false, false, {}, false,
+                       [finish](bool ok, const QString& message) {
+                         finish(ok, message.isEmpty()
+                                        ? QStringLiteral(
+                                              "sent as a new prompt")
+                                        : message);
+                       });
     return;
   }
-  const int id =
-      socket_->SteerSession(session_id, text.trimmed(), execution_generation_);
-  if (id < 0) {
-    PublishError(QStringLiteral("gateway is not connected"));
-    finish(false, QStringLiteral("gateway is not connected"));
-    return;
-  }
-  pending_steers_[id] = text.trimmed();
-  if (done) {
-    pending_steer_callbacks_[id] = std::move(done);
-  }
+
+  PromptOperation operation;
+  operation.kind = PromptOperation::Kind::kSteer;
+  operation.session_id = session_id;
+  operation.text = text.trimmed();
+  operation.execution_generation = generation;
+  operation.done = std::move(done);
+  // Steers share the prompt queue so an attachment-backed prompt and a steer
+  // can never race on the socket. The callback fires from the response handler,
+  // in exactly the order the user submitted them.
+  prompt_operations_.PushBack(std::move(operation));
+  StartNextPromptOperation();
 }
 
 void ProfileWorker::FinishHubRequest(quint64 token, const QString& route) {
@@ -2481,20 +2723,19 @@ void ProfileWorker::OnSocketDisconnected() {
     return;
   }
   std::vector<SteerCallback> prompt_callbacks;
-  for (auto& entry : pending_prompt_callbacks_) {
-    if (entry.second) {
-      prompt_callbacks.push_back(std::move(entry.second));
+  for (PromptOperation& operation : prompt_operations_.operations()) {
+    if (operation.done) {
+      prompt_callbacks.push_back(std::move(operation.done));
     }
   }
-  pending_prompt_callbacks_.clear();
+  prompt_operations_.Clear();
   pending_interrupts_.clear();
-  if (deferred_prompt_callback_) {
-    prompt_callbacks.push_back(std::move(deferred_prompt_callback_));
+  for (DeferredPrompt& prompt : deferred_prompts_) {
+    if (prompt.done) {
+      prompt_callbacks.push_back(std::move(prompt.done));
+    }
   }
-  if (pending_attached_prompt_ != nullptr &&
-      pending_attached_prompt_->done) {
-    prompt_callbacks.push_back(std::move(pending_attached_prompt_->done));
-  }
+  deferred_prompts_.clear();
   {
     std::lock_guard<std::mutex> lock(mutex_);
     state_.connected = false;
@@ -2502,9 +2743,7 @@ void ProfileWorker::OnSocketDisconnected() {
     state_.status_text = QStringLiteral("reconnecting");
     attached_session_id_.clear();
     runtime_session_id_.clear();
-    pending_attached_prompt_.reset();
     pending_session_mutations_.clear();
-    pending_prompt_request_id_ = -1;
     pending_receipt_id_ = -1;
     state_.requests.clear();
     PublishLocked();
@@ -3425,33 +3664,8 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
   if (shutting_down_) {
     return;
   }
-  if (const auto callback = pending_prompt_callbacks_.find(id);
-      callback != pending_prompt_callbacks_.end()) {
-    SteerCallback done = std::move(callback->second);
-    pending_prompt_callbacks_.erase(callback);
-    done(error.isEmpty(), error);
-  }
-  if (pending_attached_prompt_ != nullptr) {
-    auto attachment = pending_attached_prompt_->request_ids.find(id);
-    if (attachment != pending_attached_prompt_->request_ids.end()) {
-      pending_attached_prompt_->request_ids.erase(attachment);
-      if (!error.isEmpty()) {
-        // The prompt text already carries the staged paths, and the gateway
-        // can still read them, so a failed inline attach is a downgrade rather
-        // than a failed send. Do not surface it as an attachment error.
-        qWarning("profile %s: inline attachment downgraded: %s",
-                 qUtf8Printable(name_), qUtf8Printable(error));
-      }
-      if (pending_attached_prompt_->request_ids.empty()) {
-        auto pending = std::move(pending_attached_prompt_);
-        SubmitPromptFrame(pending->session_id, pending->text,
-                          pending->truncate_before_row_id,
-                          pending->confirm_empty_truncate,
-                          pending->confirm_deep_truncate, false,
-                          std::move(pending->done));
-      }
-      return;
-    }
+  if (HandleActivePromptResponse(id, result, error)) {
+    return;
   }
   if (const auto interrupt = pending_interrupts_.find(id);
       interrupt != pending_interrupts_.end()) {
@@ -3491,33 +3705,6 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
       }
       FetchSessions();
     }
-    return;
-  }
-  if (id == pending_prompt_request_id_) {
-    pending_prompt_request_id_ = -1;
-    if (!error.isEmpty()) {
-      pending_prompt_queued_ = false;
-      PublishError(error, true);
-      return;
-    }
-    // prompt.submit returns an admission receipt. Keep it so a reconnect can
-    // ask whether the turn started, finished, or was lost.
-    admission_id_ = result.value(QStringLiteral("admission_id")).toString();
-    admission_status_ = result.value(QStringLiteral("status")).toString();
-    // A normal send already appended its user row optimistically. Mark its
-    // admission as surfaced so the queued -> started transition does not add
-    // a second bubble. Queued sends have no user row yet, so they stay
-    // announceable and appear exactly when the gateway starts them.
-    if (!pending_prompt_queued_ && !admission_id_.isEmpty()) {
-      pending_prompts_.ClaimAnnouncement(admission_id_);
-    }
-    pending_prompt_queued_ = false;
-    // A cancel-then-send (Inject) can interrupt the old generation and start a
-    // queued one on a freshly re-bound subscription. Re-attach after every
-    // submit so the stream follows the new turn and replays anything the old
-    // subscription missed.
-    attached_session_id_.clear();
-    AttachIfForeground();
     return;
   }
   if (id == pending_receipt_id_) {
@@ -3645,66 +3832,6 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
           command_count);
     return;
   }
-  const auto steer_it = pending_steers_.find(id);
-  if (steer_it != pending_steers_.end()) {
-    const QString text = steer_it->second;
-    pending_steers_.erase(steer_it);
-    SteerCallback callback;
-    if (const auto cb = pending_steer_callbacks_.find(id);
-        cb != pending_steer_callbacks_.end()) {
-      callback = std::move(cb->second);
-      pending_steer_callbacks_.erase(cb);
-    }
-    auto finish = [&callback](bool ok, const QString& message) {
-      if (callback) {
-        callback(ok, message);
-      }
-    };
-    const QString status = result.value(QStringLiteral("status")).toString();
-    const bool delivered =
-        result.value(QStringLiteral("delivered")).toBool(true);
-    const bool queued = status == QStringLiteral("queued");
-    if (!error.isEmpty()) {
-      // Never replay failed steer input as a fresh prompt: the gateway may
-      // have delivered it despite the error, and a failure is not consent to
-      // start a new turn.
-      if (error.contains(QStringLiteral("stale_generation"))) {
-        execution_generation_ = -1;
-      }
-      Note(QStringLiteral("steer failed: %1").arg(error));
-      qInfo("steer result profile=%s status=%s error=%s", qUtf8Printable(name_),
-            qUtf8Printable(status), qUtf8Printable(error));
-      finish(false, error);
-      return;
-    }
-    if (!queued) {
-      // The claim was already gone (a turn that finished between our snapshot
-      // and the request): keep the words, deliver them as the next prompt.
-      execution_generation_ = -1;
-      Note(
-          QStringLiteral("Steer: the turn had already finished, so the text "
-                         "was sent as a new prompt"));
-      SendPrompt(text);
-      qInfo("steer fallback profile=%s status=%s delivered=%d",
-            qUtf8Printable(name_), qUtf8Printable(status), delivered ? 1 : 0);
-      finish(true, QStringLiteral("sent as a new prompt"));
-      return;
-    }
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      AppendUserPromptLocked(text);
-      PublishLocked();
-    }
-    Note(
-        QStringLiteral("Steer queued — the model reads it after the current "
-                       "tool call"));
-    qInfo("steer result profile=%s status=%s error=%s", qUtf8Printable(name_),
-          qUtf8Printable(status), qUtf8Printable(error));
-    qInfo("steer profile=%s text=%s", qUtf8Printable(name_),
-          qUtf8Printable(text));
-    finish(true, QString());
-    return;
-  }
   const auto command_it = pending_commands_.find(id);
   if (command_it != pending_commands_.end()) {
     const QString command = command_it->second;
@@ -3748,11 +3875,7 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
     const QString project_id =
         std::exchange(pending_create_project_id_, QString());
     if (!error.isEmpty()) {
-      pending_prompt_.clear();
-      auto deferred = std::move(deferred_prompt_callback_);
-      if (deferred) {
-        deferred(false, error);
-      }
+      FailDeferredPrompts(error);
       PublishError(error);
       return;
     }
@@ -3761,11 +3884,7 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
       session_id = result.value(QStringLiteral("stored_session_id")).toString();
     }
     if (session_id.isEmpty()) {
-      pending_prompt_.clear();
-      auto deferred = std::move(deferred_prompt_callback_);
-      if (deferred) {
-        deferred(false, QStringLiteral("Gateway created no session id"));
-      }
+      FailDeferredPrompts(QStringLiteral("Gateway created no session id"));
       PublishError(QStringLiteral("Gateway created no session id"));
       return;
     }
@@ -3815,17 +3934,7 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
       PublishLocked();
     }
     qInfo("new session %.12s", qUtf8Printable(session_id));
-    const QString prompt = std::exchange(pending_prompt_, QString());
-    auto deferred = std::move(deferred_prompt_callback_);
-    if (!prompt.isEmpty()) {
-      if (deferred) {
-        SendPromptWithCallback(prompt, std::move(deferred));
-      } else {
-        SendPrompt(prompt);
-      }
-    } else if (deferred) {
-      deferred(false, QStringLiteral("The pending prompt was cleared"));
-    }
+    FlushDeferredPrompts();
     return;
   }
 

@@ -10,6 +10,7 @@
 #include "src/gateway_events.h"
 #include "src/gateway_replay.h"
 #include "src/pending_prompt_tracker.h"
+#include "src/prompt_operation_queue.h"
 
 namespace hermes::ui {
 namespace {
@@ -50,6 +51,8 @@ class GatewayProtocolTest : public QObject {
   void replayAndReceiptParamsCarryWatermarks();
   void pendingAdmissionsParseAndBuildQueueActions();
   void pendingPromptTrackerAnnouncesOnlyProcessedQueueRows();
+  void promptOperationsStayFifoAndWaitForAck();
+  void promptFallbackKeepsPlaceAheadOfLaterSends();
   void connectionOperationParsesTargetsAndBuildsAnswer();
   void handoffPlatformAndStatusText();
 };
@@ -457,6 +460,74 @@ void GatewayProtocolTest::
                             QStringLiteral("started"))},
                        6000)
               .empty());
+}
+
+void GatewayProtocolTest::promptOperationsStayFifoAndWaitForAck() {
+  PromptOperationQueue queue;
+  auto operation = [](const QString& text) {
+    PromptOperation out;
+    out.text = text;
+    return out;
+  };
+  queue.PushBack(operation(QStringLiteral("first")));
+  queue.PushBack(operation(QStringLiteral("second")));
+  queue.PushBack(operation(QStringLiteral("third")));
+
+  QVERIFY(queue.BeginNext());
+  QVERIFY(queue.active());
+  QCOMPARE(queue.Active()->text, QStringLiteral("first"));
+  // A second request cannot be put on the wire while the first is awaiting
+  // its prompt.submit response.
+  QVERIFY(!queue.BeginNext());
+  QVERIFY(queue.FinishActive());
+
+  QVERIFY(queue.BeginNext());
+  QCOMPARE(queue.Active()->text, QStringLiteral("second"));
+  QVERIFY(queue.FinishActive());
+  QVERIFY(queue.BeginNext());
+  QCOMPARE(queue.Active()->text, QStringLiteral("third"));
+  QVERIFY(queue.FinishActive());
+  QVERIFY(!queue.BeginNext());
+  QVERIFY(queue.empty());
+
+  queue.PushBack(operation(QStringLiteral("stale")));
+  queue.Clear();
+  QVERIFY(queue.empty());
+  QVERIFY(!queue.active());
+}
+
+void GatewayProtocolTest::promptFallbackKeepsPlaceAheadOfLaterSends() {
+  PromptOperationQueue queue;
+  auto operation = [](const QString& text) {
+    PromptOperation out;
+    out.text = text;
+    return out;
+  };
+  queue.PushBack(operation(QStringLiteral("steer")));
+  queue.PushBack(operation(QStringLiteral("queued-later")));
+  QVERIFY(queue.BeginNext());
+  QCOMPARE(queue.Active()->text, QStringLiteral("steer"));
+
+  // An idle steer becomes a prompt. It was submitted before the queued send,
+  // so it must run immediately after the active steer, not at the tail.
+  queue.PushAfterActive(operation(QStringLiteral("fallback")));
+  QVERIFY(queue.FinishActive());
+  QVERIFY(queue.BeginNext());
+  QCOMPARE(queue.Active()->text, QStringLiteral("fallback"));
+  QVERIFY(queue.FinishActive());
+  QVERIFY(queue.BeginNext());
+  QCOMPARE(queue.Active()->text, QStringLiteral("queued-later"));
+  QVERIFY(queue.FinishActive());
+
+  // With no active operation the helper is just a front insert.
+  queue.PushAfterActive(operation(QStringLiteral("front")));
+  queue.PushBack(operation(QStringLiteral("back")));
+  QVERIFY(queue.BeginNext());
+  QCOMPARE(queue.Active()->text, QStringLiteral("front"));
+  QVERIFY(queue.FinishActive());
+  QVERIFY(queue.BeginNext());
+  QCOMPARE(queue.Active()->text, QStringLiteral("back"));
+  QVERIFY(queue.FinishActive());
 }
 
 void GatewayProtocolTest::connectionOperationParsesTargetsAndBuildsAnswer() {
