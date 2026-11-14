@@ -29,6 +29,7 @@
 #include "src/message_history.h"
 #include "src/prompt_submit.h"
 #include "src/session_usage.h"
+#include "src/turn_outcome.h"
 
 namespace hermes::ui {
 namespace {
@@ -452,6 +453,8 @@ void ProfileWorker::SelectSession(const QString& session_id) {
     state_.messages.clear();
     state_.unread = 0;
     state_.error_text.clear();
+    state_.turn_failed = false;
+    state_.turn_error_text.clear();
     state_.status_text = QStringLiteral("loading");
     history_loaded_ = false;
     attached_session_id_.clear();
@@ -520,7 +523,7 @@ void ProfileWorker::SubmitPromptFrame(const QString& session_id,
     if (done) {
       done(false, QStringLiteral("Gateway socket is not connected"));
     }
-    PublishError(QStringLiteral("Gateway socket is not connected"));
+    PublishError(QStringLiteral("Gateway socket is not connected"), true);
     return;
   }
   qInfo("send session=%.12s chars=%lld truncate_row=%lld",
@@ -539,7 +542,7 @@ void ProfileWorker::SubmitPromptFrame(const QString& session_id,
     if (done) {
       done(false, QStringLiteral("Could not submit the prompt"));
     }
-    PublishError(QStringLiteral("Could not submit the prompt"));
+    PublishError(QStringLiteral("Could not submit the prompt"), true);
     return;
   }
   if (done) {
@@ -657,10 +660,7 @@ void ProfileWorker::SendPromptInternal(const QString& text,
       message.raw_text = trimmed;
       message.blocks = ParseMarkdown(trimmed);
       state_.messages.push_back(std::move(message));
-      state_.running = true;
-      state_.running_session_id = state_.selected_session_id;
-      state_.error_text.clear();
-      state_.status_text = QStringLiteral("working");
+      BeginTurn(&state_);
       foreground_ = true;
       state_.unread = 0;
     }
@@ -799,6 +799,8 @@ void ProfileWorker::LoadCachedState() {
   state_.running = false;
   state_.status_text = QStringLiteral("syncing");
   state_.error_text.clear();
+  state_.turn_failed = false;
+  state_.turn_error_text.clear();
   // Keep history_loaded_ false: the gateway REST page is still authoritative
   // and will replace this snapshot as soon as the worker reaches it.
   history_loaded_ = false;
@@ -1865,10 +1867,7 @@ void ProfileWorker::AppendUserPromptLocked(const QString& text) {
   message.timestamp = QDateTime::currentDateTime();
   message.blocks = ParseMarkdown(trimmed);
   state_.messages.push_back(std::move(message));
-  state_.running = true;
-  state_.running_session_id = state_.selected_session_id;
-  state_.error_text.clear();
-  state_.status_text = QStringLiteral("working");
+  BeginTurn(&state_);
   foreground_ = true;
   state_.unread = 0;
   NoteActivityLocked();
@@ -3248,7 +3247,12 @@ void ProfileWorker::OnSocketEvent(const QString& type,
     const QString error = payload.value(QStringLiteral("error")).toString();
     const bool failed = payload.value(QStringLiteral("status")).toString() ==
                         QStringLiteral("error");
-    CompleteAssistant(failed && !error.isEmpty() ? error : text, failed);
+    const QString failure =
+        failed
+            ? (error.isEmpty() ? QStringLiteral("The turn failed") : error)
+            : QString();
+    const QString body = failed && text.trimmed().isEmpty() ? failure : text;
+    CompleteAssistant(body, failure);
     return;
   }
 
@@ -3337,6 +3341,10 @@ void ProfileWorker::OnSocketEvent(const QString& type,
       state_.running = running;
       state_.running_session_id =
           state_.running ? state_.selected_session_id : QString();
+      if (running) {
+        state_.turn_failed = false;
+        state_.turn_error_text.clear();
+      }
     }
     const QString model = payload.value(QStringLiteral("model")).toString();
     if (!model.isEmpty()) {
@@ -3407,7 +3415,8 @@ void ProfileWorker::OnSocketEvent(const QString& type,
 
   if (type == QStringLiteral("error")) {
     PublishError(payload.value(QStringLiteral("message"))
-                     .toString(QStringLiteral("Hermes reported an error")));
+                     .toString(QStringLiteral("Hermes reported an error")),
+                 true);
   }
 }
 
@@ -3488,7 +3497,7 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
     pending_prompt_request_id_ = -1;
     if (!error.isEmpty()) {
       pending_prompt_queued_ = false;
-      PublishError(error);
+      PublishError(error, true);
       return;
     }
     // prompt.submit returns an admission receipt. Keep it so a reconnect can
@@ -3787,6 +3796,8 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
       state_.running = false;
       state_.running_session_id.clear();
       state_.error_text.clear();
+      state_.turn_failed = false;
+      state_.turn_error_text.clear();
       state_.status_text = QStringLiteral("ready");
       history_loaded_ = true;
       attached_session_id_ = session_id;
@@ -3913,6 +3924,10 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
       state_.running = info.value(QStringLiteral("running")).toBool();
       state_.running_session_id =
           state_.running ? state_.selected_session_id : QString();
+    }
+    if (state_.running) {
+      state_.turn_failed = false;
+      state_.turn_error_text.clear();
     }
     if (!info.isEmpty() || result.contains(QStringLiteral("running")) ||
         result.contains(QStringLiteral("execution_generation"))) {
@@ -4081,7 +4096,9 @@ void ProfileWorker::AppendMoaReasoning(const QString& text, bool replace) {
   MaybePublishLocked();
 }
 
-void ProfileWorker::CompleteAssistant(const QString& text, bool error) {
+void ProfileWorker::CompleteAssistant(const QString& text,
+                                      const QString& failure) {
+  const bool error = !failure.isEmpty();
   bool superseded = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -4140,13 +4157,7 @@ void ProfileWorker::CompleteAssistant(const QString& text, bool error) {
     }
     state_.running = false;
     state_.running_session_id.clear();
-    if (error) {
-      state_.error_text = text;
-      state_.status_text = QStringLiteral("error");
-    } else {
-      state_.error_text.clear();
-      state_.status_text = QStringLiteral("ready");
-    }
+    CompleteTurn(&state_, failure);
     NoteActivityLocked();
     state_.requests.clear();
     admission_id_.clear();
@@ -4332,15 +4343,13 @@ void ProfileWorker::MaybePublishLocked() {
   PublishLocked();
 }
 
-void ProfileWorker::PublishError(const QString& error) {
+void ProfileWorker::PublishError(const QString& error, bool ends_turn) {
   if (shutting_down_) {
     return;
   }
   qWarning("profile %s: %s", qUtf8Printable(name_), qUtf8Printable(error));
   std::lock_guard<std::mutex> lock(mutex_);
-  state_.error_text = error;
-  state_.status_text = QStringLiteral("error");
-  state_.running = false;
+  ApplyProfileError(&state_, error, ends_turn);
   PublishLocked();
 }
 

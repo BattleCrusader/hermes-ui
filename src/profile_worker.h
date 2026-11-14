@@ -222,10 +222,10 @@ class ProfileWorker : public QObject {
   void AppendMoaReasoning(const QString& text, bool replace);
   ChatMessage* StreamingAssistantLocked();
   void ReparseStreamingLocked(ChatMessage* message);
-  void CompleteAssistant(const QString& text, bool error);
+  void CompleteAssistant(const QString& text, const QString& failure);
   void PublishLocked();
   void MaybePublishLocked();
-  void PublishError(const QString& error);
+  void PublishError(const QString& error, bool ends_turn = false);
   void NoteActivityLocked();
   void FinishHubRequest(quint64 token, const QString& route);
 

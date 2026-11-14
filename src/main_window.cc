@@ -5101,9 +5101,9 @@ void MainWindow::OnGenerationFinished(const ProfileSnapshot& snapshot,
   if (completion_flash_enabled_) {
     title_bar_->Flash();
   }
-  const NotificationKind kind = snapshot.error_text.isEmpty()
-                                    ? NotificationKind::kTurnDone
-                                    : NotificationKind::kTurnError;
+  const NotificationKind kind = snapshot.turn_failed
+                                    ? NotificationKind::kTurnError
+                                    : NotificationKind::kTurnDone;
   const QString session_name = SessionNotificationName(snapshot, session_id);
   const QString throttle_key = NotificationKindId(kind) + QLatin1Char(':') +
                                snapshot.name + QLatin1Char(':') + session_id;
@@ -5120,10 +5120,13 @@ void MainWindow::OnGenerationFinished(const ProfileSnapshot& snapshot,
         kind == NotificationKind::kTurnError
             ? QStringLiteral("Turn failed · %1").arg(profile_label)
             : QStringLiteral("Turn complete · %1").arg(profile_label);
+    const QString failure_text = snapshot.turn_error_text.isEmpty()
+                                     ? QStringLiteral("The turn failed")
+                                     : snapshot.turn_error_text;
     const QString body =
         kind == NotificationKind::kTurnError
-            ? QStringLiteral("%1: %2").arg(session_name,
-                                           snapshot.error_text.left(180))
+            ? QStringLiteral("%1: %2")
+                  .arg(session_name, failure_text.left(180))
             : QStringLiteral("%1 finished in %2s").arg(session_name, seconds);
     QString error;
     notifications_->Show(title, body, prefs.mute_sounds, &error);

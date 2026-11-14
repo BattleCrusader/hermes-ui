@@ -73,6 +73,7 @@
 #include "src/subagents.h"
 #include "src/terminal_widget.h"
 #include "src/todo_state.h"
+#include "src/turn_outcome.h"
 
 namespace {
 
@@ -126,6 +127,7 @@ class PreferencesTest : public QObject {
   void sessionImportAcceptsBareAndWrappedShapes();
   void composerMentionsCompletePathsAndPromoteRefs();
   void notificationPolicyMatchesDesktopAttentionRules();
+  void turnOutcomeSeparatesSyncErrorsFromTurnFailures();
   void subagentEventsBuildALiveDelegationTree();
   void audioDataUrlDecodesSpeechAndRejectsJunk();
   void attachmentAttachRpcMatchesMediaType();
@@ -3850,6 +3852,67 @@ void PreferencesTest::notificationPolicyMatchesDesktopAttentionRules() {
   QVERIFY(!throttle.Allow(QStringLiteral("turnDone:s1"), 10500));
   QVERIFY(throttle.Allow(QStringLiteral("turnDone:s2"), 10500));
   QVERIFY(throttle.Allow(QStringLiteral("turnDone:s1"), 11000));
+}
+
+void PreferencesTest::turnOutcomeSeparatesSyncErrorsFromTurnFailures() {
+  using hermes::ui::ApplyProfileError;
+  using hermes::ui::BeginTurn;
+  using hermes::ui::CompleteTurn;
+  using hermes::ui::ProfileSnapshot;
+
+  ProfileSnapshot snapshot;
+  snapshot.selected_session_id = QStringLiteral("session-a");
+  BeginTurn(&snapshot);
+  QVERIFY(snapshot.running);
+  QCOMPARE(snapshot.running_session_id, snapshot.selected_session_id);
+
+  // A control-socket timeout during a background refresh used to clear
+  // `running`, which made the shell announce the still-live turn as failed.
+  ApplyProfileError(&snapshot,
+                    QStringLiteral("gateway control socket returned no reply"),
+                    false);
+  QVERIFY(snapshot.running);
+  QCOMPARE(snapshot.running_session_id, snapshot.selected_session_id);
+  QVERIFY(!snapshot.turn_failed);
+  QVERIFY(snapshot.turn_error_text.isEmpty());
+  QCOMPARE(snapshot.error_text,
+           QStringLiteral("gateway control socket returned no reply"));
+
+  CompleteTurn(&snapshot, QString());
+  QVERIFY(!snapshot.running);
+  QVERIFY(!snapshot.turn_failed);
+  QVERIFY(snapshot.error_text.isEmpty());
+  QCOMPARE(snapshot.status_text, QStringLiteral("ready"));
+
+  // Fatal prompt submission errors do end the optimistic turn.
+  BeginTurn(&snapshot);
+  ApplyProfileError(&snapshot, QStringLiteral("Could not submit the prompt"),
+                    true);
+  QVERIFY(!snapshot.running);
+  QVERIFY(snapshot.turn_failed);
+  QCOMPARE(snapshot.turn_error_text,
+           QStringLiteral("Could not submit the prompt"));
+
+  // A fatal-looking error while idle is only a status error, not a turn.
+  ProfileSnapshot idle;
+  ApplyProfileError(&idle, QStringLiteral("Gateway created no session id"),
+                    true);
+  QVERIFY(!idle.running);
+  QVERIFY(!idle.turn_failed);
+  QCOMPARE(idle.error_text, QStringLiteral("Gateway created no session id"));
+
+  // A fatal stream error closes the streaming bubble so the completion
+  // transition is visible even when no `message.complete` follows.
+  ProfileSnapshot streaming;
+  streaming.selected_session_id = QStringLiteral("session-b");
+  hermes::ui::ChatMessage message;
+  message.role = hermes::ui::MessageRole::kAssistant;
+  message.streaming = true;
+  streaming.messages.push_back(message);
+  ApplyProfileError(&streaming, QStringLiteral("stream lost"), true);
+  QVERIFY(!streaming.messages.back().streaming);
+  QVERIFY(streaming.turn_failed);
+  QCOMPARE(streaming.turn_error_text, QStringLiteral("stream lost"));
 }
 
 void PreferencesTest::rightRailMultipleProjectGitPanes() {

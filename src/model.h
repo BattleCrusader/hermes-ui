@@ -345,6 +345,12 @@ struct ProfileSnapshot {
   QString selected_session_id;
   QString status_text;
   QString error_text;
+  // Set only when a real turn ends in failure (message.complete status=error
+  // or a fatal prompt/stream error). Background sync failures update
+  // `error_text` for the status bar but must not make the next completion
+  // notification say "Turn failed".
+  bool turn_failed = false;
+  QString turn_error_text;
   QString gateway_version;
   QString model;
   QString provider;
