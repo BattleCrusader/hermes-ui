@@ -1069,6 +1069,130 @@ class AgentHeaderButton : public QPushButton {
   bool expanded_ = false;
 };
 
+// A repository header keeps the name and change count visible while the card
+// body is collapsed; the full path stays in the tooltip. Child labels are
+// mouse-transparent so the whole row is one expand/collapse target.
+class GitRepoHeaderButton : public QPushButton {
+ public:
+  GitRepoHeaderButton(const Theme& theme, const QString& suffix,
+                      QWidget* parent)
+      : QPushButton(parent) {
+    setObjectName(QStringLiteral("rightRailGitRepoHeader") + suffix);
+    setProperty("gitRepoHeader", true);
+    setProperty("expanded", true);
+    setFlat(true);
+    setText(QString());
+    setCursor(Qt::PointingHandCursor);
+    setFocusPolicy(Qt::StrongFocus);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    setMinimumHeight(28);
+    setMinimumWidth(0);
+
+    auto* layout = new QHBoxLayout(this);
+    layout->setContentsMargins(3, 2, 3, 2);
+    layout->setSpacing(6);
+    chevron_ = new QLabel(this);
+    chevron_->setObjectName(QStringLiteral("rightRailGitRepoChevron") +
+                            suffix);
+    chevron_->setText(QStringLiteral("\u25be"));
+    chevron_->setFixedWidth(12);
+    chevron_->setAlignment(Qt::AlignCenter);
+    chevron_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    layout->addWidget(chevron_);
+    title_ = new QLabel(this);
+    title_->setObjectName(QStringLiteral("rightRailGitRepoName") + suffix);
+    title_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    title_->setMinimumWidth(0);
+    title_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    layout->addWidget(title_, 1);
+    badge_ = new QLabel(this);
+    badge_->setObjectName(QStringLiteral("rightRailGitRepoBadge") + suffix);
+    badge_->setProperty("gitRepoBadge", true);
+    badge_->setAlignment(Qt::AlignCenter);
+    badge_->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    badge_->hide();
+    layout->addWidget(badge_);
+    SetTheme(theme);
+  }
+
+  void SetTheme(const Theme& theme) {
+    chevron_->setFont(theme.UiFont(10, QFont::Normal));
+    title_->setFont(theme.UiFont(11, QFont::DemiBold));
+    badge_->setFont(theme.MonoFont(9, QFont::Bold));
+    chevron_->setStyleSheet(
+        QStringLiteral("color: %1; background: transparent;")
+            .arg(theme.text_secondary.name()));
+    title_->setStyleSheet(
+        QStringLiteral("color: %1; background: transparent;")
+            .arg(theme.foreground.name()));
+    badge_->setStyleSheet(
+        QStringLiteral("color: %1; background: %2; border-radius: 7px;"
+                       "padding: 1px 6px;")
+            .arg(theme.accent.name(), theme.code_background.name()));
+    UpdateTooltip();
+  }
+
+  void SetRepo(const QString& label, const QString& path) {
+    label_ = label;
+    path_ = path;
+    title_->setText(label_);
+    UpdateTooltip();
+  }
+
+  void SetExpanded(bool expanded) {
+    expanded_ = expanded;
+    chevron_->setText(expanded ? QStringLiteral("\u25be")
+                               : QStringLiteral("\u25b8"));
+    setProperty("expanded", expanded);
+    style()->unpolish(this);
+    style()->polish(this);
+    UpdateTooltip();
+  }
+
+  void SetChangeCount(int count) {
+    changes_ = std::max(0, count);
+    badge_->setText(changes_ > 0 ? QStringLiteral("\u25cf %1").arg(changes_)
+                                 : QString());
+    badge_->setVisible(changes_ > 0);
+    badge_->setToolTip(
+        changes_ > 0
+            ? QStringLiteral("%1 changed file%2")
+                  .arg(changes_)
+                  .arg(changes_ == 1 ? QString() : QStringLiteral("s"))
+            : QString());
+    UpdateTooltip();
+  }
+
+ private:
+  void UpdateTooltip() {
+    QString text = label_;
+    if (!path_.isEmpty()) {
+      text += QStringLiteral("\n") + QDir::toNativeSeparators(path_);
+    }
+    if (changes_ > 0) {
+      text += QStringLiteral("\n%1 changed file(s)").arg(changes_);
+    }
+    text += expanded_ ? QStringLiteral("\nClick to collapse.")
+                      : QStringLiteral("\nClick to expand.");
+    setToolTip(text);
+    QString accessible = label_;
+    if (changes_ > 0) {
+      accessible += QStringLiteral(", %1 changed files").arg(changes_);
+    }
+    accessible += expanded_ ? QStringLiteral(", expanded")
+                            : QStringLiteral(", collapsed");
+    setAccessibleName(accessible);
+  }
+
+  QLabel* chevron_ = nullptr;
+  QLabel* title_ = nullptr;
+  QLabel* badge_ = nullptr;
+  QString label_;
+  QString path_;
+  int changes_ = 0;
+  bool expanded_ = true;
+};
+
 RightRail::RightRail(const Theme& theme, QWidget* parent)
     : QWidget(parent), theme_(theme) {
   setObjectName(QStringLiteral("rightRail"));
@@ -1698,6 +1822,9 @@ void RightRail::SetSectionExpanded(const QString& id, bool expanded) {
   if (expanded && id == QStringLiteral("terminal")) {
     EnsureTerminal();
   }
+  if (expanded && id == QStringLiteral("git")) {
+    RefreshGitStatuses();
+  }
   if (expanded && sections_scroll_ != nullptr) {
     QTimer::singleShot(0, this, [this, id]() {
       Section* current = FindSection(id);
@@ -1748,6 +1875,13 @@ void RightRail::SetTheme(const Theme& theme) {
           "border-bottom: 1px solid %2; }"
           "QWidget[gitRepoCard=\"true\"] { background: %6; "
           "border: 1px solid %2; border-radius: 6px; }"
+          "QPushButton[gitRepoHeader=\"true\"] { background: transparent; "
+          "border: 0; padding: 0; }"
+          "QPushButton[gitRepoHeader=\"true\"]:hover { background: %7; "
+          "border-radius: 5px; }"
+          "QPushButton[gitRepoHeader=\"true\"]:focus, "
+          "QPushButton[gitRepoHeader=\"true\"]:pressed { background: %6; "
+          "border-radius: 5px; }"
           "QPushButton[railAction=\"true\"] { background: transparent; "
           "color: %3; border: 1px solid %2; border-radius: 5px; "
           "padding: 4px 7px; }"
@@ -1867,7 +2001,10 @@ void RightRail::SetTheme(const Theme& theme) {
       button->setFont(theme_.UiFont(10, QFont::Normal));
     }
   }
-  for (const GitRepoPane& repo : git_repositories_) {
+  for (GitRepoPane& repo : git_repositories_) {
+    if (auto* header = dynamic_cast<GitRepoHeaderButton*>(repo.header)) {
+      header->SetTheme(theme_);
+    }
     if (repo.branch != nullptr) {
       repo.branch->setFont(theme_.UiFont(11, QFont::DemiBold));
     }
@@ -2022,8 +2159,10 @@ void RightRail::RebuildGitRepositories(
       pane.id = resolved[i].id;
       pane.label = resolved[i].label;
       if (pane.root != nullptr) {
-        pane.root->setText(QStringLiteral("%1\n%2").arg(
-            pane.label, QDir::toNativeSeparators(pane.path)));
+        pane.root->setText(QDir::toNativeSeparators(pane.path));
+      }
+      if (auto* header = dynamic_cast<GitRepoHeaderButton*>(pane.header)) {
+        header->SetRepo(pane.label, pane.path);
       }
     }
     if (git_empty_ != nullptr) {
@@ -2066,43 +2205,55 @@ void RightRail::RebuildGitRepositories(
     card_layout->setSpacing(6);
 
     pane.card = card;
-    pane.root = RailLabel(
-        card, theme_,
-        QStringLiteral("%1\n%2").arg(repository.label,
-                                     QDir::toNativeSeparators(repository.path)),
-        11, QFont::DemiBold, theme_.text_secondary);
+    auto* header = new GitRepoHeaderButton(theme_, suffix, card);
+    header->SetRepo(repository.label, repository.path);
+    pane.header = header;
+    card_layout->addWidget(header);
+
+    pane.body = new QWidget(card);
+    pane.body->setObjectName(
+        QStringLiteral("rightRailGitRepoBody%1").arg(suffix));
+    auto* body_layout = new QVBoxLayout(pane.body);
+    body_layout->setContentsMargins(0, 0, 0, 0);
+    body_layout->setSpacing(6);
+    card_layout->addWidget(pane.body);
+
+    pane.root = RailLabel(pane.body, theme_,
+                          QDir::toNativeSeparators(repository.path), 9,
+                          QFont::Normal, theme_.text_tertiary);
     pane.root->setObjectName(
         QStringLiteral("rightRailGitRepoRoot%1").arg(suffix));
     pane.root->setToolTip(repository.path);
-    card_layout->addWidget(pane.root);
+    body_layout->addWidget(pane.root);
 
-    pane.branch = RailLabel(card, theme_, QStringLiteral("Checking branch…"),
-                            11, QFont::DemiBold, theme_.foreground);
+    pane.branch = RailLabel(pane.body, theme_,
+                            QStringLiteral("Checking branch…"), 11,
+                            QFont::DemiBold, theme_.foreground);
     pane.branch->setObjectName(
         QStringLiteral("rightRailGitBranch%1").arg(suffix));
     pane.branch->setWordWrap(false);
     pane.branch->setToolTip(QStringLiteral("Current branch"));
-    card_layout->addWidget(pane.branch);
+    body_layout->addWidget(pane.branch);
 
-    pane.status = RailLabel(card, theme_,
+    pane.status = RailLabel(pane.body, theme_,
                             QStringLiteral("Reading changes…"), 10,
                             QFont::Normal, theme_.text_secondary);
     pane.status->setObjectName(
         QStringLiteral("rightRailGitSummary%1").arg(suffix));
     pane.status->setToolTip(
         QStringLiteral("Staged and unstaged changes in this repository"));
-    card_layout->addWidget(pane.status);
+    body_layout->addWidget(pane.status);
 
-    pane.changes_host = new QWidget(card);
+    pane.changes_host = new QWidget(pane.body);
     pane.changes_host->setObjectName(
         QStringLiteral("rightRailGitChanges%1").arg(suffix));
     pane.changes_host->setAttribute(Qt::WA_StyledBackground, true);
     pane.changes_layout = new QVBoxLayout(pane.changes_host);
     pane.changes_layout->setContentsMargins(0, 2, 0, 2);
     pane.changes_layout->setSpacing(2);
-    card_layout->addWidget(pane.changes_host);
+    body_layout->addWidget(pane.changes_host);
 
-    pane.diff_host = new QWidget(card);
+    pane.diff_host = new QWidget(pane.body);
     pane.diff_host->setObjectName(
         QStringLiteral("rightRailGitDiffPanel%1").arg(suffix));
     pane.diff_host->setAttribute(Qt::WA_StyledBackground, true);
@@ -2140,20 +2291,21 @@ void RightRail::RebuildGitRepositories(
     pane.diff_view->setMinimumHeight(110);
     pane.diff_view->setMaximumHeight(220);
     diff_layout->addWidget(pane.diff_view);
-    card_layout->addWidget(pane.diff_host);
+    body_layout->addWidget(pane.diff_host);
 
-    auto* ignore_title = RailLabel(card, theme_, QStringLiteral("Ignore rules"),
-                                   10, QFont::DemiBold, theme_.text_secondary);
+    auto* ignore_title = RailLabel(pane.body, theme_,
+                                   QStringLiteral("Ignore rules"), 10,
+                                   QFont::DemiBold, theme_.text_secondary);
     ignore_title->setObjectName(
         QStringLiteral("rightRailGitIgnoreTitle%1").arg(suffix));
     ignore_title->setToolTip(
         QStringLiteral("Add files, folders, or patterns to .gitignore"));
-    card_layout->addWidget(ignore_title);
+    body_layout->addWidget(ignore_title);
 
     auto* ignore_input_row = new QHBoxLayout();
     ignore_input_row->setContentsMargins(0, 0, 0, 0);
     ignore_input_row->setSpacing(4);
-    pane.ignore_input = new QLineEdit(card);
+    pane.ignore_input = new QLineEdit(pane.body);
     pane.ignore_input->setObjectName(
         QStringLiteral("rightRailGitIgnoreInput%1").arg(suffix));
     pane.ignore_input->setProperty("gitRepoField", true);
@@ -2164,22 +2316,22 @@ void RightRail::RebuildGitRepositories(
     pane.ignore_input->setMinimumHeight(24);
     ignore_input_row->addWidget(pane.ignore_input, 1);
     pane.ignore_add = PreviewAction(
-        card, QStringLiteral("Add"),
+        pane.body, QStringLiteral("Add"),
         QStringLiteral("rightRailGitIgnoreAdd%1").arg(suffix));
     pane.ignore_add->setToolTip(QStringLiteral("Add to .gitignore"));
     ignore_input_row->addWidget(pane.ignore_add);
-    card_layout->addLayout(ignore_input_row);
+    body_layout->addLayout(ignore_input_row);
 
-    pane.ignore_host = new QWidget(card);
+    pane.ignore_host = new QWidget(pane.body);
     pane.ignore_host->setObjectName(
         QStringLiteral("rightRailGitIgnoreEntries%1").arg(suffix));
     pane.ignore_host->setAttribute(Qt::WA_StyledBackground, true);
     pane.ignore_layout = new QVBoxLayout(pane.ignore_host);
     pane.ignore_layout->setContentsMargins(0, 0, 0, 4);
     pane.ignore_layout->setSpacing(1);
-    card_layout->addWidget(pane.ignore_host);
+    body_layout->addWidget(pane.ignore_host);
 
-    pane.message = new QPlainTextEdit(card);
+    pane.message = new QPlainTextEdit(pane.body);
     pane.message->setObjectName(
         QStringLiteral("rightRailGitMessage%1").arg(suffix));
     pane.message->setProperty("gitRepoField", true);
@@ -2189,36 +2341,36 @@ void RightRail::RebuildGitRepositories(
     pane.message->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     pane.message->setFont(theme_.UiFont(11, QFont::Normal));
     pane.message->setFixedHeight(64);
-    card_layout->addWidget(pane.message);
+    body_layout->addWidget(pane.message);
 
-    pane.message_status = RailLabel(card, theme_, QString(), 10, QFont::Normal,
-                                    theme_.text_secondary);
+    pane.message_status = RailLabel(pane.body, theme_, QString(), 10,
+                                    QFont::Normal, theme_.text_secondary);
     pane.message_status->setObjectName(
         QStringLiteral("rightRailGitMessageStatus%1").arg(suffix));
-    card_layout->addWidget(pane.message_status);
+    body_layout->addWidget(pane.message_status);
 
     auto* actions = new FlowLayout(0, 4, 4);
     pane.refresh =
-        PreviewAction(card, QStringLiteral("Refresh"),
+        PreviewAction(pane.body, QStringLiteral("Refresh"),
                       QStringLiteral("rightRailGitRefresh%1").arg(suffix));
     actions->addWidget(pane.refresh);
     pane.generate =
-        PreviewAction(card, QStringLiteral("AI Generate"),
+        PreviewAction(pane.body, QStringLiteral("AI Generate"),
                       QStringLiteral("rightRailGitGenerate%1").arg(suffix));
     pane.generate->setToolTip(
         QStringLiteral("Draft a commit message from this repository's staged "
                        "changes"));
     actions->addWidget(pane.generate);
     pane.commit =
-        PreviewAction(card, QStringLiteral("Commit"),
+        PreviewAction(pane.body, QStringLiteral("Commit"),
                       QStringLiteral("rightRailGitCommit%1").arg(suffix));
     pane.commit->setToolTip(QStringLiteral("Commit staged changes"));
     pane.commit->setEnabled(false);
     actions->addWidget(pane.commit);
-    pane.push = PreviewAction(card, QStringLiteral("Commit & Push"),
+    pane.push = PreviewAction(pane.body, QStringLiteral("Commit & Push"),
                               QStringLiteral("rightRailGitPush%1").arg(suffix));
     actions->addWidget(pane.push);
-    card_layout->addLayout(actions);
+    body_layout->addLayout(actions);
 
     const QString path = pane.path;
     const quint64 serial = pane.serial;
@@ -2262,10 +2414,42 @@ void RightRail::RebuildGitRepositories(
           AddGitignorePattern(path, serial, repo->ignore_input->text());
         });
 
+    QObject::connect(
+        header, &QPushButton::clicked, header, [this, path, serial]() {
+          GitRepoPane* repo = FindGitRepository(path, serial);
+          if (repo != nullptr) {
+            SetGitRepoExpanded(repo, !repo->expanded);
+          }
+        });
+
     git_repositories_.push_back(pane);
     git_repositories_layout_->addWidget(card);
+    const QString key =
+        QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+    SetGitRepoExpanded(&git_repositories_.back(),
+                       !collapsed_git_repo_paths_.contains(key));
   }
   git_repositories_layout_->addStretch(1);
+}
+
+void RightRail::SetGitRepoExpanded(GitRepoPane* repository, bool expanded) {
+  if (repository == nullptr) {
+    return;
+  }
+  repository->expanded = expanded;
+  const QString key =
+      QDir::cleanPath(QFileInfo(repository->path).absoluteFilePath());
+  if (expanded) {
+    collapsed_git_repo_paths_.remove(key);
+  } else {
+    collapsed_git_repo_paths_.insert(key);
+  }
+  if (auto* header = dynamic_cast<GitRepoHeaderButton*>(repository->header)) {
+    header->SetExpanded(expanded);
+  }
+  if (repository->body != nullptr) {
+    repository->body->setVisible(expanded);
+  }
 }
 
 void RightRail::RefreshGitStatuses() {
@@ -2421,6 +2605,10 @@ void RightRail::RefreshGitStatus(const QString& path, quint64 serial) {
           if (current->branch != nullptr) {
             current->branch->setText(QStringLiteral("Not a git repository"));
           }
+          if (auto* header =
+                  dynamic_cast<GitRepoHeaderButton*>(current->header)) {
+            header->SetChangeCount(0);
+          }
           current->status->setText(
               output.isEmpty() ? QStringLiteral("Git status is unavailable.")
                                : output);
@@ -2451,12 +2639,17 @@ void RightRail::RebuildGitChanges(GitRepoPane* repository,
   const GitStatusSnapshot snapshot = ParseGitStatus(status_output);
   int staged_count = 0;
   int unstaged_count = 0;
+  QSet<QString> changed_paths;
   for (const GitFileChange& change : snapshot.changes) {
+    changed_paths.insert(change.path);
     if (change.staged) {
       ++staged_count;
     } else {
       ++unstaged_count;
     }
+  }
+  if (auto* header = dynamic_cast<GitRepoHeaderButton*>(repository->header)) {
+    header->SetChangeCount(changed_paths.size());
   }
 
   if (repository->branch != nullptr) {

@@ -137,6 +137,7 @@ class PreferencesTest : public QObject {
   void rightRailKeepsArtifactScrollAcrossSnapshots();
   void rightRailProjectGitTerminalPanes();
   void rightRailMultipleProjectGitPanes();
+  void rightRailCollapsesRepositoriesAndBadgesChanges();
   void rightRailStagesUnstagesAndIgnoresFiles();
   void flowLayoutWrapsRowsAtNarrowWidths();
   void artifactDetectionAndNamingMatchDesktop();
@@ -3998,6 +3999,10 @@ void PreferencesTest::rightRailMultipleProjectGitPanes() {
       rail.findChild<QLabel*>(QStringLiteral("rightRailGitRepoRoot"));
   auto* second_root =
       rail.findChild<QLabel*>(QStringLiteral("rightRailGitRepoRoot_1"));
+  auto* first_name =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitRepoName"));
+  auto* second_name =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitRepoName_1"));
   QVERIFY(first_branch != nullptr);
   QVERIFY(second_branch != nullptr);
   QVERIFY(first_summary != nullptr);
@@ -4012,9 +4017,11 @@ void PreferencesTest::rightRailMultipleProjectGitPanes() {
   QVERIFY(second_generate != nullptr);
   QVERIFY(first_root != nullptr);
   QVERIFY(second_root != nullptr);
-  QVERIFY(first_root->text().contains(QStringLiteral("One")));
+  QVERIFY(first_name != nullptr);
+  QVERIFY(second_name != nullptr);
+  QCOMPARE(first_name->text(), QStringLiteral("One"));
+  QCOMPARE(second_name->text(), QStringLiteral("Two"));
   QVERIFY(first_root->text().contains(first.path()));
-  QVERIFY(second_root->text().contains(QStringLiteral("Two")));
   QVERIFY(second_root->text().contains(second.path()));
   QVERIFY(rail.findChild<QWidget*>(QStringLiteral("rightRailGitRepo_0")) !=
           nullptr);
@@ -4084,4 +4091,117 @@ void PreferencesTest::rightRailMultipleProjectGitPanes() {
   QCOMPARE(second_message_status->text(),
            QStringLiteral("Generated · review and commit."));
   QCOMPARE(first_message->toPlainText(), QString());
+}
+
+void PreferencesTest::rightRailCollapsesRepositoriesAndBadgesChanges() {
+  if (QStandardPaths::findExecutable(QStringLiteral("git")).isEmpty()) {
+    QSKIP("git is not installed");
+  }
+  QTemporaryDir first;
+  QTemporaryDir second;
+  QVERIFY(first.isValid());
+  QVERIFY(second.isValid());
+  const auto write_file = [](const QString& root, const QString& name,
+                             const QString& contents) {
+    QFile file(QDir(root).filePath(name));
+    if (!file.open(QIODevice::WriteOnly)) {
+      return false;
+    }
+    return file.write(contents.toUtf8()) >= 0;
+  };
+  const auto run_git = [](const QString& root, const QStringList& arguments) {
+    QProcess process;
+    process.setWorkingDirectory(root);
+    process.start(QStringLiteral("git"), arguments);
+    if (!process.waitForFinished(5000) || process.exitCode() != 0) {
+      qWarning() << process.readAllStandardError();
+      return false;
+    }
+    return true;
+  };
+  const auto init_repo = [&](const QString& root, const QString& file) {
+    if (!write_file(root, file, QStringLiteral("initial content"))) {
+      return false;
+    }
+    return run_git(root, {QStringLiteral("init")}) &&
+           run_git(root,
+                   {QStringLiteral("config"), QStringLiteral("user.email"),
+                    QStringLiteral("test@example.com")}) &&
+           run_git(root, {QStringLiteral("config"), QStringLiteral("user.name"),
+                          QStringLiteral("Hermes Test")}) &&
+           run_git(root, {QStringLiteral("add"), file}) &&
+           run_git(root, {QStringLiteral("commit"), QStringLiteral("-m"),
+                          QStringLiteral("initial")});
+  };
+  QVERIFY(init_repo(first.path(), QStringLiteral("first.txt")));
+  QVERIFY(init_repo(second.path(), QStringLiteral("second.txt")));
+
+  std::vector<hermes::ui::ProjectRepoInfo> repositories;
+  repositories.push_back(
+      {QStringLiteral("repo-one"), QStringLiteral("One"), first.path()});
+  repositories.push_back(
+      {QStringLiteral("repo-two"), QStringLiteral("Two"), second.path()});
+
+  hermes::ui::RightRail rail(hermes::ui::Theme::Light());
+  rail.resize(360, 900);
+  rail.show();
+  rail.SetProjectContext(QStringLiteral("multi"), QStringLiteral("Multi"),
+                         first.path(), repositories);
+  QVERIFY(ExpandRailSection(rail, QStringLiteral("git")));
+
+  auto* first_header =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailGitRepoHeader"));
+  auto* second_header =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailGitRepoHeader_1"));
+  auto* first_body =
+      rail.findChild<QWidget*>(QStringLiteral("rightRailGitRepoBody"));
+  auto* second_body =
+      rail.findChild<QWidget*>(QStringLiteral("rightRailGitRepoBody_1"));
+  auto* first_badge =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitRepoBadge"));
+  auto* second_badge =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitRepoBadge_1"));
+  auto* first_summary =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitSummary"));
+  auto* second_summary =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailGitSummary_1"));
+  auto* first_refresh =
+      rail.findChild<QPushButton*>(QStringLiteral("rightRailGitRefresh"));
+  QVERIFY(first_header != nullptr);
+  QVERIFY(second_header != nullptr);
+  QVERIFY(first_body != nullptr);
+  QVERIFY(second_body != nullptr);
+  QVERIFY(first_badge != nullptr);
+  QVERIFY(second_badge != nullptr);
+  QVERIFY(first_summary != nullptr);
+  QVERIFY(second_summary != nullptr);
+  QVERIFY(first_refresh != nullptr);
+  QTRY_VERIFY(first_body->isVisible());
+  QTRY_VERIFY(second_body->isVisible());
+  QVERIFY(first_header->property("expanded").toBool());
+  QVERIFY(second_header->property("expanded").toBool());
+  QTRY_COMPARE(first_summary->text(), QStringLiteral("Working tree clean"));
+  QTRY_COMPARE(second_summary->text(), QStringLiteral("Working tree clean"));
+  QVERIFY(!first_badge->isVisible());
+  QVERIFY(!second_badge->isVisible());
+
+  QVERIFY(write_file(first.path(), QStringLiteral("dirty.txt"),
+                     QStringLiteral("dirty")));
+  first_refresh->click();
+  QTRY_VERIFY(first_badge->isVisible());
+  QCOMPARE(first_badge->text(), QStringLiteral("\u25cf 1"));
+  QVERIFY(!second_badge->isVisible());
+
+  first_header->click();
+  QTRY_VERIFY(!first_body->isVisible());
+  QVERIFY(!first_header->property("expanded").toBool());
+  QVERIFY(first_badge->isVisible());
+  first_header->click();
+  QTRY_VERIFY(first_body->isVisible());
+  QVERIFY(first_header->property("expanded").toBool());
+
+  second_header->click();
+  QTRY_VERIFY(!second_body->isVisible());
+  QVERIFY(!second_header->property("expanded").toBool());
+  QVERIFY(first_body->isVisible());
 }

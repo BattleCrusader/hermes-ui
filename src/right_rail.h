@@ -144,6 +144,7 @@ class RightRail : public QWidget {
   void RefreshGitStatuses();
   void RefreshGitStatus(const QString& path, quint64 serial);
   void RebuildGitChanges(GitRepoPane* repository, const QString& status_output);
+  void SetGitRepoExpanded(GitRepoPane* repository, bool expanded);
   void RefreshGitignore(GitRepoPane* repository);
   void RunGit(const QString& root, const QStringList& arguments,
               std::function<void(bool ok, const QString& output)> done);
@@ -178,6 +179,8 @@ class RightRail : public QWidget {
     QString suffix;
     quint64 serial = 0;
     QWidget* card = nullptr;
+    QPushButton* header = nullptr;
+    QWidget* body = nullptr;
     QLabel* root = nullptr;
     QLabel* branch = nullptr;
     QLabel* status = nullptr;
@@ -200,6 +203,7 @@ class RightRail : public QWidget {
     QPushButton* push = nullptr;
     bool ai_generating = false;
     quint64 ai_generation = 0;
+    bool expanded = true;
   };
   GitRepoPane* FindGitRepository(const QString& path, quint64 serial = 0);
   void EnsureTerminal();
@@ -289,6 +293,7 @@ class RightRail : public QWidget {
   std::map<QString, AgentCard> agent_cards_;
   QSet<QString> expanded_agents_;
   QSet<QString> announced_agents_;
+  QSet<QString> collapsed_git_repo_paths_;
   QLabel* todos_empty_ = nullptr;
   QLabel* todos_summary_ = nullptr;
   QWidget* todos_list_ = nullptr;
