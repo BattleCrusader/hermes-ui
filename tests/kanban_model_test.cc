@@ -2,6 +2,7 @@
 
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QScrollBar>
 #include <QtTest>
 
 #include "src/kanban_model.h"
@@ -187,6 +188,35 @@ class KanbanModelTest : public QObject {
     // palette untouched when the app switched between light and dark themes.
     pages.SetTheme(Theme::Dark());
     QCOMPARE(view->CanvasBackgroundForTest(), Theme::Dark().background);
+  }
+
+  void viewKeepsHorizontalRangeAtRightEdge() {
+    KanbanView view(hermes::ui::Theme{});
+    KanbanBoard board;
+    board.board = QStringLiteral("test");
+    board.columns = OrderedColumns(
+        {QStringLiteral("triage"), QStringLiteral("todo"),
+         QStringLiteral("scheduled"), QStringLiteral("ready"),
+         QStringLiteral("running"), QStringLiteral("blocked"),
+         QStringLiteral("review"), QStringLiteral("done")});
+    board.tasks.push_back(ParseTask(Task("done-1", "done")));
+    KanbanBoardMeta meta;
+    meta.slug = QStringLiteral("test");
+    meta.name = QStringLiteral("Test");
+    view.SetBoardForTest(board, meta);
+
+    auto* scroll = view.findChild<QScrollBar*>(QStringLiteral("kanbanHScroll"));
+    QVERIFY(scroll != nullptr);
+    const int maximum = scroll->maximum();
+    QVERIFY(maximum > 0);
+
+    scroll->setValue(maximum);
+    QCOMPARE(scroll->value(), maximum);
+    // A refresh while scrolled right must not shrink the range back under the
+    // thumb. This used to make the done lane unreachable.
+    view.SetBoardForTest(board, meta);
+    QCOMPARE(scroll->maximum(), maximum);
+    QCOMPARE(scroll->value(), maximum);
   }
 
   void viewRefreshKeepsSelectionOnlyForLiveCards() {

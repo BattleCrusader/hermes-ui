@@ -674,7 +674,11 @@ class KanbanBoardCanvas : public QWidget {
       columns_.push_back(column);
       x += width + kColumnGap;
     }
-    content_width_ = std::max(0, x - kColumnGap + kBoardPad - 1);
+    // `x` is shifted by h_offset_ for painting. Content width must stay fixed
+    // while scrolling, otherwise the scrollbar range shrinks under the thumb
+    // and the last lane can never be reached.
+    const int content_right = x + h_offset_;
+    content_width_ = std::max(0, content_right - kColumnGap + kBoardPad - 1);
     if (on_content_width) {
       on_content_width(content_width_, width());
     }
