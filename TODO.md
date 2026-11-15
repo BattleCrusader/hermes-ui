@@ -42,6 +42,23 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-15 (model switcher names the provider)
+
+**The composer model picker now states the routed provider, not just the model
+id.** The same model id can exist under several providers, so the switcher used
+to leave the actual route ambiguous.
+
+- [x] The menu opens with a bold, disabled header such as
+      `Using Anthropic · claude-sonnet-4-5`; a profile-default route reads
+      `Profile default · <model>`.
+- [x] The active provider's submenu gets a `✓` prefix and the active model is
+      checked and bold. Choosing a model updates the stored provider before the
+      selection callback fires.
+- [x] The chip keeps the compact model label but its tooltip and accessible
+      description now carry `<provider> · <model>`.
+- [x] `composerControlsExposeTheSameRoute` asserts the header and tooltip.
+      Full native suite **10/10 passed** in 17.77 s. Commit `bec5906`.
+
 ## Status update — 2026-11-14 (ordered prompt, queue and steer operations)
 
 **Every prompt, run-after queue, attachment-backed send, deferred new-chat send
