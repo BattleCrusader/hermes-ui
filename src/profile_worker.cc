@@ -2194,7 +2194,10 @@ void ProfileWorker::ForgetPendingAdmission(const QString& admission_id) {
 void ProfileWorker::Steer(const QString& text) { SteerWithCallback(text, {}); }
 
 void ProfileWorker::SteerWithCallback(const QString& text, SteerCallback done) {
-  auto finish = [&done](bool ok, const QString& message) {
+  // The idle-steer path hands a callback to the prompt queue, which invokes it
+  // after the submit acknowledgement. Capture the callback by value so it does
+  // not point at this stack frame once the method returns.
+  auto finish = [done](bool ok, const QString& message) {
     if (done) {
       done(ok, message);
     }
