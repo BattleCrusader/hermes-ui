@@ -70,14 +70,18 @@ and steer now travels through one FIFO and waits for its own response.**
       reuses it instead of appending a duplicate.
 - [x] A finished-turn steer fallback is inserted immediately after the active
       steer, before later queued sends.
+- [x] A live probe exposed the idle-steer fallback handing the prompt queue a
+      callback that captured its completion lambda by reference; the method
+      returned before the submit ACK, so the callback dangled. It now captures
+      a by-value copy and the probe completes cleanly.
 - [x] A rejected queued admission no longer calls `PublishError(..., true)`;
       only a normal prompt submit owns the turn it starts, so a failed
       run-after request cannot raise “Turn failed” for the live turn.
 - [x] Added `promptOperationsStayFifoAndWaitForAck` and
       `promptFallbackKeepsPlaceAheadOfLaterSends`. Full native suite **10/10
-      passed** in 22.42 s. A live `--probe-steer` run confirmed the queued
-      steer response and agent processing order. Commits `d91399e` and
-      `6dd1a4e`, pushed to `main`.
+      passed** in 20.73 s. A live `--probe-steer` run confirmed the queued
+      steer response and agent processing order after the callback fix.
+      Commits `d91399e`, `6dd1a4e` and `2529ef8`, pushed to `main`.
 
 ## Status update — 2026-11-14 (collapsible Git repo cards)
 
