@@ -64,17 +64,20 @@ and steer now travels through one FIFO and waits for its own response.**
       and flushed in submission order instead of the last one replacing the
       rest.
 - [x] Steers share the prompt queue, so a steer response cannot overtake an
-      earlier prompt response or reorder locally appended user bubbles. A
-      finished-turn steer fallback is inserted immediately after the active
+      earlier prompt response. A steer appends its user row at submit time, so
+      a prompt typed while the steer is in flight cannot jump above it; a
+      rejected steer removes that optimistic row, and a finished-turn fallback
+      reuses it instead of appending a duplicate.
+- [x] A finished-turn steer fallback is inserted immediately after the active
       steer, before later queued sends.
 - [x] A rejected queued admission no longer calls `PublishError(..., true)`;
       only a normal prompt submit owns the turn it starts, so a failed
       run-after request cannot raise “Turn failed” for the live turn.
 - [x] Added `promptOperationsStayFifoAndWaitForAck` and
       `promptFallbackKeepsPlaceAheadOfLaterSends`. Full native suite **10/10
-      passed** in 23.70 s. A live `--probe-steer` run confirmed the queued
-      steer response and agent processing order. Commit `d91399e`, pushed to
-      `main`.
+      passed** in 22.42 s. A live `--probe-steer` run confirmed the queued
+      steer response and agent processing order. Commits `d91399e` and
+      `6dd1a4e`, pushed to `main`.
 
 ## Status update — 2026-11-14 (collapsible Git repo cards)
 
