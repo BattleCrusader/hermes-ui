@@ -282,6 +282,12 @@ void PreferencesTest::composerControlsExposeTheSameRoute() {
   QVERIFY(reasoning != nullptr);
   QCOMPARE(model->text(), QStringLiteral("m1"));
   QCOMPARE(reasoning->text(), QStringLiteral("high"));
+  // The switcher must name the route, not just the model: the same model id
+  // can exist under several providers.
+  QCOMPARE(composer.ModelSwitcherHeaderText(),
+           QStringLiteral("Using Provider One \u00b7 m1"));
+  QVERIFY(model->toolTip().startsWith(
+      QStringLiteral("Provider One \u00b7 m1")));
 }
 
 void PreferencesTest::composerHistoryBrowsesAndRestoresDraft() {

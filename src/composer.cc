@@ -141,6 +141,8 @@ void Composer::SetModelCatalog(const std::vector<ModelProvider>& providers,
   provider_ = provider;
   if (!model.isEmpty()) {
     SetModelLabel(model);
+  } else {
+    UpdateModelChip();
   }
   if (model_refresh_pending_ && model_visibility_dialog_) {
     model_refresh_pending_ = false;
@@ -709,18 +711,41 @@ void Composer::ShowModelMenu() {
           "QMenu { background: %1; color: %2; border: 1px solid %3; "
           "padding: 4px; }"
           "QMenu::item { padding: 5px 18px 5px 10px; border-radius: 5px; }"
-          "QMenu::item:selected { background: %4; }")
+          "QMenu::item:selected { background: %4; }"
+          "QMenu::item:disabled { color: %5; }")
           .arg(theme_.surface.name(), theme_.foreground.name(),
-               theme_.stroke.name(), theme_.selected.name()));
+               theme_.stroke.name(), theme_.selected.name(),
+               theme_.text_tertiary.name()));
+  // The catalog groups models by provider but never said which provider the
+  // turn actually routes to. Keep that route visible before the lists.
+  QAction* current = menu.addAction(ModelSwitcherHeaderText());
+  current->setEnabled(false);
+  QFont current_font = theme_.UiFont(10, QFont::Normal);
+  current_font.setBold(true);
+  current->setFont(current_font);
+  menu.addSeparator();
   const std::vector<ModelProvider> visible =
       VisibleModelCatalog(providers_, hidden_models_);
   for (const ModelProvider& provider : visible) {
-    QMenu* submenu =
-        menu.addMenu(provider.name.isEmpty() ? provider.slug : provider.name);
+    const bool is_current_provider =
+        !provider_.isEmpty() && provider.slug == provider_;
+    QString title = provider.name.isEmpty() ? provider.slug : provider.name;
+    if (is_current_provider) {
+      title = QStringLiteral("\u2713 ") + title;
+    }
+    QMenu* submenu = menu.addMenu(title);
     submenu->setFont(theme_.UiFont(11, QFont::Normal));
     for (const QString& model : provider.models) {
       QAction* action = submenu->addAction(model);
+      const bool is_current_model =
+          is_current_provider && model == model_label_;
+      action->setCheckable(true);
+      action->setChecked(is_current_model);
+      if (is_current_model) {
+        action->setFont(theme_.UiFont(11, QFont::DemiBold));
+      }
       connect(action, &QAction::triggered, this, [this, provider, model]() {
+        provider_ = provider.slug;
         SetModelLabel(model);
         if (on_model_selected) {
           on_model_selected(provider.slug, model);
@@ -834,14 +859,49 @@ void Composer::SetText(const QString& text) {
 
 void Composer::SetModelLabel(const QString& model) {
   if (model.isEmpty() || model_label_ == model) {
+    UpdateModelChip();
     return;
   }
   model_label_ = model;
-  if (model_button_ != nullptr) {
-    model_button_->setText(model);
-    model_button_->setToolTip(model);
-  }
+  UpdateModelChip();
   update();
+}
+
+QString Composer::CurrentProviderName() const {
+  if (provider_.isEmpty()) {
+    return {};
+  }
+  for (const ModelProvider& provider : providers_) {
+    if (provider.slug == provider_) {
+      return provider.name.isEmpty() ? provider.slug : provider.name;
+    }
+  }
+  return provider_;
+}
+
+QString Composer::ModelSwitcherHeaderText() const {
+  const QString provider = CurrentProviderName();
+  if (provider.isEmpty()) {
+    return model_label_ == QStringLiteral("model")
+               ? QStringLiteral("Profile default model")
+               : QStringLiteral("Profile default \u00b7 %1").arg(model_label_);
+  }
+  return QStringLiteral("Using %1 \u00b7 %2").arg(provider, model_label_);
+}
+
+void Composer::UpdateModelChip() {
+  if (model_button_ == nullptr) {
+    return;
+  }
+  model_button_->setText(model_label_);
+  const QString provider = CurrentProviderName();
+  const QString route =
+      provider.isEmpty()
+          ? model_label_
+          : QStringLiteral("%1 \u00b7 %2").arg(provider, model_label_);
+  model_button_->setToolTip(
+      QStringLiteral("%1 \u2014 click to change provider or model").arg(route));
+  model_button_->setAccessibleDescription(route);
 }
 
 void Composer::SetSlashCommands(std::vector<SlashCommand> commands) {

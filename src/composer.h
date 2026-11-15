@@ -38,6 +38,12 @@ class Composer : public QWidget {
   void SetTheme(const Theme& theme);
   void SetText(const QString& text);
   void SetModelLabel(const QString& model);
+  // The provider the current turn routes to, resolved to its display name.
+  // Empty when the profile default is in use or the catalog has not loaded.
+  QString CurrentProviderName() const;
+  // Header shown at the top of the model switcher, e.g.
+  // "Using Anthropic \u00b7 claude-sonnet-4-5".
+  QString ModelSwitcherHeaderText() const;
   void SetModelCatalog(const std::vector<ModelProvider>& providers,
                        const QString& provider, const QString& model);
   // Local model-picker visibility. Empty means every catalog model is shown.
@@ -164,6 +170,7 @@ class Composer : public QWidget {
   QRectF ReasoningChipRect() const;
   void UpdateChipStyles();
   void ShowModelMenu();
+  void UpdateModelChip();
   void ShowReasoningMenu();
   QDialog* BuildModelVisibilityDialog();
   void ShowModelVisibilityDialog();
