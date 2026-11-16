@@ -717,25 +717,50 @@ void ChatViewTest::previewRoutesToSideRailHandler() {
   message.author = QStringLiteral("Hermes");
   message.timestamp = QDateTime::currentDateTime();
   message.blocks.push_back(hermes::ui::MessageBlock{
+      .kind = hermes::ui::BlockKind::kParagraph,
+      .text = QStringLiteral("Prose stays outside the window card."),
+  });
+  message.blocks.push_back(hermes::ui::MessageBlock{
       .kind = hermes::ui::BlockKind::kCode,
       .text = QStringLiteral("# Release\n\n- shipped"),
       .language = QStringLiteral("markdown"),
+  });
+  message.blocks.push_back(hermes::ui::MessageBlock{
+      .kind = hermes::ui::BlockKind::kCode,
+      .text = QStringLiteral("{\"ok\": true}"),
+      .language = QStringLiteral("json"),
   });
   snapshot->messages.push_back(message);
   view.SetSnapshot(snapshot);
   QTest::qWait(20);
 
-  QRectF preview;
+  QRectF markdown_preview;
+  QRectF json_preview;
   for (const hermes::ui::ClickTarget& target : view.ClickTargets()) {
-    if (target.name == QStringLiteral("chat:preview:0:0")) {
-      preview = target.rect;
+    if (target.name == QStringLiteral("chat:preview:0:1")) {
+      markdown_preview = target.rect;
+    } else if (target.name == QStringLiteral("chat:preview:0:2")) {
+      json_preview = target.rect;
     }
   }
-  QVERIFY(!preview.isNull());
+  QVERIFY(!markdown_preview.isNull());
+  QVERIFY(!json_preview.isNull());
   QTest::mouseClick(view.widget(), Qt::LeftButton, Qt::NoModifier,
-                    preview.center().toPoint());
+                    markdown_preview.center().toPoint());
   QCOMPARE(previewed_language, QStringLiteral("markdown"));
   QCOMPARE(previewed_text, QStringLiteral("# Release\n\n- shipped"));
+
+  // Code-like blocks expose Preview for every language; the rail falls back
+  // to a plain-text/code preview for JSON.
+  QTest::mouseClick(view.widget(), Qt::LeftButton, Qt::NoModifier,
+                    json_preview.center().toPoint());
+  QCOMPARE(previewed_language, QStringLiteral("json"));
+  QCOMPARE(previewed_text, QStringLiteral("{\"ok\": true}"));
+
+  // Normal generated prose is not a text card and has no Preview target.
+  for (const hermes::ui::ClickTarget& target : view.ClickTargets()) {
+    QVERIFY(!target.name.startsWith(QStringLiteral("chat:textpreview:")));
+  }
 }
 
 void ChatViewTest::markdownParsesRichBlocksAndInlineSpans() {

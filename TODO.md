@@ -42,6 +42,25 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-17 (only code-like blocks get the title bar)
+
+**Normal assistant prose stays plain. Code, diff, math and Mermaid keep the
+window card, title bar, Preview and Copy.**
+
+- [x] Removed the text-card experiment that wrapped every contiguous prose run
+      in a `TEXT` window. Paragraphs, headings, lists, quotes and tables render
+      as ordinary transcript blocks again; normal answers must not look like a
+      generated artifact.
+- [x] Code-like blocks keep their language title bar and now expose **Preview**
+      for every language, not only HTML/SVG/Markdown/CSV. JSON and other
+      languages fall back to the right-rail code/plain-text preview.
+- [x] Prose inside an unlabeled or ```text fence still parses as prose, so a
+      model that wraps its whole answer cannot accidentally recreate a `TEXT`
+      card.
+- [x] `previewRoutesToSideRailHandler` covers Markdown and JSON previews and
+      asserts normal prose exposes no `chat:textpreview:` target. Full native
+      suite **10/10 passed**.
+
 ## Status update — 2026-11-17 (plain-text fences are prose, not code cards)
 
 **A fenced `text` or unlabeled block is now parsed as a normal assistant

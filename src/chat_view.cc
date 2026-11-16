@@ -74,7 +74,6 @@ constexpr qreal kQuoteBarWidth = 3;
 constexpr qreal kQuoteRadius = 7;
 
 // Forward declaration: hit targets are built before the renderer definition.
-bool IsPreviewableLanguage(const QString& language);
 bool IsCodeLikeBlock(BlockKind kind);
 QString CopyableBlockText(const MessageBlock& block);
 bool HasCopyableBlockText(const MessageBlock& block);
@@ -563,11 +562,9 @@ class TranscriptWidget : public QWidget {
         if (IsCodeLikeBlock(block.source.kind)) {
           targets.push_back({QStringLiteral("chat:copy:%1:%2").arg(i).arg(b),
                              CopyButtonRect(block)});
-          if (IsPreviewableLanguage(block.source.language)) {
-            targets.push_back(
-                {QStringLiteral("chat:preview:%1:%2").arg(i).arg(b),
-                 PreviewButtonRect(block), true});
-          }
+          targets.push_back(
+              {QStringLiteral("chat:preview:%1:%2").arg(i).arg(b),
+               PreviewButtonRect(block), true});
         } else if (block.source.kind == BlockKind::kTool) {
           targets.push_back({QStringLiteral("chat:tool:") + block.text,
                              QRectF(block.rect.left(), block.rect.top(),
@@ -1093,6 +1090,9 @@ TranscriptWidget::SelectableRuns() const {
                   block.source.language.toUpper(),
                   theme_.UiFont(10, QFont::Normal),
                   Qt::AlignLeft | Qt::AlignVCenter);
+        add_plain(PreviewButtonRect(block), QStringLiteral("Preview"),
+                  theme_.UiFont(10, QFont::Normal),
+                  Qt::AlignRight | Qt::AlignVCenter);
         const QString copy_text =
             !copied_block_.isEmpty() && copied_block_ == block.source.text
                 ? QStringLiteral("Copied")
@@ -1768,8 +1768,7 @@ void TranscriptWidget::mousePressEvent(QMouseEvent* event) {
           event->accept();
           return;
         }
-        if (block.source.kind == BlockKind::kCode &&
-            IsPreviewableLanguage(block.source.language) &&
+        if (IsCodeLikeBlock(block.source.kind) &&
             PreviewButtonRect(block).contains(position)) {
           OpenCodePreview(block.source.text, block.source.language);
           event->accept();
@@ -3023,11 +3022,9 @@ void TranscriptWidget::PaintCodeBlock(QPainter& painter,
       !copied_block_.isEmpty() && copied_block_ == block.source.text;
   painter.setFont(theme_.UiFont(10, QFont::Normal));
   painter.setPen(theme_.code_comment);
-  if (IsPreviewableLanguage(block.source.language)) {
-    painter.drawText(PreviewButtonRect(block),
-                     Qt::AlignVCenter | Qt::AlignRight,
-                     QStringLiteral("Preview"));
-  }
+  painter.drawText(PreviewButtonRect(block),
+                   Qt::AlignVCenter | Qt::AlignRight,
+                   QStringLiteral("Preview"));
   painter.setPen(copied ? theme_.accent : theme_.code_comment);
   painter.drawText(CopyButtonRect(block), Qt::AlignVCenter | Qt::AlignRight,
                    copied ? QStringLiteral("Copied") : QStringLiteral("Copy"));
@@ -3310,15 +3307,6 @@ QString CopyableBlockText(const MessageBlock& block) {
 
 bool HasCopyableBlockText(const MessageBlock& block) {
   return !CopyableBlockText(block).trimmed().isEmpty();
-}
-
-// Languages whose fenced block can be rendered rather than only copied.
-bool IsPreviewableLanguage(const QString& language) {
-  const QString lang = language.trimmed().toLower();
-  return lang == QStringLiteral("svg") || lang == QStringLiteral("rtf") ||
-         lang == QStringLiteral("html") || lang == QStringLiteral("htm") ||
-         lang == QStringLiteral("markdown") || lang == QStringLiteral("md") ||
-         lang == QStringLiteral("csv");
 }
 
 }  // namespace
