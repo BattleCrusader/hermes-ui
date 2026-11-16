@@ -70,8 +70,9 @@ class Composer : public QWidget {
   // owned by the shell; the composer only reflects it.
   void SetQueuedPrompts(int count);
   void SetSlashCommands(std::vector<SlashCommand> commands);
-  // Per-session user prompt ring, newest first. ArrowUp/ArrowDown browse it
-  // only when the caret is at the start/end, so multiline editing still works.
+  // Per-session submitted-input ring, newest first. ArrowUp/ArrowDown browse it
+  // only when the caret cannot leave the first/last visual line, so multiline
+  // editing still works; Down restores the unsent draft after the newest entry.
   void SetHistory(const QStringList& history);
   // `@` completion. The shell supplies a gateway-backed directory lister and
   // the profile home that relative mentions resolve against. Listing is async

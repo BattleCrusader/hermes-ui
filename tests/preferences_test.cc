@@ -36,6 +36,7 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
+#include <QTextBlock>
 #include <QTextBrowser>
 #include <QTextDocument>
 #include <QTextEdit>
@@ -300,7 +301,8 @@ void PreferencesTest::composerHistoryBrowsesAndRestoresDraft() {
   auto* editor = composer.findChild<QTextEdit*>();
   QVERIFY(editor != nullptr);
   composer.SetText(QStringLiteral("draft text"));
-  editor->moveCursor(QTextCursor::Start);
+  // The first line is the top line even when the caret is at its end.
+  editor->moveCursor(QTextCursor::End);
 
   QTest::keyClick(editor, Qt::Key_Up);
   QCOMPARE(composer.Text(), QStringLiteral("newest prompt"));
@@ -313,16 +315,34 @@ void PreferencesTest::composerHistoryBrowsesAndRestoresDraft() {
   QTest::keyClick(editor, Qt::Key_Down);
   QCOMPARE(composer.Text(), QStringLiteral("draft text"));
 
-  composer.SetText(QStringLiteral("line one\nline two"));
-  editor->moveCursor(QTextCursor::Start);
-  QTest::keyClick(editor, Qt::Key_Up);
-  QCOMPARE(composer.Text(), QStringLiteral("newest prompt"));
+  // Vertical editing still wins away from the top and bottom lines.
   composer.SetHistory(
       {QStringLiteral("newest prompt"), QStringLiteral("older prompt")});
-  composer.SetText(QStringLiteral("plain"));
+  composer.SetText(QStringLiteral("line one\nline two"));
+  QTextCursor inner = editor->textCursor();
+  inner.setPosition(editor->document()->findBlockByNumber(1).position());
+  editor->setTextCursor(inner);
+  QTest::keyClick(editor, Qt::Key_Up);
+  QCOMPARE(composer.Text(), QStringLiteral("line one\nline two"));
+
+  // On the top line, even off the first character, Up enters history.
+  editor->moveCursor(QTextCursor::Start);
+  editor->moveCursor(QTextCursor::Right);
+  QTest::keyClick(editor, Qt::Key_Up);
+  QCOMPARE(composer.Text(), QStringLiteral("newest prompt"));
+
+  // Down leaves history from any point on the final visual line.
+  composer.SetHistory({QStringLiteral("newest line\nsecond line"),
+                       QStringLiteral("older prompt")});
+  composer.SetText(QStringLiteral("draft text"));
   editor->moveCursor(QTextCursor::End);
   QTest::keyClick(editor, Qt::Key_Up);
-  QCOMPARE(composer.Text(), QStringLiteral("plain"));
+  QCOMPARE(composer.Text(), QStringLiteral("newest line\nsecond line"));
+  QTextCursor bottom = editor->textCursor();
+  bottom.setPosition(editor->document()->findBlockByNumber(1).position());
+  editor->setTextCursor(bottom);
+  QTest::keyClick(editor, Qt::Key_Down);
+  QCOMPARE(composer.Text(), QStringLiteral("draft text"));
 }
 
 void PreferencesTest::composerTokenMeterFormatsContextUsage() {

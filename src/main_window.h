@@ -174,6 +174,11 @@ class MainWindow : public QWidget {
   void UpdateRequest(const ProfileSnapshot& snapshot);
   void UpdateFindBar();
   void UpdateComposerHistory(const ProfileSnapshot& snapshot);
+  // Composer input history is per session and kept in submission order, so a
+  // local slash command is just as recoverable as a gateway prompt.
+  QString ComposerHistoryKey(const ProfileSnapshot& snapshot) const;
+  QStringList SessionComposerHistory(const ProfileSnapshot& snapshot);
+  void RememberComposerInput(const QString& text);
   void ApplyRunIndicators(const ProfileSnapshot& snapshot);
   void ApplyVoiceState(const ProfileSnapshot& snapshot);
   void ApplyGatewayEvents(const ProfileSnapshot& snapshot);
@@ -203,6 +208,7 @@ class MainWindow : public QWidget {
   std::size_t composer_history_message_count_ = 0;
   qint64 composer_history_last_row_ = -1;
   QString composer_history_tail_;
+  QHash<QString, QStringList> composer_input_history_;
   SessionSearchBar* session_search_ = nullptr;
   RightRail* right_rail_ = nullptr;
   QSplitter* body_splitter_ = nullptr;

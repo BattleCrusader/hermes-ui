@@ -1951,6 +1951,7 @@ void MainWindow::SubmitText(const QString& text) {
   if (trimmed.isEmpty()) {
     return;
   }
+  RememberComposerInput(trimmed);
   const QStringList attachments = composer_->AttachmentPaths();
   const bool slash_command =
       attachments.isEmpty() && trimmed.startsWith(QLatin1Char('/'));
@@ -2622,6 +2623,9 @@ void MainWindow::ShowDetachedChat() {
   });
 
   Composer* composer = detached_chat_->composer();
+  if (const auto snapshot = supervisor_.ActiveSnapshot()) {
+    composer->SetHistory(SessionComposerHistory(*snapshot));
+  }
   composer->SetHiddenModels(
       ParseHiddenModels(NativePref(QStringLiteral("native.model_visibility"))));
   composer->on_stop = [this]() {
@@ -2649,6 +2653,7 @@ void MainWindow::ShowDetachedChat() {
             if (trimmed.isEmpty()) {
               return;
             }
+            RememberComposerInput(trimmed);
             const QStringList attachments = composer->AttachmentPaths();
             const bool slash_command =
                 attachments.isEmpty() && trimmed.startsWith(QLatin1Char('/'));
@@ -2680,6 +2685,7 @@ void MainWindow::ShowDetachedChat() {
           });
   connect(composer, &Composer::SteerRequested, this,
           [this, composer](const QString& text) {
+            RememberComposerInput(text);
             supervisor_.Steer(supervisor_.active_index(), text);
             steered_prompts_.append(text);
             while (steered_prompts_.size() > 20) {
@@ -3696,6 +3702,7 @@ void MainWindow::RecordSteeredPrompt(const QString& text) {
   if (trimmed.isEmpty()) {
     return;
   }
+  RememberComposerInput(trimmed);
   // Re-injecting a history row moves it to the front instead of adding a
   // duplicate entry every time.
   steered_prompts_.removeAll(trimmed);
@@ -3737,6 +3744,7 @@ void MainWindow::QueuePromptText(const QString& text) {
   if (trimmed.isEmpty()) {
     return;
   }
+  RememberComposerInput(trimmed);
   const int active = supervisor_.active_index();
   const auto snapshot = supervisor_.ActiveSnapshot();
   const bool running = snapshot && SelectedTurnRunning(*snapshot);
@@ -4934,7 +4942,55 @@ void MainWindow::UpdateComposerHistory(const ProfileSnapshot& snapshot) {
   composer_history_message_count_ = snapshot.messages.size();
   composer_history_last_row_ = last_row;
   composer_history_tail_ = tail;
-  composer_->SetHistory(ComposerHistory(snapshot));
+  composer_->SetHistory(SessionComposerHistory(snapshot));
+  if (detached_chat_ != nullptr && detached_chat_->composer() != nullptr) {
+    detached_chat_->composer()->SetHistory(SessionComposerHistory(snapshot));
+  }
+}
+
+QString MainWindow::ComposerHistoryKey(
+    const ProfileSnapshot& snapshot) const {
+  return snapshot.name + QLatin1Char('\x1f') + snapshot.selected_session_id;
+}
+
+QStringList MainWindow::SessionComposerHistory(
+    const ProfileSnapshot& snapshot) {
+  const QString key = ComposerHistoryKey(snapshot);
+  const auto found = composer_input_history_.constFind(key);
+  if (found != composer_input_history_.cend()) {
+    return found.value();
+  }
+  QStringList history = ComposerHistory(snapshot);
+  if (!history.isEmpty()) {
+    composer_input_history_.insert(key, history);
+  }
+  return history;
+}
+
+void MainWindow::RememberComposerInput(const QString& text) {
+  const QString trimmed = text.trimmed();
+  if (trimmed.isEmpty()) {
+    return;
+  }
+  const auto snapshot = supervisor_.ActiveSnapshot();
+  if (!snapshot || snapshot->selected_session_id.isEmpty()) {
+    return;
+  }
+  const QString key = ComposerHistoryKey(*snapshot);
+  auto found = composer_input_history_.find(key);
+  if (found == composer_input_history_.end()) {
+    found = composer_input_history_.insert(key, ComposerHistory(*snapshot));
+  }
+  // Submission order is the browse order; repeated prompts are kept because
+  // the user may deliberately re-send one.
+  found->prepend(trimmed);
+  const QStringList history = *found;
+  if (composer_ != nullptr) {
+    composer_->SetHistory(history);
+  }
+  if (detached_chat_ != nullptr && detached_chat_->composer() != nullptr) {
+    detached_chat_->composer()->SetHistory(history);
+  }
 }
 
 void MainWindow::ApplyVoiceState(const ProfileSnapshot& snapshot) {
