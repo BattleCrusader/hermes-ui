@@ -68,6 +68,7 @@
 #include "src/native_prefs.h"
 #include "src/notification_prefs.h"
 #include "src/notification_service.h"
+#include "src/notification_text.h"
 #include "src/pages_view.h"
 #include "src/pet_overlay.h"
 #include "src/profile_selection.h"
@@ -5123,11 +5124,22 @@ void MainWindow::OnGenerationFinished(const ProfileSnapshot& snapshot,
     const QString failure_text = snapshot.turn_error_text.isEmpty()
                                      ? QStringLiteral("The turn failed")
                                      : snapshot.turn_error_text;
+    // Name the prompt that opened the turn; a steer never replaces it. Fall
+    // back to the session title only when the snapshot never saw the prompt.
+    const QString prompt_summary =
+        NotificationPromptSummary(snapshot.turn_prompt_text);
     const QString body =
         kind == NotificationKind::kTurnError
-            ? QStringLiteral("%1: %2")
-                  .arg(session_name, failure_text.left(180))
-            : QStringLiteral("%1 finished in %2s").arg(session_name, seconds);
+            ? (prompt_summary.isEmpty()
+                   ? QStringLiteral("%1: %2")
+                         .arg(session_name, failure_text.left(180))
+                   : QStringLiteral("%1 \u2014 %2")
+                         .arg(prompt_summary, failure_text.left(180)))
+            : (prompt_summary.isEmpty()
+                   ? QStringLiteral("%1 finished in %2s")
+                         .arg(session_name, seconds)
+                   : QStringLiteral("%1 \u00b7 %2s")
+                         .arg(prompt_summary, seconds));
     QString error;
     notifications_->Show(title, body, prefs.mute_sounds, &error);
   }

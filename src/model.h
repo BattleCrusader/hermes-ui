@@ -351,6 +351,9 @@ struct ProfileSnapshot {
   // notification say "Turn failed".
   bool turn_failed = false;
   QString turn_error_text;
+  // The prompt that opened the live turn. Steers deliberately leave it alone,
+  // so a completion notification names what the user originally asked for.
+  QString turn_prompt_text;
   QString gateway_version;
   QString model;
   QString provider;

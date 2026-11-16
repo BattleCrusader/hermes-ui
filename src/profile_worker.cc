@@ -578,7 +578,7 @@ void ProfileWorker::SendPromptInternal(const QString& text,
           message.blocks = ParseMarkdown(trimmed);
           state_.messages.push_back(std::move(message));
         }
-        BeginTurn(&state_);
+        BeginTurn(&state_, trimmed);
         foreground_ = true;
         state_.unread = 0;
       }
@@ -2138,7 +2138,7 @@ void ProfileWorker::AppendUserPromptLocked(const QString& text,
   message.blocks = ParseMarkdown(trimmed);
   state_.messages.push_back(std::move(message));
   if (begin_turn) {
-    BeginTurn(&state_);
+    BeginTurn(&state_, trimmed);
   }
   foreground_ = true;
   state_.unread = 0;

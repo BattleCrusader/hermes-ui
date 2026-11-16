@@ -58,6 +58,7 @@
 #include "src/model_visibility.h"
 #include "src/native_prefs.h"
 #include "src/notification_prefs.h"
+#include "src/notification_text.h"
 #include "src/preferences_dialog.h"
 #include "src/profile_selection.h"
 #include "src/project_appearance.h"
@@ -127,6 +128,7 @@ class PreferencesTest : public QObject {
   void sessionImportAcceptsBareAndWrappedShapes();
   void composerMentionsCompletePathsAndPromoteRefs();
   void notificationPolicyMatchesDesktopAttentionRules();
+  void notificationPromptSummaryKeepsTheOpeningPrompt();
   void turnOutcomeSeparatesSyncErrorsFromTurnFailures();
   void subagentEventsBuildALiveDelegationTree();
   void audioDataUrlDecodesSpeechAndRejectsJunk();
@@ -3859,6 +3861,43 @@ void PreferencesTest::notificationPolicyMatchesDesktopAttentionRules() {
   QVERIFY(!throttle.Allow(QStringLiteral("turnDone:s1"), 10500));
   QVERIFY(throttle.Allow(QStringLiteral("turnDone:s2"), 10500));
   QVERIFY(throttle.Allow(QStringLiteral("turnDone:s1"), 11000));
+}
+
+void PreferencesTest::notificationPromptSummaryKeepsTheOpeningPrompt() {
+  using hermes::ui::BeginTurn;
+  using hermes::ui::NotificationPromptSummary;
+  using hermes::ui::ProfileSnapshot;
+
+  ProfileSnapshot snapshot;
+  snapshot.selected_session_id = QStringLiteral("session-a");
+  BeginTurn(&snapshot,
+            QStringLiteral("  Fix the login bug\n\nand add tests  "));
+  QCOMPARE(snapshot.turn_prompt_text,
+           QStringLiteral("Fix the login bug\n\nand add tests"));
+  // Banner text is one line even when the prompt had paragraphs.
+  QCOMPARE(NotificationPromptSummary(snapshot.turn_prompt_text),
+           QStringLiteral("Fix the login bug and add tests"));
+
+  // A steer never calls BeginTurn, so appending one cannot replace the prompt
+  // that opened the turn.
+  hermes::ui::ChatMessage steer;
+  steer.role = hermes::ui::MessageRole::kUser;
+  hermes::ui::MessageBlock block;
+  block.kind = hermes::ui::BlockKind::kParagraph;
+  block.text = QStringLiteral("also mention the changelog");
+  steer.blocks.push_back(block);
+  snapshot.messages.push_back(steer);
+  QCOMPARE(NotificationPromptSummary(snapshot.turn_prompt_text),
+           QStringLiteral("Fix the login bug and add tests"));
+
+  // Long prompts are cut to a single readable line, not the whole submission.
+  const QString long_prompt =
+      QStringLiteral("Investigate why the gateway ") + QString(200, 'x') +
+      QStringLiteral(" and then summarise every finding for the team");
+  const QString summary = NotificationPromptSummary(long_prompt);
+  QVERIFY(summary.size() <= 140);
+  QVERIFY(summary.endsWith(QChar(0x2026)));
+  QVERIFY(!summary.contains(QLatin1Char('\n')));
 }
 
 void PreferencesTest::turnOutcomeSeparatesSyncErrorsFromTurnFailures() {

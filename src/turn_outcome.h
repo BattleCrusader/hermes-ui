@@ -41,7 +41,7 @@ inline void ApplyProfileError(ProfileSnapshot* snapshot, const QString& error,
 
 // Starts a new turn with a clean outcome. A stale failure from the previous
 // turn must never bleed into the next completion notification.
-inline void BeginTurn(ProfileSnapshot* snapshot) {
+inline void BeginTurn(ProfileSnapshot* snapshot, const QString& prompt = {}) {
   if (snapshot == nullptr) {
     return;
   }
@@ -49,6 +49,10 @@ inline void BeginTurn(ProfileSnapshot* snapshot) {
   snapshot->running_session_id = snapshot->selected_session_id;
   snapshot->turn_failed = false;
   snapshot->turn_error_text.clear();
+  // Empty clears the old prompt so a turn whose text the UI never saw cannot
+  // reuse the previous banner. A steer never calls BeginTurn, so it can never
+  // become the prompt named by the next completion.
+  snapshot->turn_prompt_text = prompt.trimmed();
   snapshot->error_text.clear();
   snapshot->status_text = QStringLiteral("working");
 }
