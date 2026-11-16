@@ -59,6 +59,7 @@
 #include "src/chat_view.h"
 #include "src/command_palette.h"
 #include "src/composer.h"
+#include "src/composer_history.h"
 #include "src/detached_chat.h"
 #include "src/gateway_events.h"
 #include "src/gateway_http.h"
@@ -114,7 +115,7 @@ QStringList ComposerHistory(const ProfileSnapshot& snapshot) {
     if (text.isEmpty()) {
       text = it->raw_text;
     }
-    text = text.trimmed();
+    text = ComposerHistoryEntryFor(text);
     if (!text.isEmpty()) {
       history.append(text);
     }

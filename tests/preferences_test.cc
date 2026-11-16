@@ -53,6 +53,7 @@
 #include "src/browser_automation.h"
 #include "src/cache_store.h"
 #include "src/composer.h"
+#include "src/composer_history.h"
 #include "src/flow_layout.h"
 #include "src/message_history.h"
 #include "src/model.h"
@@ -118,6 +119,7 @@ class PreferencesTest : public QObject {
   void applyEmitsTheSelectedRoute();
   void composerControlsExposeTheSameRoute();
   void composerHistoryBrowsesAndRestoresDraft();
+  void composerHistorySkipsControlFramesAndUnwrapsSteers();
   void composerTokenMeterFormatsContextUsage();
   void composerExpandsStatusLineWhileRunning();
   void selectedTurnRunningFallsBackToStreaming();
@@ -343,6 +345,41 @@ void PreferencesTest::composerHistoryBrowsesAndRestoresDraft() {
   editor->setTextCursor(bottom);
   QTest::keyClick(editor, Qt::Key_Down);
   QCOMPARE(composer.Text(), QStringLiteral("draft text"));
+}
+
+void PreferencesTest::composerHistorySkipsControlFramesAndUnwrapsSteers() {
+  // A steer is a real user message in a marker wrapper; the words inside are
+  // what the user typed, so history must unwrap it rather than skip it.
+  const QString steer = QStringLiteral(
+      "[OUT-OF-BAND USER MESSAGE — a direct message from the user, delivered "
+      "once at this position]\nAlso, should we try one without voice?\n"
+      "[/OUT-OF-BAND USER MESSAGE]");
+  QCOMPARE(hermes::ui::ComposerHistoryEntryFor(steer),
+           QStringLiteral("Also, should we try one without voice?"));
+
+  // Background and context scaffolding is persisted as role:"user" too, but
+  // none of it belongs in an Up-arrow history.
+  QVERIFY(hermes::ui::ComposerHistoryEntryFor(
+              QStringLiteral("[ASYNC DELEGATION BATCH COMPLETE — deleg_x]\n"
+                             "A background fan-out unit finished."))
+              .isEmpty());
+  QVERIFY(hermes::ui::ComposerHistoryEntryFor(
+              QStringLiteral("[System note: recalled memory context]"))
+              .isEmpty());
+  QVERIFY(hermes::ui::ComposerHistoryEntryFor(
+              QStringLiteral("[CONTEXT COMPACTION — earlier turns]"))
+              .isEmpty());
+  QVERIFY(hermes::ui::ComposerHistoryEntryFor(
+              QStringLiteral("Cronjob Response: nightly digest"))
+              .isEmpty());
+
+  // Ordinary prompts survive unchanged, even bracketed user text.
+  QCOMPARE(hermes::ui::ComposerHistoryEntryFor(
+               QStringLiteral("the video copy is pretty boring")),
+           QStringLiteral("the video copy is pretty boring"));
+  QCOMPARE(hermes::ui::ComposerHistoryEntryFor(
+               QStringLiteral("[TODO] tighten the edit")),
+           QStringLiteral("[TODO] tighten the edit"));
 }
 
 void PreferencesTest::composerTokenMeterFormatsContextUsage() {
