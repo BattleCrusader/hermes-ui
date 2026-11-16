@@ -76,6 +76,8 @@ constexpr qreal kQuoteRadius = 7;
 // Forward declaration: hit targets are built before the renderer definition.
 bool IsPreviewableLanguage(const QString& language);
 bool IsCodeLikeBlock(BlockKind kind);
+QString CopyableBlockText(const MessageBlock& block);
+bool HasCopyableBlockText(const MessageBlock& block);
 
 QString FormatTurnDuration(double seconds) {
   const int total = qMax(0, qRound(seconds));
@@ -393,6 +395,10 @@ class TranscriptWidget : public QWidget {
   bool ContinueConnection();
   void SetRequestRespondHandler(
       std::function<void(const QString&, const QJsonObject&)> handler);
+  void SetCodePreviewHandler(
+      std::function<void(const QString&, const QString&)> handler) {
+    code_preview_handler_ = std::move(handler);
+  }
   void SetEditMessageHandler(
       std::function<void(const ChatMessage&, const QString&)> handler) {
     edit_handler_ = std::move(handler);
@@ -567,6 +573,13 @@ class TranscriptWidget : public QWidget {
                              QRectF(block.rect.left(), block.rect.top(),
                                     block.rect.width(), 28)});
         }
+        if (!IsCodeLikeBlock(block.source.kind) &&
+            HasCopyableBlockText(block.source)) {
+          targets.push_back({QStringLiteral("chat:copyblock:%1:%2")
+                                 .arg(i)
+                                 .arg(b),
+                             BlockCopyButtonRect(block)});
+        }
       }
     }
     return targets;
@@ -707,6 +720,7 @@ class TranscriptWidget : public QWidget {
                         LaidMessage* laid_out);
   void PaintMessage(QPainter& painter, const LaidMessage& message) const;
   void PaintCodeBlock(QPainter& painter, const LaidBlock& block) const;
+  void PaintBlockCopyButton(QPainter& painter, const LaidBlock& block) const;
   // Rendered preview for generated SVG/RTF/HTML/Markdown/CSV blocks.
   void OpenCodePreview(const QString& text, const QString& language);
   void PaintImageBlock(QPainter& painter, const LaidBlock& block) const;
@@ -719,6 +733,7 @@ class TranscriptWidget : public QWidget {
   void LayoutMessageActions(LaidMessage* message, const ChatMessage& source);
   static QRectF CopyButtonRect(const LaidBlock& block);
   static QRectF PreviewButtonRect(const LaidBlock& block);
+  static QRectF BlockCopyButtonRect(const LaidBlock& block);
   static QString BodyText(const ChatMessage& message);
   static QString ActionTooltip(const QString& action);
   QFont MonoFont(int size, QFont::Weight weight) const;
@@ -739,6 +754,7 @@ class TranscriptWidget : public QWidget {
   std::map<QString, bool> reasoning_expanded_;
   QString copied_block_;
   int hovered_message_ = -1;
+  int hovered_block_ = -1;
   QString hovered_action_;
   QString search_query_;
   std::vector<std::size_t> search_matches_;
@@ -751,6 +767,7 @@ class TranscriptWidget : public QWidget {
   std::function<void()> delete_conversation_handler_;
   std::function<void(const ChatMessage&, const QString&)> read_aloud_handler_;
   std::function<void(const ChatMessage&, const QString&)> pin_handler_;
+  std::function<void(const QString&, const QString&)> code_preview_handler_;
   std::set<QString> expanded_tools_;
   // Building runs walks every laid-out message and elides plain text. Selection
   // hit testing used to do that on every mouse move (and again while painting),
@@ -964,6 +981,13 @@ QRectF TranscriptWidget::CopyButtonRect(const LaidBlock& block) {
   // did nothing when clicked.
   return QRectF(block.rect.right() - 60, block.rect.top(), 56,
                 kCodeHeaderHeight);
+}
+
+QRectF TranscriptWidget::BlockCopyButtonRect(const LaidBlock& block) {
+  // The right gutter stays outside the text column (kRightPadding leaves 34px)
+  // so the affordance never covers prose or its selection geometry.
+  return QRectF(block.rect.right() + 4, block.rect.top() + 1,
+                kActionRowButton, 24);
 }
 
 QRectF TranscriptWidget::PreviewButtonRect(const LaidBlock& block) {
@@ -1573,6 +1597,7 @@ void TranscriptWidget::mouseMoveEvent(QMouseEvent* event) {
     return;
   }
   int hovered = -1;
+  int hovered_block = -1;
   QString action;
   for (std::size_t index = 0; index < messages_.size(); ++index) {
     const LaidMessage& message = messages_[index];
@@ -1600,6 +1625,24 @@ void TranscriptWidget::mouseMoveEvent(QMouseEvent* event) {
                    : QStringLiteral("regenerate");
     } else if (message.react_rect.contains(position)) {
       action = QStringLiteral("react");
+    } else {
+      for (std::size_t b = 0; b < message.blocks.size(); ++b) {
+        const LaidBlock& block = message.blocks[b];
+        if (IsCodeLikeBlock(block.source.kind) ||
+            !HasCopyableBlockText(block.source)) {
+          continue;
+        }
+        const QRectF copy = BlockCopyButtonRect(block);
+        if (copy.contains(position)) {
+          hovered_block = static_cast<int>(b);
+          action = QStringLiteral("copyblock");
+          break;
+        }
+        if (block.rect.contains(position)) {
+          hovered_block = static_cast<int>(b);
+          break;
+        }
+      }
     }
     break;
   }
@@ -1609,8 +1652,10 @@ void TranscriptWidget::mouseMoveEvent(QMouseEvent* event) {
   if (tooltip != toolTip()) {
     setToolTip(tooltip);
   }
-  if (hovered != hovered_message_ || action != hovered_action_) {
+  if (hovered != hovered_message_ || hovered_block != hovered_block_ ||
+      action != hovered_action_) {
     hovered_message_ = hovered;
+    hovered_block_ = hovered_block;
     hovered_action_ = action;
     update();
   }
@@ -1692,6 +1737,22 @@ void TranscriptWidget::mousePressEvent(QMouseEvent* event) {
     }
     for (const LaidMessage& message : messages_) {
       for (const LaidBlock& block : message.blocks) {
+        if (!IsCodeLikeBlock(block.source.kind) &&
+            HasCopyableBlockText(block.source) &&
+            BlockCopyButtonRect(block).contains(position)) {
+          const QString text = CopyableBlockText(block.source);
+          QGuiApplication::clipboard()->setText(text);
+          copied_block_ = text;
+          InvalidateSelectableRuns();
+          QTimer::singleShot(1200, this, [this]() {
+            copied_block_.clear();
+            InvalidateSelectableRuns();
+            update();
+          });
+          update();
+          event->accept();
+          return;
+        }
         if (block.source.kind == BlockKind::kTool &&
             block.rect.height() >= 28 &&
             QRectF(block.rect.left(), block.rect.top(), block.rect.width(), 28)
@@ -2498,6 +2559,9 @@ QString TranscriptWidget::ActionTooltip(const QString& action) {
   if (action == QStringLiteral("copy_full")) {
     return QStringLiteral("Copy full response");
   }
+  if (action == QStringLiteral("copyblock")) {
+    return QStringLiteral("Copy block");
+  }
   if (action == QStringLiteral("speak")) {
     return QStringLiteral("Read aloud");
   }
@@ -2790,7 +2854,9 @@ void TranscriptWidget::PaintMessage(QPainter& painter,
     PaintReasoning(painter, message);
   }
 
-  for (const LaidBlock& block : message.blocks) {
+  const int message_index = static_cast<int>(&message - messages_.data());
+  for (std::size_t b = 0; b < message.blocks.size(); ++b) {
+    const LaidBlock& block = message.blocks[b];
     if (IsCodeLikeBlock(block.source.kind)) {
       PaintCodeBlock(painter, block);
     } else if (block.source.kind == BlockKind::kImage) {
@@ -2861,6 +2927,12 @@ void TranscriptWidget::PaintMessage(QPainter& painter,
       painter.translate(block.rect.topLeft());
       block.document->drawContents(&painter);
       painter.restore();
+    }
+    if (hovered_message_ == message_index &&
+        hovered_block_ == static_cast<int>(b) &&
+        !IsCodeLikeBlock(block.source.kind) &&
+        HasCopyableBlockText(block.source)) {
+      PaintBlockCopyButton(painter, block);
     }
   }
 
@@ -2972,8 +3044,24 @@ void TranscriptWidget::PaintCodeBlock(QPainter& painter,
   }
 }
 
+void TranscriptWidget::PaintBlockCopyButton(QPainter& painter,
+                                            const LaidBlock& block) const {
+  const QRectF rect = BlockCopyButtonRect(block);
+  const bool copied = !copied_block_.isEmpty() &&
+                      copied_block_ == CopyableBlockText(block.source);
+  if (hovered_action_ == QStringLiteral("copyblock")) {
+    FillRounded(painter, rect, 5, theme_.hover);
+  }
+  DrawCodicon(painter, rect, 0xEBCC,
+              copied ? theme_.accent : theme_.text_tertiary, 12);
+}
+
 void TranscriptWidget::OpenCodePreview(const QString& text,
                                        const QString& language) {
+  if (code_preview_handler_) {
+    code_preview_handler_(text, language);
+    return;
+  }
   const QString lang = language.trimmed().toLower();
   QDialog dialog(this);
   dialog.setObjectName(QStringLiteral("codePreviewDialog"));
@@ -3197,6 +3285,31 @@ ushort ToolIconFor(const QString& name) {
 bool IsCodeLikeBlock(BlockKind kind) {
   return kind == BlockKind::kCode || kind == BlockKind::kDiff ||
          kind == BlockKind::kMath || kind == BlockKind::kMermaid;
+}
+
+// Every generated text block is copyable: prose, headings, list items,
+// tables, quotes, footnotes, tool output, and artifact captions/paths. Rules
+// and empty blocks have nothing to copy. Code-like blocks keep their header
+// Copy chip, so the gutter affordance skips them.
+QString CopyableBlockText(const MessageBlock& block) {
+  if (block.kind == BlockKind::kRule) {
+    return QString();
+  }
+  QString text = block.kind == BlockKind::kTool ? block.detail : block.text;
+  if (block.kind == BlockKind::kArtifact ||
+      block.kind == BlockKind::kImage) {
+    if (!block.detail.isEmpty()) {
+      if (!text.trimmed().isEmpty()) {
+        text += QStringLiteral("\n\n");
+      }
+      text += block.detail;
+    }
+  }
+  return text;
+}
+
+bool HasCopyableBlockText(const MessageBlock& block) {
+  return !CopyableBlockText(block).trimmed().isEmpty();
 }
 
 // Languages whose fenced block can be rendered rather than only copied.
@@ -3568,6 +3681,10 @@ void ChatView::SetReactMessageHandler(ReactionHandler handler) {
 
 void ChatView::SetDeleteConversationHandler(std::function<void()> handler) {
   transcript_->SetDeleteConversationHandler(std::move(handler));
+}
+
+void ChatView::SetCodePreviewHandler(CodePreviewHandler handler) {
+  transcript_->SetCodePreviewHandler(std::move(handler));
 }
 
 void ChatView::TriggerMessageActionForTest(const QString& action,

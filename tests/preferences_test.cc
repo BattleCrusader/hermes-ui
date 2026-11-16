@@ -148,6 +148,7 @@ class PreferencesTest : public QObject {
   void artifactDetectionAndNamingMatchDesktop();
   void rightRailBrowsesGeneratedArtifactVersions();
   void rightRailRendersHtmlArtifactAndSource();
+  void rightRailPreviewsGeneratedMarkdownInSidebar();
   void rightRailShowsTodoTimelineAndFiltersPrompts();
   void sessionSearchBarFindsAndOpensSessions();
   void modelVisibilityFiltersPickerAndPersists();
@@ -1955,6 +1956,86 @@ void PreferencesTest::rightRailRendersHtmlArtifactAndSource() {
   QVERIFY(svg_body->isVisible());
   QVERIFY(svg_body->text().contains(QStringLiteral("<svg")));
   QVERIFY(!svg_widget->isVisible());
+}
+
+void PreferencesTest::rightRailPreviewsGeneratedMarkdownInSidebar() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::RightRail rail(theme);
+  rail.resize(286, 640);
+  rail.show();
+
+  hermes::ui::ProfileSnapshot snapshot = Snapshot();
+  snapshot.selected_session_id = QStringLiteral("s1");
+  rail.SetSnapshot(snapshot);
+
+  rail.PreviewGeneratedText(
+      QStringLiteral("# Release\n\n**Shipped** the native sidebar.\n\n"
+                     "| Item | State |\n|:--|--:|\n| copy | ready |"),
+      QStringLiteral("markdown"));
+  QCoreApplication::processEvents();
+
+  auto* document = rail.findChild<QTextBrowser*>(
+      QStringLiteral("rightRailArtifactPreviewDocument"));
+  auto* body =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailArtifactPreviewBody"));
+  auto* title =
+      rail.findChild<QLabel*>(QStringLiteral("rightRailArtifactPreviewTitle"));
+  auto* browser = rail.findChild<QPushButton*>(
+      QStringLiteral("rightRailArtifactPreviewBrowser"));
+  auto* source = rail.findChild<QPushButton*>(
+      QStringLiteral("rightRailArtifactPreviewSource"));
+  auto* copy = rail.findChild<QPushButton*>(
+      QStringLiteral("rightRailArtifactPreviewCopy"));
+  QVERIFY(document != nullptr);
+  QVERIFY(body != nullptr);
+  QVERIFY(title != nullptr);
+  QVERIFY(browser != nullptr);
+  QVERIFY(source != nullptr);
+  QVERIFY(copy != nullptr);
+  QVERIFY(title->text().contains(QStringLiteral("MARKDOWN")));
+  QVERIFY(document->isVisible());
+  QVERIFY(!body->isVisible());
+  QVERIFY(document->toPlainText().contains(QStringLiteral("Release")));
+  QVERIFY(document->toPlainText().contains(QStringLiteral("Shipped")));
+  QVERIFY(document->toPlainText().contains(QStringLiteral("ready")));
+  QCOMPARE(browser->text(), QStringLiteral("Open in Browser"));
+  QVERIFY(browser->isVisible());
+  QGuiApplication::clipboard()->clear();
+  copy->click();
+  QVERIFY(QGuiApplication::clipboard()->text().startsWith(
+      QStringLiteral("# Release")));
+
+  source->click();
+  QVERIFY(body->isVisible());
+  QVERIFY(body->text().contains(QStringLiteral("# Release")));
+  QVERIFY(!document->isVisible());
+  source->click();
+  QVERIFY(document->isVisible());
+
+  // A transient transcript preview must survive periodic polling, but a
+  // session change owns a different transcript and must close it.
+  hermes::ui::ProfileSnapshot same = snapshot;
+  same.revision = 2;
+  rail.SetSnapshot(same);
+  QCoreApplication::processEvents();
+  QVERIFY(document->isVisible());
+
+  hermes::ui::ProfileSnapshot other = snapshot;
+  other.selected_session_id = QStringLiteral("s2");
+  other.revision = 3;
+  rail.SetSnapshot(other);
+  QCoreApplication::processEvents();
+  QVERIFY(!document->isVisible());
+  QVERIFY(!body->isVisible());
+
+  // CSV preview uses the same sidebar surface and table renderer.
+  rail.PreviewGeneratedText(QStringLiteral("name,count\nalpha,2\nbeta,9"),
+                            QStringLiteral("csv"));
+  QCoreApplication::processEvents();
+  QVERIFY(document->isVisible());
+  QVERIFY(document->toPlainText().contains(QStringLiteral("alpha")));
+  QVERIFY(document->toPlainText().contains(QStringLiteral("beta")));
+  QVERIFY(document->toHtml().contains(QStringLiteral("<table")));
 }
 
 void PreferencesTest::rightRailShowsTodoTimelineAndFiltersPrompts() {

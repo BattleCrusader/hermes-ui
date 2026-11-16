@@ -89,6 +89,11 @@ class ChatView : public QScrollArea {
   void SetRewindMessageHandler(MessageActionHandler handler);
   void SetReactMessageHandler(ReactionHandler handler);
   void SetDeleteConversationHandler(std::function<void()> handler);
+  // Generated HTML/Markdown/CSV/SVG can open in the right rail. The shell owns
+  // that surface; without a handler the transcript keeps the modal fallback.
+  using CodePreviewHandler =
+      std::function<void(const QString& text, const QString& language)>;
+  void SetCodePreviewHandler(CodePreviewHandler handler);
   void SetRequestRespondHandler(
       std::function<void(const QString&, const QJsonObject&)> handler);
   // Test seam: invoke a painted/context action without opening a popup.

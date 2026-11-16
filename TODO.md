@@ -42,6 +42,37 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-17 (every block copies, generated previews use the rail)
+
+**Every assistant text block now has a hover copy affordance, and generated
+HTML/Markdown/CSV/SVG opens in the right rail with Open in Browser.**
+
+- [x] Non-code blocks (paragraph, heading, bullet, quote, table, footnote,
+      artifact, tool, image) expose a right-gutter copy target and clipboard
+      text. Code-like blocks keep the shared header Copy chip, so a code card
+      never grows two competing copy buttons.
+- [x] `CopyableBlockText` is the single source for the gutter click, the
+      “copied” accent state and the tests: empty blocks are skipped, tool
+      rows copy their detail, and artifact/image rows copy the caption plus
+      their path with a blank-line separator.
+- [x] Preview routing goes through `ChatView::SetCodePreviewHandler`. The main
+      window reveals the right rail and calls
+      `RightRail::PreviewGeneratedText`; detached chat and standalone tests
+      keep the old modal fallback when no handler is installed.
+- [x] The rail reuses `StyleMarkdownPreview` for Markdown (GitHub dialect) and
+      renders CSV as a table. The action row now says **Open in Browser**;
+      Markdown and CSV are converted to HTML before the temp file is opened,
+      and the button is visible for every renderable generated preview.
+- [x] Transient transcript previews survive periodic session polling. They
+      close when the selected session changes, while selecting a real artifact
+      still replaces them normally.
+- [x] Tests: `everyGeneratedBlockOffersCopy` checks all nine non-code targets
+      and their clipboard text (and that a rule/code block has no gutter
+      duplicate); `previewRoutesToSideRailHandler` proves Preview reaches the
+      shell; `rightRailPreviewsGeneratedMarkdownInSidebar` covers Markdown,
+      source toggle, Open in Browser, polling survival, session-change close
+      and CSV. Full native suite **10/10 passed**.
+
 ## Status update — 2026-11-16 (slash completion prefixes the draft)
 
 **Typing `/` at the start of an existing draft now opens completion, and

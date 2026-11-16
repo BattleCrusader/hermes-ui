@@ -95,6 +95,9 @@ class RightRail : public QWidget {
   // Accordion sections replace the old tab strip. Expanding is idempotent and
   // scrolls the section into view; the collapsed bar uses the same path.
   void ExpandSection(const QString& id);
+  // Generated transcript content (HTML/Markdown/CSV/SVG) opens here instead of
+  // a modal: the Outputs section owns Copy, Source, Save and Open in Browser.
+  void PreviewGeneratedText(const QString& text, const QString& language);
   // Test/probe hook: run a shell command in the embedded terminal and let the
   // normal PTY path render it.
   void RunTerminalCommandForTest(const QString& command);
@@ -321,6 +324,12 @@ class RightRail : public QWidget {
   SessionArtifact preview_artifact_;
   QString artifact_home_;
   bool artifact_show_source_ = false;
+  // A transcript preview is not one of the collected session artifacts.
+  // RebuildArtifacts must not close it on every polling refresh; only a
+  // session change or another artifact selection replaces it.
+  bool preview_transient_ = false;
+  QString preview_session_;
+  QString current_session_id_;
   quint64 artifact_scroll_generation_ = 0;
   bool artifacts_rendered_ = false;
   QString artifact_render_signature_;

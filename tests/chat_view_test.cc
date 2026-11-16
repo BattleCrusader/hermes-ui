@@ -241,6 +241,8 @@ class ChatViewTest : public QObject {
   void quoteCardWrapsAndContainsText();
   void consecutiveQuoteLinesRenderAsOneCard();
   void codeCopyTargetCoversTheWholeLabel();
+  void everyGeneratedBlockOffersCopy();
+  void previewRoutesToSideRailHandler();
   void appearancePreferencesReshapeTranscript();
   void markdownParsesRichBlocksAndInlineSpans();
   void markdownBlocksRenderInTranscript();
@@ -606,6 +608,133 @@ void ChatViewTest::codeCopyTargetCoversTheWholeLabel() {
                            qRound(copy_rect.center().y())));
   QCOMPARE(QGuiApplication::clipboard()->text(),
            QStringLiteral("int answer = 42;"));
+}
+
+void ChatViewTest::everyGeneratedBlockOffersCopy() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::ChatView view(theme);
+  view.resize(900, 900);
+  view.show();
+
+  auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
+  snapshot->name = QStringLiteral("default");
+  snapshot->label = QStringLiteral("default");
+  snapshot->revision = 1;
+  hermes::ui::ChatMessage message;
+  message.role = hermes::ui::MessageRole::kAssistant;
+  message.author = QStringLiteral("Hermes");
+  message.timestamp = QDateTime::currentDateTime();
+  message.blocks = {
+      {.kind = hermes::ui::BlockKind::kParagraph,
+       .text = QStringLiteral("plain paragraph")},
+      {.kind = hermes::ui::BlockKind::kHeading,
+       .text = QStringLiteral("heading")},
+      {.kind = hermes::ui::BlockKind::kBullet,
+       .text = QStringLiteral("bullet")},
+      {.kind = hermes::ui::BlockKind::kQuote,
+       .text = QStringLiteral("quote")},
+      {.kind = hermes::ui::BlockKind::kTable,
+       .text = QStringLiteral("| a | b |"),
+       .detail = QStringLiteral("<table><tr><td>a</td></tr></table>")},
+      {.kind = hermes::ui::BlockKind::kFootnote,
+       .text = QStringLiteral("footnote")},
+      {.kind = hermes::ui::BlockKind::kArtifact,
+       .text = QStringLiteral("Report"),
+       .detail = QStringLiteral("artifacts/report.md")},
+      {.kind = hermes::ui::BlockKind::kTool,
+       .text = QStringLiteral("terminal"),
+       .detail = QStringLiteral("$ make\nok")},
+      {.kind = hermes::ui::BlockKind::kImage,
+       .text = QStringLiteral("Chart"),
+       .detail = QStringLiteral("artifacts/chart.png")},
+      {.kind = hermes::ui::BlockKind::kRule},
+      {.kind = hermes::ui::BlockKind::kCode,
+       .text = QStringLiteral("int answer = 42;"),
+       .language = QStringLiteral("cpp")},
+  };
+  snapshot->messages.push_back(message);
+  view.SetSnapshot(snapshot);
+  QTest::qWait(30);
+
+  QMap<QString, QRectF> copies;
+  for (const hermes::ui::ClickTarget& target : view.ClickTargets()) {
+    if (target.name.startsWith(QStringLiteral("chat:copyblock:"))) {
+      copies.insert(target.name, target.rect);
+    }
+  }
+  QCOMPARE(copies.size(), 9);
+  for (int index = 0; index < 9; ++index) {
+    QVERIFY2(copies.contains(QStringLiteral("chat:copyblock:0:%1").arg(index)),
+             qPrintable(QStringLiteral("missing block %1").arg(index)));
+  }
+  QVERIFY(!copies.contains(QStringLiteral("chat:copyblock:0:9")));
+  // Code-like blocks keep their header chip instead of a gutter duplicate.
+  QVERIFY(!copies.contains(QStringLiteral("chat:copyblock:0:10")));
+
+  const QMap<QString, QString> expected = {
+      {QStringLiteral("chat:copyblock:0:0"), QStringLiteral("plain paragraph")},
+      {QStringLiteral("chat:copyblock:0:1"), QStringLiteral("heading")},
+      {QStringLiteral("chat:copyblock:0:2"), QStringLiteral("bullet")},
+      {QStringLiteral("chat:copyblock:0:3"), QStringLiteral("quote")},
+      {QStringLiteral("chat:copyblock:0:4"), QStringLiteral("| a | b |")},
+      {QStringLiteral("chat:copyblock:0:5"), QStringLiteral("footnote")},
+      {QStringLiteral("chat:copyblock:0:6"),
+       QStringLiteral("Report\n\nartifacts/report.md")},
+      {QStringLiteral("chat:copyblock:0:7"), QStringLiteral("$ make\nok")},
+      {QStringLiteral("chat:copyblock:0:8"),
+       QStringLiteral("Chart\n\nartifacts/chart.png")},
+  };
+  for (auto it = expected.cbegin(); it != expected.cend(); ++it) {
+    QGuiApplication::clipboard()->clear();
+    QTest::mouseClick(view.widget(), Qt::LeftButton, Qt::NoModifier,
+                      copies.value(it.key()).center().toPoint());
+    QTest::qWait(10);
+    QCOMPARE(QGuiApplication::clipboard()->text(), it.value());
+  }
+}
+
+void ChatViewTest::previewRoutesToSideRailHandler() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::ChatView view(theme);
+  view.resize(800, 600);
+  view.show();
+
+  QString previewed_text;
+  QString previewed_language;
+  view.SetCodePreviewHandler(
+      [&](const QString& text, const QString& language) {
+        previewed_text = text;
+        previewed_language = language;
+      });
+
+  auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
+  snapshot->name = QStringLiteral("default");
+  snapshot->label = QStringLiteral("default");
+  snapshot->revision = 1;
+  hermes::ui::ChatMessage message;
+  message.role = hermes::ui::MessageRole::kAssistant;
+  message.author = QStringLiteral("Hermes");
+  message.timestamp = QDateTime::currentDateTime();
+  message.blocks.push_back(hermes::ui::MessageBlock{
+      .kind = hermes::ui::BlockKind::kCode,
+      .text = QStringLiteral("# Release\n\n- shipped"),
+      .language = QStringLiteral("markdown"),
+  });
+  snapshot->messages.push_back(message);
+  view.SetSnapshot(snapshot);
+  QTest::qWait(20);
+
+  QRectF preview;
+  for (const hermes::ui::ClickTarget& target : view.ClickTargets()) {
+    if (target.name == QStringLiteral("chat:preview:0:0")) {
+      preview = target.rect;
+    }
+  }
+  QVERIFY(!preview.isNull());
+  QTest::mouseClick(view.widget(), Qt::LeftButton, Qt::NoModifier,
+                    preview.center().toPoint());
+  QCOMPARE(previewed_language, QStringLiteral("markdown"));
+  QCOMPARE(previewed_text, QStringLiteral("# Release\n\n- shipped"));
 }
 
 void ChatViewTest::markdownParsesRichBlocksAndInlineSpans() {

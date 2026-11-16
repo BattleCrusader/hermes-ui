@@ -420,6 +420,11 @@ void MainWindow::BuildUi() {
         ReactToMessage(message, emoji);
       });
   chat_view_->SetDeleteConversationHandler([this]() { DeleteConversation(); });
+  chat_view_->SetCodePreviewHandler(
+      [this](const QString& text, const QString& language) {
+        SetRightRailEnabled(true);
+        right_rail_->PreviewGeneratedText(text, language);
+      });
   chat_layout->addWidget(chat_view_, 1);
 
   // Workspace pages share the chat column: the desktop mounts them inside the

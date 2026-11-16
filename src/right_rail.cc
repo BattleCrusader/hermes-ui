@@ -33,6 +33,7 @@
 #include <QSvgWidget>
 #include <QTemporaryFile>
 #include <QTextBrowser>
+#include <QTextDocument>
 #include <QTextCursor>
 #include <QTextOption>
 #include <QTimer>
@@ -293,6 +294,55 @@ QString ComposeArtifactHtml(const QString& content) {
          content + QStringLiteral("</body></html>");
 }
 
+bool IsMarkdownKind(const QString& kind) {
+  return kind == QStringLiteral("markdown") || kind == QStringLiteral("md");
+}
+
+QString MarkdownToHtml(const QString& content) {
+  QTextDocument document;
+  document.setMarkdown(content, QTextDocument::MarkdownDialectGitHub);
+  const QString html = document.toHtml();
+  const QRegularExpression body(
+      QStringLiteral("<body[^>]*>(.*)</body>"),
+      QRegularExpression::DotMatchesEverythingOption |
+          QRegularExpression::CaseInsensitiveOption);
+  const QRegularExpressionMatch match = body.match(html);
+  if (match.hasMatch()) {
+    return match.captured(1);
+  }
+  return html;
+}
+
+QString ComposeCsvHtml(const QString& content) {
+  QString html = QStringLiteral(
+      "<table cellspacing='0' cellpadding='7' border='0' "
+      "style='border-collapse:collapse;width:100%;'>");
+  const QStringList lines = content.split('\n');
+  const int limit = std::min(static_cast<int>(lines.size()), 500);
+  for (int row = 0; row < limit; ++row) {
+    html += row == 0 ? QStringLiteral("<tr style='font-weight:600;'>")
+                     : QStringLiteral("<tr>");
+    for (const QString& cell : lines.at(row).split(',')) {
+      html += QStringLiteral("<td style='border-bottom:1px solid "
+                             "rgba(127,127,127,.28);text-align:left;'>%1</td>")
+                  .arg(cell.toHtmlEscaped());
+    }
+    html += QStringLiteral("</tr>");
+  }
+  html += QStringLiteral("</table>");
+  return html;
+}
+
+QString BrowserDocumentHtml(const QString& content, const QString& kind) {
+  if (IsMarkdownKind(kind)) {
+    return ComposeArtifactHtml(MarkdownToHtml(content));
+  }
+  if (kind == QStringLiteral("csv")) {
+    return ComposeArtifactHtml(ComposeCsvHtml(content));
+  }
+  return ComposeArtifactHtml(content);
+}
+
 QString CurrentArtifactContent(const SessionArtifact& artifact) {
   if (artifact.versions.empty()) {
     return QString();
@@ -313,14 +363,14 @@ ArtifactKind RailArtifactKind(const QString& kind) {
   return ArtifactKind::kCode;
 }
 
-bool OpenArtifactHtmlInBrowser(const QString& content) {
+bool OpenArtifactHtmlInBrowser(const QString& content, const QString& kind) {
   QTemporaryFile file(QDir::tempPath() +
                       QStringLiteral("/hermes-artifact-XXXXXX.html"));
   file.setAutoRemove(false);
   if (!file.open()) {
     return false;
   }
-  const QByteArray bytes = ComposeArtifactHtml(content).toUtf8();
+  const QByteArray bytes = BrowserDocumentHtml(content, kind).toUtf8();
   if (file.write(bytes) != bytes.size()) {
     return false;
   }
@@ -1647,7 +1697,7 @@ RightRail::RightRail(const Theme& theme, QWidget* parent)
                     QStringLiteral("rightRailArtifactPreviewSource"));
   action_layout->addWidget(artifact_preview_source_);
   artifact_preview_browser_ =
-      PreviewAction(action_row, QStringLiteral("Browser"),
+      PreviewAction(action_row, QStringLiteral("Open in Browser"),
                     QStringLiteral("rightRailArtifactPreviewBrowser"));
   action_layout->addWidget(artifact_preview_browser_);
   artifact_preview_open_ =
@@ -1703,7 +1753,8 @@ RightRail::RightRail(const Theme& theme, QWidget* parent)
                      const QString content =
                          CurrentArtifactContent(preview_artifact_);
                      if (!content.isEmpty()) {
-                       OpenArtifactHtmlInBrowser(content);
+                       OpenArtifactHtmlInBrowser(content,
+                                                 preview_artifact_.kind);
                      }
                    });
   QObject::connect(
@@ -4014,6 +4065,10 @@ void RightRail::RebuildArtifacts(const ProfileSnapshot& snapshot) {
   if (layout == nullptr) {
     return;
   }
+  if (preview_transient_ &&
+      snapshot.selected_session_id != preview_session_) {
+    CloseArtifactPreview();
+  }
   const int pane_scroll = sections_scroll_ != nullptr
                               ? sections_scroll_->verticalScrollBar()->value()
                               : 0;
@@ -4044,7 +4099,11 @@ void RightRail::RebuildArtifacts(const ProfileSnapshot& snapshot) {
       preview_match = &artifact;
     }
   }
-  if (preview_match == nullptr) {
+  if (preview_transient_) {
+    // The preview belongs to a transcript block, not the artifact registry.
+    // Keep it while the same session keeps polling; the next real artifact
+    // selection or a session change replaces it.
+  } else if (preview_match == nullptr) {
     CloseArtifactPreview();
   } else if (preview_artifact_.generated) {
     const int index = preview_artifact_.version_index;
@@ -4113,6 +4172,8 @@ void RightRail::RebuildArtifacts(const ProfileSnapshot& snapshot) {
 void RightRail::CloseArtifactPreview() {
   preview_artifact_ = SessionArtifact{};
   artifact_show_source_ = false;
+  preview_transient_ = false;
+  preview_session_.clear();
   if (artifact_preview_ == nullptr) {
     return;
   }
@@ -4132,6 +4193,8 @@ void RightRail::CloseArtifactPreview() {
 
 void RightRail::ShowArtifactPreview(const SessionArtifact& artifact) {
   preview_artifact_ = artifact;
+  preview_transient_ = false;
+  preview_session_.clear();
   artifact_show_source_ = false;
   artifact_preview_->show();
   artifact_preview_body_->show();
@@ -4147,11 +4210,12 @@ void RightRail::ShowArtifactPreview(const SessionArtifact& artifact) {
   artifact_preview_copy_->setVisible(artifact.generated);
   artifact_preview_save_->setVisible(artifact.generated);
   const bool renderable =
-      artifact.generated && (artifact.kind == QStringLiteral("html") ||
-                             artifact.kind == QStringLiteral("svg"));
+      artifact.generated &&
+      (artifact.kind == QStringLiteral("html") ||
+       artifact.kind == QStringLiteral("svg") ||
+       IsMarkdownKind(artifact.kind) || artifact.kind == QStringLiteral("csv"));
   artifact_preview_source_->setVisible(renderable);
-  artifact_preview_browser_->setVisible(
-      artifact.generated && artifact.kind == QStringLiteral("html"));
+  artifact_preview_browser_->setVisible(renderable);
   artifact_preview_open_->setVisible(!artifact.generated);
 
   if (artifact.generated) {
@@ -4220,8 +4284,11 @@ void RightRail::RenderArtifactPreview() {
   artifact_preview_body_->setPixmap(QPixmap());
   artifact_preview_document_->hide();
   artifact_preview_svg_->hide();
-  const bool renderable = preview_artifact_.kind == QStringLiteral("html") ||
-                          preview_artifact_.kind == QStringLiteral("svg");
+  const bool renderable =
+      preview_artifact_.kind == QStringLiteral("html") ||
+      preview_artifact_.kind == QStringLiteral("svg") ||
+      IsMarkdownKind(preview_artifact_.kind) ||
+      preview_artifact_.kind == QStringLiteral("csv");
   artifact_preview_source_->setText(artifact_show_source_
                                         ? QStringLiteral("Rendered")
                                         : QStringLiteral("Source"));
@@ -4230,6 +4297,20 @@ void RightRail::RenderArtifactPreview() {
       !artifact_show_source_) {
     artifact_preview_body_->hide();
     artifact_preview_document_->setHtml(ComposeArtifactHtml(content));
+    artifact_preview_document_->show();
+    return;
+  }
+  if (IsMarkdownKind(preview_artifact_.kind) && !artifact_show_source_) {
+    artifact_preview_body_->hide();
+    artifact_preview_document_->setMarkdown(content);
+    StyleMarkdownPreview(artifact_preview_document_, theme_);
+    artifact_preview_document_->show();
+    return;
+  }
+  if (preview_artifact_.kind == QStringLiteral("csv") &&
+      !artifact_show_source_) {
+    artifact_preview_body_->hide();
+    artifact_preview_document_->setHtml(ComposeCsvHtml(content));
     artifact_preview_document_->show();
     return;
   }
@@ -4260,7 +4341,42 @@ void RightRail::RenderArtifactPreview() {
   }
 }
 
+void RightRail::PreviewGeneratedText(const QString& text,
+                                     const QString& language) {
+  if (text.trimmed().isEmpty()) {
+    return;
+  }
+  const QString lang = language.trimmed().toLower();
+  QString kind = QStringLiteral("code");
+  if (lang == QStringLiteral("html") || lang == QStringLiteral("htm")) {
+    kind = QStringLiteral("html");
+  } else if (lang == QStringLiteral("svg")) {
+    kind = QStringLiteral("svg");
+  } else if (lang == QStringLiteral("md") ||
+             lang == QStringLiteral("markdown")) {
+    kind = QStringLiteral("markdown");
+  } else if (lang == QStringLiteral("csv")) {
+    kind = QStringLiteral("csv");
+  }
+  SessionArtifact artifact;
+  artifact.generated = true;
+  artifact.kind = kind;
+  artifact.language = lang;
+  artifact.label = QStringLiteral("Generated %1 preview")
+                       .arg(lang.isEmpty() ? kind : lang.toUpper());
+  artifact.id = QStringLiteral("transcript-preview-%1").arg(kind);
+  artifact.versions.push_back(ArtifactVersion{
+      text, QDateTime::currentMSecsSinceEpoch(), ArtifactContentHash(text)});
+  artifact.version_index = 0;
+  ShowArtifactPreview(artifact);
+  preview_transient_ = true;
+  preview_session_ = current_session_id_;
+  ExpandSection(QStringLiteral("artifacts"));
+  update();
+}
+
 void RightRail::SetSnapshot(const ProfileSnapshot& snapshot) {
+  current_session_id_ = snapshot.selected_session_id;
   RebuildContext(snapshot);
   RebuildAgents(snapshot);
   RebuildTodos(snapshot);
