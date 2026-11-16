@@ -42,6 +42,29 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-16 (history shows the user's words, not control frames)
+
+**Up-arrow history now skips machine-authored `role:"user"` control frames and
+unwraps steers, so the first Up recalls a real prompt or command instead of a
+wall of background scaffolding.**
+
+- [x] The live session showed why real-app history looked broken: the newest
+      entries were `[OUT-OF-BAND USER MESSAGE …]` (a steer), `[ASYNC DELEGATION
+      BATCH COMPLETE …]`, and context/system notices, all persisted as
+      `role:"user"` by the agent. Pressing Up loaded the scaffolding rather than
+      the prompt the user remembered typing.
+- [x] `src/composer_history.h` normalizes transcript rows: steer markers unwrap
+      to their body text, while `[System:`, `[SYSTEM]`, `[CONTEXT`, `[PRIOR
+      CONTEXT`, `[IMPORTANT: Background`, `[Your active task list`, `[Planning
+      state preserved`, `[ASYNC DELEGATION`, `Cronjob Response:`, runtime/system
+      notes, and legacy summary openers are skipped.
+- [x] Ordinary prompts, including bracketed user text such as `[TODO] …`, pass
+      through unchanged. `ComposerHistory` applies the filter before seeding the
+      per-session ring, so a restart no longer re-seeds scaffolding.
+- [x] `composerHistorySkipsControlFramesAndUnwrapsSteers` covers steer
+      unwrapping, delegation/context/system/cron filtering, and ordinary
+      prompts. Full native suite **10/10 passed** in 21.29 s.
+
 ## Status update — 2026-11-16 (composer history follows the caret)
 
 **Up/Down now browse every submission for the selected session, including local
