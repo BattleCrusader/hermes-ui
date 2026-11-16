@@ -2735,7 +2735,7 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
     // pages until the lineage is exhausted. This is a REST SQLite read and the
     // result is cached for the lifetime of the profile worker.
     std::vector<std::pair<qint64, QString>> history_rows;
-    bool history_complete = false;
+    bool history_failed = false;
     for (int offset = 0; offset < kComposerHistoryFetchLimit;
          offset += kMessageFetchLimit) {
       QJsonDocument history_document;
@@ -2748,6 +2748,7 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
                   .arg(kMessageFetchLimit)
                   .arg(offset),
               &history_document, &history_error)) {
+        history_failed = true;
         break;
       }
       const QJsonArray history_messages =
@@ -2763,7 +2764,6 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
         }
       }
       if (history_messages.size() < kMessageFetchLimit) {
-        history_complete = true;
         break;
       }
     }
@@ -2775,9 +2775,10 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
       for (auto it = history_rows.rbegin(); it != history_rows.rend(); ++it) {
         composer_history.append(it->second);
       }
-      // Only pin a complete lineage. A partial page is still better than no
-      // recall, but the next refresh can fill in the rest.
-      if (history_complete) {
+      // A failed HTTP page should be retried on the next refresh. A lineage
+      // that merely hit the safety cap is still worth caching so every refresh
+      // does not repeat the full walk.
+      if (!history_failed) {
         composer_history_cache_.insert(session_id, composer_history);
       }
       history_fetched = true;
