@@ -311,6 +311,14 @@ void PreferencesTest::composerHistoryBrowsesAndRestoresDraft() {
   editor->moveCursor(QTextCursor::Start);
   QTest::keyClick(editor, Qt::Key_Up);
   QCOMPARE(composer.Text(), QStringLiteral("newest prompt"));
+  // A caret moved into a recalled prompt is for text editing, not for walking
+  // further back through history.
+  QTextCursor middle = editor->textCursor();
+  middle.setPosition(3);
+  editor->setTextCursor(middle);
+  QTest::keyClick(editor, Qt::Key_Up);
+  QCOMPARE(composer.Text(), QStringLiteral("newest prompt"));
+  editor->moveCursor(QTextCursor::End);
   QTest::keyClick(editor, Qt::Key_Up);
   QCOMPARE(composer.Text(), QStringLiteral("older prompt"));
   QTest::keyClick(editor, Qt::Key_Up);

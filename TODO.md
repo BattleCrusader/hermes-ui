@@ -50,9 +50,10 @@ absolute end.**
 
 - [x] Gate history on the absolute caret, not the visual line:
       `cursor.position() == 0` for entering/advancing Up and `cursor.atEnd()`
-      for Down. A one-line draft with the caret at the end no longer jumps into
-      history; repeated Up still works because browsing bypasses the entry test
-      via `history_cursor_ >= 0`, and `SetText` leaves the caret at the end.
+      for Down. A caret moved into the middle of a recalled prompt now edits
+      text instead of walking further back; only an unedited entry whose caret
+      is still at its end may advance, which is what makes repeated Up cycle.
+      A one-line draft at the end no longer jumps into history.
 - [x] Root cause of “only a few prompts”: the REST transcript request used the
       server default `include_compacted=false`, so rows archived by context
       compaction never reached the composer. `FetchMessages` now pages backwards

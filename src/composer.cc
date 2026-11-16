@@ -1608,9 +1608,15 @@ bool Composer::eventFilter(QObject* watched, QEvent* event) {
            key_event->key() == Qt::Key_Down) &&
           !history_.isEmpty()) {
         const QTextCursor cursor = editor_->textCursor();
-        if (!cursor.hasSelection() &&
-            key_event->key() == Qt::Key_Up &&
-            (history_cursor_ >= 0 || cursor.position() == 0)) {
+        // Up belongs to the start of the prompt. The one exception is an
+        // unedited history entry whose caret is still at its end, which is how
+        // repeated Up advances to older entries. Moving the caret into the
+        // middle re-enables normal cursor movement instead of history.
+        const bool untouched_history =
+            history_cursor_ >= 0 && history_cursor_ < history_.size() &&
+            cursor.atEnd() && Text() == history_.at(history_cursor_);
+        if (!cursor.hasSelection() && key_event->key() == Qt::Key_Up &&
+            (cursor.position() == 0 || untouched_history)) {
           if (history_cursor_ < 0) {
             // Keep whatever the user was composing before entering history.
             history_draft_ = Text();
