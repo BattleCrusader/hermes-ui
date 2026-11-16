@@ -500,6 +500,19 @@ void Composer::SetPinnedContextCount(int count) {
 }
 
 void Composer::SetHistory(const QStringList& history) {
+  // Transcript updates arrive continuously while a reply streams. If the user
+  // is already browsing, keep them on the same prompt instead of resetting to
+  // the newest entry on every update (which made repeated Up presses look
+  // like they did nothing).
+  if (history_cursor_ >= 0 && history_cursor_ < history_.size()) {
+    const QString selected = history_.at(history_cursor_);
+    const int next = history.indexOf(selected);
+    if (next >= 0) {
+      history_ = history;
+      history_cursor_ = next;
+      return;
+    }
+  }
   history_ = history;
   history_cursor_ = -1;
   history_draft_.clear();
@@ -969,6 +982,11 @@ void Composer::SetQueuedPrompts(int count) {
 void Composer::Clear() {
   editor_->clear();
   attachments_.clear();
+  // A submitted prompt (or a handled command) starts a new shell-history
+  // session; the next Up should recall the newest entry, not resume a browse
+  // position from before the submission.
+  history_cursor_ = -1;
+  history_draft_.clear();
   update();
 }
 
@@ -1615,7 +1633,11 @@ bool Composer::eventFilter(QObject* watched, QEvent* event) {
         Submit();
         return true;
       }
-      if (key_event->modifiers() == Qt::NoModifier &&
+      // Some external keyboards report arrow keys with KeypadModifier. That
+      // is still a plain Up/Down for history, not a shortcut chord.
+      const Qt::KeyboardModifiers history_modifiers =
+          key_event->modifiers() & ~Qt::KeypadModifier;
+      if (history_modifiers == Qt::NoModifier &&
           (key_event->key() == Qt::Key_Up ||
            key_event->key() == Qt::Key_Down) &&
           !history_.isEmpty()) {

@@ -333,6 +333,49 @@ void PreferencesTest::composerHistoryBrowsesAndRestoresDraft() {
   QTest::keyClick(editor, Qt::Key_Up);
   QCOMPARE(composer.Text(), QStringLiteral("newest prompt"));
 
+  // External keyboards can report arrow keys with KeypadModifier; that is
+  // still plain history navigation.
+  composer.SetHistory({QStringLiteral("keypad prompt")});
+  composer.SetText(QStringLiteral("draft text"));
+  editor->moveCursor(QTextCursor::End);
+  QTest::keyClick(editor, Qt::Key_Up, Qt::KeypadModifier);
+  QCOMPARE(composer.Text(), QStringLiteral("keypad prompt"));
+
+  // A streaming reply refreshes the transcript history while the user is
+  // browsing. The cursor must follow the same prompt, not snap back to the
+  // newest entry on every update.
+  composer.SetHistory({QStringLiteral("newest prompt"),
+                       QStringLiteral("older prompt")});
+  composer.SetText(QStringLiteral("draft text"));
+  editor->moveCursor(QTextCursor::End);
+  QTest::keyClick(editor, Qt::Key_Up);
+  QCOMPARE(composer.Text(), QStringLiteral("newest prompt"));
+  composer.SetHistory({QStringLiteral("streaming row"),
+                       QStringLiteral("newest prompt"),
+                       QStringLiteral("older prompt")});
+  QTest::keyClick(editor, Qt::Key_Up);
+  QCOMPARE(composer.Text(), QStringLiteral("older prompt"));
+  QTest::keyClick(editor, Qt::Key_Down);
+  QCOMPARE(composer.Text(), QStringLiteral("newest prompt"));
+  QTest::keyClick(editor, Qt::Key_Down);
+  QCOMPARE(composer.Text(), QStringLiteral("streaming row"));
+  QTest::keyClick(editor, Qt::Key_Down);
+  QCOMPARE(composer.Text(), QStringLiteral("draft text"));
+
+  // Submitting clears the browse position, so the next Up starts at the
+  // newest entry rather than resuming mid-history.
+  composer.SetHistory({QStringLiteral("newest prompt"),
+                       QStringLiteral("older prompt")});
+  composer.SetText(QStringLiteral("draft text"));
+  editor->moveCursor(QTextCursor::End);
+  QTest::keyClick(editor, Qt::Key_Up);
+  QTest::keyClick(editor, Qt::Key_Up);
+  composer.Clear();
+  composer.SetText(QStringLiteral("next draft"));
+  editor->moveCursor(QTextCursor::End);
+  QTest::keyClick(editor, Qt::Key_Up);
+  QCOMPARE(composer.Text(), QStringLiteral("newest prompt"));
+
   // Down leaves history from any point on the final visual line.
   composer.SetHistory({QStringLiteral("newest line\nsecond line"),
                        QStringLiteral("older prompt")});
@@ -380,6 +423,17 @@ void PreferencesTest::composerHistorySkipsControlFramesAndUnwrapsSteers() {
   QCOMPARE(hermes::ui::ComposerHistoryEntryFor(
                QStringLiteral("[TODO] tighten the edit")),
            QStringLiteral("[TODO] tighten the edit"));
+
+  // A fresh session has no transcript rows; the profile-wide ring supplies the
+  // older prompts, with duplicates already in the session history removed.
+  const QStringList merged = hermes::ui::MergeComposerHistories(
+      {QStringLiteral("newest prompt"), QStringLiteral("older prompt")},
+      {QStringLiteral("newest prompt"),
+       QStringLiteral("from another session")});
+  QCOMPARE(merged,
+           QStringList({QStringLiteral("newest prompt"),
+                        QStringLiteral("older prompt"),
+                        QStringLiteral("from another session")}));
 }
 
 void PreferencesTest::composerTokenMeterFormatsContextUsage() {

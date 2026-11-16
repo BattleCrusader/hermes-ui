@@ -179,6 +179,10 @@ class MainWindow : public QWidget {
   QString ComposerHistoryKey(const ProfileSnapshot& snapshot) const;
   QStringList SessionComposerHistory(const ProfileSnapshot& snapshot);
   void RememberComposerInput(const QString& text);
+  void LoadComposerProfileHistory();
+  void SaveComposerProfileHistory();
+  void BackfillComposerProfileHistory(const QString& profile,
+                                      const QStringList& entries);
   void ApplyRunIndicators(const ProfileSnapshot& snapshot);
   void ApplyVoiceState(const ProfileSnapshot& snapshot);
   void ApplyGatewayEvents(const ProfileSnapshot& snapshot);
@@ -209,6 +213,10 @@ class MainWindow : public QWidget {
   qint64 composer_history_last_row_ = -1;
   QString composer_history_tail_;
   QHash<QString, QStringList> composer_input_history_;
+  // Profile-wide history is the fallback when the active session has no
+  // prompts yet (a fresh chat) and is persisted across restarts.
+  QHash<QString, QStringList> composer_profile_history_;
+  bool composer_profile_history_loaded_ = false;
   SessionSearchBar* session_search_ = nullptr;
   RightRail* right_rail_ = nullptr;
   QSplitter* body_splitter_ = nullptr;

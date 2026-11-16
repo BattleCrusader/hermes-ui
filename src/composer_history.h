@@ -78,6 +78,20 @@ inline QString ComposerHistoryEntryFor(const QString& text) {
   return trimmed;
 }
 
+// Old prompts from earlier sessions are appended after the current session's
+// history. Shell-style recall should still work when a chat is brand new and
+// the transcript has nothing to seed from.
+inline QStringList MergeComposerHistories(const QStringList& session,
+                                          const QStringList& profile) {
+  QStringList merged = session;
+  for (const QString& entry : profile) {
+    if (!entry.isEmpty() && !merged.contains(entry)) {
+      merged.append(entry);
+    }
+  }
+  return merged;
+}
+
 }  // namespace hermes::ui
 
 #endif  // HERMES_UI_SRC_COMPOSER_HISTORY_H_

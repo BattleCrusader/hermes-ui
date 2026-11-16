@@ -92,6 +92,8 @@
 namespace hermes::ui {
 namespace {
 
+constexpr int kComposerHistoryLimit = 100;
+
 // The desktop derives its composer history from the live session messages
 // instead of keeping a parallel ring; do the same so edited/resumed sessions
 // cannot drift.
@@ -4954,18 +4956,90 @@ QString MainWindow::ComposerHistoryKey(
   return snapshot.name + QLatin1Char('\x1f') + snapshot.selected_session_id;
 }
 
+void MainWindow::LoadComposerProfileHistory() {
+  if (composer_profile_history_loaded_) {
+    return;
+  }
+  composer_profile_history_loaded_ = true;
+  const QString raw = NativePref(QStringLiteral("native.composer_history"));
+  if (raw.isEmpty()) {
+    return;
+  }
+  const QJsonDocument document = QJsonDocument::fromJson(raw.toUtf8());
+  if (!document.isObject()) {
+    return;
+  }
+  const QJsonObject root = document.object();
+  for (auto it = root.constBegin(); it != root.constEnd(); ++it) {
+    QStringList entries;
+    for (const QJsonValue& value : it.value().toArray()) {
+      const QString entry = ComposerHistoryEntryFor(value.toString());
+      if (!entry.isEmpty() && entries.size() < kComposerHistoryLimit) {
+        entries.append(entry);
+      }
+    }
+    if (!entries.isEmpty()) {
+      composer_profile_history_.insert(it.key(), entries);
+    }
+  }
+}
+
+void MainWindow::SaveComposerProfileHistory() {
+  QJsonObject root;
+  for (auto it = composer_profile_history_.constBegin();
+       it != composer_profile_history_.constEnd(); ++it) {
+    QJsonArray entries;
+    for (const QString& entry : it.value()) {
+      entries.append(entry);
+    }
+    root.insert(it.key(), entries);
+  }
+  SetNativePref(QStringLiteral("native.composer_history"),
+                QString::fromUtf8(
+                    QJsonDocument(root).toJson(QJsonDocument::Compact)));
+}
+
+void MainWindow::BackfillComposerProfileHistory(
+    const QString& profile, const QStringList& entries) {
+  QStringList& ring = composer_profile_history_[profile];
+  bool changed = false;
+  for (const QString& entry : entries) {
+    if (!entry.isEmpty() && !ring.contains(entry)) {
+      ring.append(entry);
+      changed = true;
+    }
+  }
+  while (ring.size() > kComposerHistoryLimit) {
+    ring.removeLast();
+    changed = true;
+  }
+  if (changed) {
+    SaveComposerProfileHistory();
+  }
+}
+
 QStringList MainWindow::SessionComposerHistory(
     const ProfileSnapshot& snapshot) {
+  LoadComposerProfileHistory();
   const QString key = ComposerHistoryKey(snapshot);
+  QStringList history;
   const auto found = composer_input_history_.constFind(key);
   if (found != composer_input_history_.cend()) {
-    return found.value();
+    history = found.value();
+  } else {
+    history = ComposerHistory(snapshot);
+    if (!history.isEmpty()) {
+      composer_input_history_.insert(key, history);
+      // Persist the session's transcript-derived prompts the first time we
+      // see it, so they survive a restart and remain recallable from a new
+      // chat even when that chat has no user rows yet.
+      BackfillComposerProfileHistory(snapshot.name, history);
+    }
   }
-  QStringList history = ComposerHistory(snapshot);
-  if (!history.isEmpty()) {
-    composer_input_history_.insert(key, history);
-  }
-  return history;
+  // A brand-new session has no transcript rows. Fall back to the profile's
+  // persisted ring so old prompts and local commands are still one Up away.
+  return MergeComposerHistories(
+      history, composer_profile_history_.value(snapshot.name));
 }
 
 void MainWindow::RememberComposerInput(const QString& text) {
@@ -4974,9 +5048,20 @@ void MainWindow::RememberComposerInput(const QString& text) {
     return;
   }
   const auto snapshot = supervisor_.ActiveSnapshot();
-  if (!snapshot || snapshot->selected_session_id.isEmpty()) {
+  if (!snapshot || snapshot->name.isEmpty()) {
     return;
   }
+  LoadComposerProfileHistory();
+  QStringList& profile = composer_profile_history_[snapshot->name];
+  // The profile ring is shell-style: recalling a repeated prompt moves it to
+  // the front instead of stacking duplicates.
+  profile.removeAll(trimmed);
+  profile.prepend(trimmed);
+  while (profile.size() > kComposerHistoryLimit) {
+    profile.removeLast();
+  }
+  SaveComposerProfileHistory();
+
   const QString key = ComposerHistoryKey(*snapshot);
   auto found = composer_input_history_.find(key);
   if (found == composer_input_history_.end()) {
@@ -4985,7 +5070,7 @@ void MainWindow::RememberComposerInput(const QString& text) {
   // Submission order is the browse order; repeated prompts are kept because
   // the user may deliberately re-send one.
   found->prepend(trimmed);
-  const QStringList history = *found;
+  const QStringList history = SessionComposerHistory(*snapshot);
   if (composer_ != nullptr) {
     composer_->SetHistory(history);
   }
