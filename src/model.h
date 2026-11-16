@@ -398,6 +398,10 @@ struct ProfileSnapshot {
   int pending_revision = -1;
   std::vector<SessionSummary> sessions;
   std::vector<ChatMessage> messages;
+  // Newest-first user prompts from the display lineage, including rows that
+  // compaction archived. `messages` deliberately holds only the live page;
+  // the composer still needs the older prompts for Up/Down recall.
+  QStringList composer_history;
   // Live delegated children reported by subagent.* events. Kept beside the
   // transcript because the Agents panel reads them without another route.
   std::vector<SubagentProgress> subagents;

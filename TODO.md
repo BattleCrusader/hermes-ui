@@ -42,6 +42,38 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-16 (history reaches every prompt)
+
+**Up now reaches compaction-archived prompts, and the caret rules are absolute:
+Up only leaves a draft at row 0 / column 0, Down only leaves history at the
+absolute end.**
+
+- [x] Gate history on the absolute caret, not the visual line:
+      `cursor.position() == 0` for entering/advancing Up and `cursor.atEnd()`
+      for Down. A one-line draft with the caret at the end no longer jumps into
+      history; repeated Up still works because browsing bypasses the entry test
+      via `history_cursor_ >= 0`, and `SetText` leaves the caret at the end.
+- [x] Root cause of “only a few prompts”: the REST transcript request used the
+      server default `include_compacted=false`, so rows archived by context
+      compaction never reached the composer. `FetchMessages` now makes a second
+      `include_compacted=true` request for history only; the visible transcript
+      still paints live rows. History rows are sorted by database row id so
+      lineage order is chronological across compaction ancestors.
+- [x] Added `ProfileSnapshot::composer_history` (newest first) and
+      `BuildComposerHistory(transcript, local, profile)`; the per-session list
+      is rebuilt from the transcript on every call, so a partial first page is
+      replaced by the full lineage.
+- [x] Raised the persisted `native.composer_history` ring from 100 to 500
+      prompts, and kept backfill append-only so a just-submitted prompt is not
+      pushed behind older transcript rows.
+- [x] The update guard now tracks `composer_history.size()`; compacted prompts
+      can arrive with unchanged `messages.size()`, last row and tail.
+- [x] `composerHistoryBrowsesAndRestoresDraft` now proves Up at `End` does
+      nothing, Up at `Start` enters history, Down at an inner line does nothing,
+      and Down at `End` restores the draft. `BuildComposerHistory` is covered
+      with local-only, transcript and cross-session entries. Full native suite
+      **10/10 passed**.
+
 ## Status update — 2026-11-16 (history survives streaming and restarts)
 
 **Composer history now keeps its browse position while a reply streams, ignores

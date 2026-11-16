@@ -210,6 +210,7 @@ class MainWindow : public QWidget {
   bool composer_history_ready_ = false;
   QString composer_history_session_;
   std::size_t composer_history_message_count_ = 0;
+  qsizetype composer_history_prompt_count_ = 0;
   qint64 composer_history_last_row_ = -1;
   QString composer_history_tail_;
   QHash<QString, QStringList> composer_input_history_;

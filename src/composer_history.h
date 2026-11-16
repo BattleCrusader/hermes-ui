@@ -23,7 +23,7 @@ inline const QStringList& MachinePrefixes() {
       QStringLiteral("[Runtime note:"),
       QStringLiteral("[CONTEXT"),
       QStringLiteral("[PRIOR CONTEXT"),
-      QStringLiteral("[IMPORTANT: Background"),
+      QStringLiteral("[IMPORTANT:"),
       QStringLiteral("[Your active task list"),
       QStringLiteral("[Planning state preserved"),
       QStringLiteral("[ASYNC DELEGATION"),
@@ -90,6 +90,33 @@ inline QStringList MergeComposerHistories(const QStringList& session,
     }
   }
   return merged;
+}
+
+// Builds the full browse list from three sources. The transcript is
+// authoritative for gateway prompts; local submissions that never became rows
+// (for example `/new`) are kept in front because they were the most recent
+// things the user typed. Profile entries only fill in older sessions.
+inline QStringList BuildComposerHistory(const QStringList& transcript,
+                                        const QStringList& local,
+                                        const QStringList& profile) {
+  QStringList history;
+  for (const QString& entry : local) {
+    if (!entry.isEmpty() && !transcript.contains(entry) &&
+        !history.contains(entry)) {
+      history.append(entry);
+    }
+  }
+  for (const QString& entry : transcript) {
+    if (!entry.isEmpty() && !history.contains(entry)) {
+      history.append(entry);
+    }
+  }
+  for (const QString& entry : profile) {
+    if (!entry.isEmpty() && !history.contains(entry)) {
+      history.append(entry);
+    }
+  }
+  return history;
 }
 
 }  // namespace hermes::ui

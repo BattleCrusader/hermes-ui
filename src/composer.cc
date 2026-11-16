@@ -32,8 +32,6 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextEdit>
-#include <QTextLayout>
-#include <QTextLine>
 #include <QTimer>
 #include <QToolButton>
 #include <QUrl>
@@ -61,38 +59,6 @@ QString CssColor(const QColor& color) {
       .arg(color.green())
       .arg(color.blue())
       .arg(color.alpha());
-}
-
-// Arrow keys browse prompt history only when they cannot move the caret any
-// further. A wrapped paragraph counts as one block but several visual lines, so
-// ask the layout instead of comparing text positions.
-bool CursorOnFirstVisualLine(const QTextCursor& cursor) {
-  const QTextBlock block = cursor.block();
-  if (block.position() != 0) {
-    return false;
-  }
-  const QTextLayout* layout = block.layout();
-  if (layout == nullptr || layout->lineCount() == 0) {
-    return true;
-  }
-  const int offset = cursor.position() - block.position();
-  const QTextLine line = layout->lineForTextPosition(offset);
-  return !line.isValid() || line.lineNumber() == 0;
-}
-
-bool CursorOnLastVisualLine(const QTextCursor& cursor) {
-  const QTextBlock block = cursor.block();
-  if (block.next().isValid()) {
-    return false;
-  }
-  const QTextLayout* layout = block.layout();
-  if (layout == nullptr || layout->lineCount() == 0) {
-    return true;
-  }
-  const int offset = cursor.position() - block.position();
-  const QTextLine line = layout->lineForTextPosition(offset);
-  return !line.isValid() ||
-         line.lineNumber() == layout->lineCount() - 1;
 }
 
 }  // namespace
@@ -1644,7 +1610,7 @@ bool Composer::eventFilter(QObject* watched, QEvent* event) {
         const QTextCursor cursor = editor_->textCursor();
         if (!cursor.hasSelection() &&
             key_event->key() == Qt::Key_Up &&
-            (history_cursor_ >= 0 || CursorOnFirstVisualLine(cursor))) {
+            (history_cursor_ >= 0 || cursor.position() == 0)) {
           if (history_cursor_ < 0) {
             // Keep whatever the user was composing before entering history.
             history_draft_ = Text();
@@ -1660,7 +1626,7 @@ bool Composer::eventFilter(QObject* watched, QEvent* event) {
         }
         if (!cursor.hasSelection() &&
             key_event->key() == Qt::Key_Down && history_cursor_ >= 0 &&
-            CursorOnLastVisualLine(cursor)) {
+            cursor.atEnd()) {
           if (history_cursor_ > 0) {
             --history_cursor_;
             SetText(history_.at(history_cursor_));

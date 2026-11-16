@@ -92,7 +92,7 @@
 namespace hermes::ui {
 namespace {
 
-constexpr int kComposerHistoryLimit = 100;
+constexpr int kComposerHistoryLimit = 500;
 
 // The desktop derives its composer history from the live session messages
 // instead of keeping a parallel ring; do the same so edited/resumed sessions
@@ -119,6 +119,15 @@ QStringList ComposerHistory(const ProfileSnapshot& snapshot) {
     }
     text = ComposerHistoryEntryFor(text);
     if (!text.isEmpty()) {
+      history.append(text);
+    }
+  }
+  // The REST page can include compacted rows that the visible transcript no
+  // longer paints. They sit behind the live rows and fill in the older prompts
+  // that compaction archived.
+  for (const QString& raw : snapshot.composer_history) {
+    const QString text = ComposerHistoryEntryFor(raw);
+    if (!text.isEmpty() && !history.contains(text)) {
       history.append(text);
     }
   }
@@ -4936,6 +4945,7 @@ void MainWindow::UpdateComposerHistory(const ProfileSnapshot& snapshot) {
   if (composer_history_ready_ &&
       snapshot.selected_session_id == composer_history_session_ &&
       snapshot.messages.size() == composer_history_message_count_ &&
+      snapshot.composer_history.size() == composer_history_prompt_count_ &&
       last_row == composer_history_last_row_ &&
       tail == composer_history_tail_) {
     return;
@@ -4943,6 +4953,7 @@ void MainWindow::UpdateComposerHistory(const ProfileSnapshot& snapshot) {
   composer_history_ready_ = true;
   composer_history_session_ = snapshot.selected_session_id;
   composer_history_message_count_ = snapshot.messages.size();
+  composer_history_prompt_count_ = snapshot.composer_history.size();
   composer_history_last_row_ = last_row;
   composer_history_tail_ = tail;
   composer_->SetHistory(SessionComposerHistory(snapshot));
@@ -5002,6 +5013,10 @@ void MainWindow::SaveComposerProfileHistory() {
 void MainWindow::BackfillComposerProfileHistory(
     const QString& profile, const QStringList& entries) {
   QStringList& ring = composer_profile_history_[profile];
+  // A session page starts with the newest prompts. Later pages add older rows,
+  // so append what is missing instead of reordering prompts the user just
+  // submitted. The session list itself is rebuilt from the transcript each
+  // time, so a partial first page can never pin the history.
   bool changed = false;
   for (const QString& entry : entries) {
     if (!entry.isEmpty() && !ring.contains(entry)) {
@@ -5022,24 +5037,20 @@ QStringList MainWindow::SessionComposerHistory(
     const ProfileSnapshot& snapshot) {
   LoadComposerProfileHistory();
   const QString key = ComposerHistoryKey(snapshot);
-  QStringList history;
+  const QStringList transcript = ComposerHistory(snapshot);
+  if (!transcript.isEmpty()) {
+    // Persist every transcript page, not just the first one. The REST fetch
+    // can finish after the first snapshot, so seeding only once left history
+    // stuck at the handful of rows that happened to be loaded first.
+    BackfillComposerProfileHistory(snapshot.name, transcript);
+  }
+  QStringList local;
   const auto found = composer_input_history_.constFind(key);
   if (found != composer_input_history_.cend()) {
-    history = found.value();
-  } else {
-    history = ComposerHistory(snapshot);
-    if (!history.isEmpty()) {
-      composer_input_history_.insert(key, history);
-      // Persist the session's transcript-derived prompts the first time we
-      // see it, so they survive a restart and remain recallable from a new
-      // chat even when that chat has no user rows yet.
-      BackfillComposerProfileHistory(snapshot.name, history);
-    }
+    local = found.value();
   }
-  // A brand-new session has no transcript rows. Fall back to the profile's
-  // persisted ring so old prompts and local commands are still one Up away.
-  return MergeComposerHistories(
-      history, composer_profile_history_.value(snapshot.name));
+  return BuildComposerHistory(
+      transcript, local, composer_profile_history_.value(snapshot.name));
 }
 
 void MainWindow::RememberComposerInput(const QString& text) {
@@ -5065,11 +5076,14 @@ void MainWindow::RememberComposerInput(const QString& text) {
   const QString key = ComposerHistoryKey(*snapshot);
   auto found = composer_input_history_.find(key);
   if (found == composer_input_history_.end()) {
-    found = composer_input_history_.insert(key, ComposerHistory(*snapshot));
+    found = composer_input_history_.insert(key, QStringList());
   }
   // Submission order is the browse order; repeated prompts are kept because
   // the user may deliberately re-send one.
   found->prepend(trimmed);
+  while (found->size() > kComposerHistoryLimit) {
+    found->removeLast();
+  }
   const QStringList history = SessionComposerHistory(*snapshot);
   if (composer_ != nullptr) {
     composer_->SetHistory(history);

@@ -303,9 +303,12 @@ void PreferencesTest::composerHistoryBrowsesAndRestoresDraft() {
   auto* editor = composer.findChild<QTextEdit*>();
   QVERIFY(editor != nullptr);
   composer.SetText(QStringLiteral("draft text"));
-  // The first line is the top line even when the caret is at its end.
+  // Up only enters history from the absolute start of the prompt.
   editor->moveCursor(QTextCursor::End);
+  QTest::keyClick(editor, Qt::Key_Up);
+  QCOMPARE(composer.Text(), QStringLiteral("draft text"));
 
+  editor->moveCursor(QTextCursor::Start);
   QTest::keyClick(editor, Qt::Key_Up);
   QCOMPARE(composer.Text(), QStringLiteral("newest prompt"));
   QTest::keyClick(editor, Qt::Key_Up);
@@ -327,9 +330,12 @@ void PreferencesTest::composerHistoryBrowsesAndRestoresDraft() {
   QTest::keyClick(editor, Qt::Key_Up);
   QCOMPARE(composer.Text(), QStringLiteral("line one\nline two"));
 
-  // On the top line, even off the first character, Up enters history.
+  // Being on the top line is not enough: Up must be at column 0, row 0.
   editor->moveCursor(QTextCursor::Start);
   editor->moveCursor(QTextCursor::Right);
+  QTest::keyClick(editor, Qt::Key_Up);
+  QCOMPARE(composer.Text(), QStringLiteral("line one\nline two"));
+  editor->moveCursor(QTextCursor::Start);
   QTest::keyClick(editor, Qt::Key_Up);
   QCOMPARE(composer.Text(), QStringLiteral("newest prompt"));
 
@@ -337,7 +343,7 @@ void PreferencesTest::composerHistoryBrowsesAndRestoresDraft() {
   // still plain history navigation.
   composer.SetHistory({QStringLiteral("keypad prompt")});
   composer.SetText(QStringLiteral("draft text"));
-  editor->moveCursor(QTextCursor::End);
+  editor->moveCursor(QTextCursor::Start);
   QTest::keyClick(editor, Qt::Key_Up, Qt::KeypadModifier);
   QCOMPARE(composer.Text(), QStringLiteral("keypad prompt"));
 
@@ -347,7 +353,7 @@ void PreferencesTest::composerHistoryBrowsesAndRestoresDraft() {
   composer.SetHistory({QStringLiteral("newest prompt"),
                        QStringLiteral("older prompt")});
   composer.SetText(QStringLiteral("draft text"));
-  editor->moveCursor(QTextCursor::End);
+  editor->moveCursor(QTextCursor::Start);
   QTest::keyClick(editor, Qt::Key_Up);
   QCOMPARE(composer.Text(), QStringLiteral("newest prompt"));
   composer.SetHistory({QStringLiteral("streaming row"),
@@ -367,25 +373,28 @@ void PreferencesTest::composerHistoryBrowsesAndRestoresDraft() {
   composer.SetHistory({QStringLiteral("newest prompt"),
                        QStringLiteral("older prompt")});
   composer.SetText(QStringLiteral("draft text"));
-  editor->moveCursor(QTextCursor::End);
+  editor->moveCursor(QTextCursor::Start);
   QTest::keyClick(editor, Qt::Key_Up);
   QTest::keyClick(editor, Qt::Key_Up);
   composer.Clear();
   composer.SetText(QStringLiteral("next draft"));
-  editor->moveCursor(QTextCursor::End);
+  editor->moveCursor(QTextCursor::Start);
   QTest::keyClick(editor, Qt::Key_Up);
   QCOMPARE(composer.Text(), QStringLiteral("newest prompt"));
 
-  // Down leaves history from any point on the final visual line.
+  // Down only leaves history at the absolute end of the prompt.
   composer.SetHistory({QStringLiteral("newest line\nsecond line"),
                        QStringLiteral("older prompt")});
   composer.SetText(QStringLiteral("draft text"));
-  editor->moveCursor(QTextCursor::End);
+  editor->moveCursor(QTextCursor::Start);
   QTest::keyClick(editor, Qt::Key_Up);
   QCOMPARE(composer.Text(), QStringLiteral("newest line\nsecond line"));
-  QTextCursor bottom = editor->textCursor();
-  bottom.setPosition(editor->document()->findBlockByNumber(1).position());
-  editor->setTextCursor(bottom);
+  QTextCursor inner_line = editor->textCursor();
+  inner_line.setPosition(editor->document()->findBlockByNumber(1).position());
+  editor->setTextCursor(inner_line);
+  QTest::keyClick(editor, Qt::Key_Down);
+  QCOMPARE(composer.Text(), QStringLiteral("newest line\nsecond line"));
+  editor->moveCursor(QTextCursor::End);
   QTest::keyClick(editor, Qt::Key_Down);
   QCOMPARE(composer.Text(), QStringLiteral("draft text"));
 }
@@ -434,6 +443,20 @@ void PreferencesTest::composerHistorySkipsControlFramesAndUnwrapsSteers() {
            QStringList({QStringLiteral("newest prompt"),
                         QStringLiteral("older prompt"),
                         QStringLiteral("from another session")}));
+
+  // A late transcript page must add the older prompts even when a partial page
+  // already seeded the history. Local-only commands stay in front.
+  const QStringList built = hermes::ui::BuildComposerHistory(
+      {QStringLiteral("newest prompt"), QStringLiteral("older prompt"),
+       QStringLiteral("oldest prompt")},
+      {QStringLiteral("/new"), QStringLiteral("newest prompt")},
+      {QStringLiteral("older prompt"), QStringLiteral("other session")});
+  QCOMPARE(built,
+           QStringList({QStringLiteral("/new"),
+                        QStringLiteral("newest prompt"),
+                        QStringLiteral("older prompt"),
+                        QStringLiteral("oldest prompt"),
+                        QStringLiteral("other session")}));
 }
 
 void PreferencesTest::composerTokenMeterFormatsContextUsage() {

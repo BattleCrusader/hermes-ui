@@ -451,6 +451,7 @@ void ProfileWorker::SelectSession(const QString& session_id) {
       }
     }
     state_.messages.clear();
+    state_.composer_history.clear();
     state_.unread = 0;
     state_.error_text.clear();
     state_.turn_failed = false;
@@ -1241,6 +1242,7 @@ void ProfileWorker::FetchSessions() {
       state_.selected_session_id =
           state_.sessions.empty() ? QString() : state_.sessions.front().id;
       state_.messages.clear();
+      state_.composer_history.clear();
       history_loaded_ = false;
       // Prefetch the latest transcript for every profile. This is a REST
       // SQLite read (no agent build, no socket resume), so the first profile
@@ -2716,6 +2718,42 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
     }
   }
 
+  // The transcript page above intentionally contains only live rows. Ask for
+  // the display lineage separately so compaction-archived user prompts remain
+  // recallable without painting them into the visible transcript.
+  QStringList composer_history;
+  QJsonDocument history_document;
+  QString history_error;
+  const bool history_fetched = http_->GetJson(
+          QStringLiteral(
+              "/api/sessions/%1/messages?limit=%2&order=latest"
+              "&include_compacted=true")
+              .arg(session_id)
+              .arg(kMessageFetchLimit),
+          &history_document, &history_error);
+  if (history_fetched) {
+    std::vector<std::pair<qint64, QString>> history_rows;
+    const QJsonArray history_messages =
+        history_document.object().value(QStringLiteral("messages")).toArray();
+    for (const QJsonValue& value : history_messages) {
+      const QJsonObject row = value.toObject();
+      const QString role = row.value(QStringLiteral("role")).toString();
+      const QString content = row.value(QStringLiteral("content")).toString();
+      if (role == QStringLiteral("user") && !content.trimmed().isEmpty()) {
+        history_rows.emplace_back(
+            static_cast<qint64>(row.value(QStringLiteral("id")).toDouble()),
+            content);
+      }
+    }
+    std::sort(history_rows.begin(), history_rows.end(),
+              [](const auto& left, const auto& right) {
+                return left.first < right.first;
+              });
+    for (auto it = history_rows.rbegin(); it != history_rows.rend(); ++it) {
+      composer_history.append(it->second);
+    }
+  }
+
   if (messages.size() > kRenderMessageLimit) {
     std::size_t start = messages.size() - kRenderMessageLimit;
     const std::size_t lookback = start > 40 ? start - 40 : 0;
@@ -2769,6 +2807,9 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
     PreservePendingUserMessages(&messages, state_.messages);
     if (!keep_live) {
       state_.messages = std::move(messages);
+    }
+    if (history_fetched) {
+      state_.composer_history = std::move(composer_history);
     }
     state_.error_text.clear();
     state_.status_text = QStringLiteral("ready");
@@ -3991,6 +4032,7 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
         pinned_session_id_ = session_id;
       }
       state_.messages.clear();
+      state_.composer_history.clear();
       state_.todos.clear();
       state_.todo_revision = 0;
       state_.session_control_summary.clear();
