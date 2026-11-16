@@ -42,6 +42,35 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-16 (history survives streaming and restarts)
+
+**Composer history now keeps its browse position while a reply streams, ignores
+the keypad modifier on arrow keys, and falls back to a persisted profile-wide
+ring so a fresh chat can still recall older prompts.**
+
+- [x] Live-app probe: with the rebuilt binary, the first Up in the real `ceo`
+      session recalled `did you update obsidian with the youtube manifest too?`
+      instead of a control frame. Key capture and the control-frame filter both
+      work in the running app.
+- [x] Root cause of “Up works once, then does nothing”: `Composer::SetHistory`
+      reset `history_cursor_` on every transcript refresh. While a reply streamed
+      (or any background row arrived), the next Up treated the currently loaded
+      prompt as a fresh draft and re-selected the newest entry forever. History
+      updates now follow the selected entry by text and preserve the draft;
+      `Clear()` resets browsing after a submission so the next Up starts newest.
+- [x] Arrow keys with `Qt::KeypadModifier` are treated as plain Up/Down, not as
+      modified shortcuts, for external keyboards.
+- [x] Added a persisted `native.composer_history` ring per profile (JSON in
+      `QSettings`, 100 entries). It is merged after the current session’s history,
+      backfilled from the transcript the first time a session is seen, and
+      repeated prompts move to the front instead of duplicating. A brand-new
+      chat now recalls old prompts and local commands even after an app restart.
+- [x] `MergeComposerHistories` and the keypad/streaming cases are covered by
+      `composerHistoryBrowsesAndRestoresDraft` and
+      `composerHistorySkipsControlFramesAndUnwrapsSteers`. A temp-prefs static
+      run proved the JSON round-trip; full native suite **10/10 passed** in
+      18.37 s.
+
 ## Status update — 2026-11-16 (history shows the user's words, not control frames)
 
 **Up-arrow history now skips machine-authored `role:"user"` control frames and
