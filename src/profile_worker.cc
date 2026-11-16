@@ -40,6 +40,9 @@ namespace {
 constexpr int kSessionFetchPageSize = 100;
 constexpr int kSessionFetchLimit = 500;
 constexpr int kMessageFetchLimit = 500;
+// History is paged back through the whole lineage so compaction archives stay
+// recallable. Cap the walk so a pathological session cannot stall a profile.
+constexpr int kComposerHistoryFetchLimit = 10000;
 // The transcript is painted in full on every snapshot. Keep the window small
 // until the layout cache lands; the gateway still has the full history.
 constexpr int kRenderMessageLimit = 500;
@@ -2722,35 +2725,62 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
   // the display lineage separately so compaction-archived user prompts remain
   // recallable without painting them into the visible transcript.
   QStringList composer_history;
-  QJsonDocument history_document;
-  QString history_error;
-  const bool history_fetched = http_->GetJson(
-          QStringLiteral(
-              "/api/sessions/%1/messages?limit=%2&order=latest"
-              "&include_compacted=true")
-              .arg(session_id)
-              .arg(kMessageFetchLimit),
-          &history_document, &history_error);
-  if (history_fetched) {
+  bool history_fetched = false;
+  const auto cached_history = composer_history_cache_.constFind(session_id);
+  if (cached_history != composer_history_cache_.cend()) {
+    composer_history = cached_history.value();
+    history_fetched = true;
+  } else {
+    // The newest page alone can be almost entirely tool output, so walk older
+    // pages until the lineage is exhausted. This is a REST SQLite read and the
+    // result is cached for the lifetime of the profile worker.
     std::vector<std::pair<qint64, QString>> history_rows;
-    const QJsonArray history_messages =
-        history_document.object().value(QStringLiteral("messages")).toArray();
-    for (const QJsonValue& value : history_messages) {
-      const QJsonObject row = value.toObject();
-      const QString role = row.value(QStringLiteral("role")).toString();
-      const QString content = row.value(QStringLiteral("content")).toString();
-      if (role == QStringLiteral("user") && !content.trimmed().isEmpty()) {
-        history_rows.emplace_back(
-            static_cast<qint64>(row.value(QStringLiteral("id")).toDouble()),
-            content);
+    bool history_complete = false;
+    for (int offset = 0; offset < kComposerHistoryFetchLimit;
+         offset += kMessageFetchLimit) {
+      QJsonDocument history_document;
+      QString history_error;
+      if (!http_->GetJson(
+              QStringLiteral(
+                  "/api/sessions/%1/messages?limit=%2&offset=%3&order=latest"
+                  "&include_compacted=true")
+                  .arg(session_id)
+                  .arg(kMessageFetchLimit)
+                  .arg(offset),
+              &history_document, &history_error)) {
+        break;
+      }
+      const QJsonArray history_messages =
+          history_document.object().value(QStringLiteral("messages")).toArray();
+      for (const QJsonValue& value : history_messages) {
+        const QJsonObject row = value.toObject();
+        const QString role = row.value(QStringLiteral("role")).toString();
+        const QString content = row.value(QStringLiteral("content")).toString();
+        if (role == QStringLiteral("user") && !content.trimmed().isEmpty()) {
+          history_rows.emplace_back(
+              static_cast<qint64>(row.value(QStringLiteral("id")).toDouble()),
+              content);
+        }
+      }
+      if (history_messages.size() < kMessageFetchLimit) {
+        history_complete = true;
+        break;
       }
     }
-    std::sort(history_rows.begin(), history_rows.end(),
-              [](const auto& left, const auto& right) {
-                return left.first < right.first;
-              });
-    for (auto it = history_rows.rbegin(); it != history_rows.rend(); ++it) {
-      composer_history.append(it->second);
+    if (!history_rows.empty()) {
+      std::sort(history_rows.begin(), history_rows.end(),
+                [](const auto& left, const auto& right) {
+                  return left.first < right.first;
+                });
+      for (auto it = history_rows.rbegin(); it != history_rows.rend(); ++it) {
+        composer_history.append(it->second);
+      }
+      // Only pin a complete lineage. A partial page is still better than no
+      // recall, but the next refresh can fill in the rest.
+      if (history_complete) {
+        composer_history_cache_.insert(session_id, composer_history);
+      }
+      history_fetched = true;
     }
   }
 

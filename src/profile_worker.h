@@ -4,6 +4,7 @@
 #define HERMES_UI_PROFILE_WORKER_H_
 
 #include <QColor>
+#include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
@@ -299,6 +300,9 @@ class ProfileWorker : public QObject {
   bool pending_prompts_baseline_ready_ = false;
   int pending_receipt_id_ = -1;
   bool history_loaded_ = false;
+  // Full prompt lineage per session, built by paging backwards through
+  // include_compacted messages once per worker lifetime.
+  QHash<QString, QStringList> composer_history_cache_;
   bool cache_dirty_ = false;
   bool pending_new_session_ = false;
   QString pending_new_session_cwd_;

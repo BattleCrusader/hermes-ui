@@ -55,10 +55,15 @@ absolute end.**
       via `history_cursor_ >= 0`, and `SetText` leaves the caret at the end.
 - [x] Root cause of “only a few prompts”: the REST transcript request used the
       server default `include_compacted=false`, so rows archived by context
-      compaction never reached the composer. `FetchMessages` now makes a second
-      `include_compacted=true` request for history only; the visible transcript
-      still paints live rows. History rows are sorted by database row id so
-      lineage order is chronological across compaction ancestors.
+      compaction never reached the composer. `FetchMessages` now pages backwards
+      through `include_compacted=true` history (500 rows per page, up to 10,000
+      rows, cached per session); the visible transcript still paints live rows.
+      The newest page alone was often almost entirely tool output, so the walk
+      is what surfaces the older prompts. History rows are sorted by database
+      row id so lineage order is chronological across compaction ancestors.
+- [x] Live proof on the real `ceo` session: 3,404 message rows paged in seven
+      requests produced 100 user prompts, and the persisted ring held 83 after
+      filtering control frames/steers instead of the previous 7.
 - [x] Added `ProfileSnapshot::composer_history` (newest first) and
       `BuildComposerHistory(transcript, local, profile)`; the per-session list
       is rebuilt from the transcript on every call, so a partial first page is
