@@ -42,6 +42,27 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-16 (composer history follows the caret)
+
+**Up/Down now browse every submission for the selected session, including local
+slash commands, and restore the unsent draft after the newest entry.**
+
+- [x] History entry/exit is decided by the caret's visual line, not its text
+      offset. Up from anywhere on the first visual line (including a wrapped
+      or hard-wrapped line) enters history; Down from anywhere on the last
+      visual line advances it.
+- [x] The first Up saves the current composer text as a draft. Cycling Down
+      past the newest entry restores that draft; multiline vertical editing
+      still wins while the caret can move within the buffer.
+- [x] `MainWindow` keeps a per-profile/per-session submitted-input ring. It is
+      seeded from the transcript, then records normal prompts, `/commands`,
+      queued prompts, and steers in submission order, so a local command that
+      never becomes a transcript row remains recoverable. The detached composer
+      reads and updates the same ring.
+- [x] `composerHistoryBrowsesAndRestoresDraft` now covers top-line entry,
+      bottom-line exit, draft restoration, and multiline editing. Full native
+      suite **10/10 passed** in 33.14 s.
+
 ## Status update — 2026-11-16 (prompt-named notifications; one quote card, one copy target)
 
 **Completion banners now name the prompt that opened the turn, and a multi-line
