@@ -42,6 +42,31 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-16 (prompt-named notifications; one quote card, one copy target)
+
+**Completion banners now name the prompt that opened the turn, and a multi-line
+Markdown quote renders as one selectable card.** The banner used to repeat the
+session title; a quoted block used to become one card per line.
+
+- [x] `ProfileSnapshot::turn_prompt_text` is set by `BeginTurn(snapshot, prompt)`
+      on prompt submission and pending-admission start. Steers never call
+      `BeginTurn`, so they cannot replace the opening prompt.
+- [x] Success bodies read `<prompt summary> · <seconds>`; failures read
+      `<prompt summary> — <error>`. Long prompts fold to one 140-character line
+      via `NotificationPromptSummary` (`src/notification_text.h`), falling back
+      to the session title only when no prompt was captured. Commit `18cc0dd`.
+- [x] Consecutive `>` lines, including a bare `>` paragraph break, parse into a
+      single `kQuote` block, so the whole quotation is one card and one text
+      selection. The card paints and copies the same document.
+- [x] The code/diff/math/Mermaid header now paints its `Copy` label inside the
+      same rect used for hit-testing; the old 30px target started inside the
+      right-aligned word. Diff, math and Mermaid copy actions now work too.
+      Commit `6c71658`.
+- [x] Tests `notificationPromptSummaryKeepsTheOpeningPrompt`,
+      `consecutiveQuoteLinesRenderAsOneCard` and
+      `codeCopyTargetCoversTheWholeLabel`. Full native suite **10/10 passed**
+      in 20.37 s.
+
 ## Status update — 2026-11-15 (model switcher names the provider)
 
 **The composer model picker now states the routed provider, not just the model
