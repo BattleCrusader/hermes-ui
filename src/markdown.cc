@@ -552,10 +552,28 @@ std::vector<MessageBlock> ParseMarkdown(const QString& text) {
 
     if (trimmed.startsWith(QLatin1Char('>'))) {
       flush_paragraph();
+      // A block quote may span many lines. Parsing each `>` row as its own
+      // card split one quotation into several boxes, so it could not be read
+      // or copied as a single block.
       MessageBlock block;
       block.kind = BlockKind::kQuote;
-      block.text = trimmed.mid(1).trimmed();
+      QStringList quoted;
+      int quote_end = line_index;
+      while (quote_end < lines.size()) {
+        const QString quoted_line = lines.at(quote_end).trimmed();
+        if (!quoted_line.startsWith(QLatin1Char('>'))) {
+          break;
+        }
+        QString content = quoted_line.mid(1);
+        if (content.startsWith(QLatin1Char(' '))) {
+          content.remove(0, 1);
+        }
+        quoted.push_back(content);
+        ++quote_end;
+      }
+      block.text = quoted.join(QLatin1Char('\n'));
       blocks.push_back(block);
+      line_index = quote_end - 1;
       continue;
     }
 

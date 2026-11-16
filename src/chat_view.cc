@@ -75,6 +75,7 @@ constexpr qreal kQuoteRadius = 7;
 
 // Forward declaration: hit targets are built before the renderer definition.
 bool IsPreviewableLanguage(const QString& language);
+bool IsCodeLikeBlock(BlockKind kind);
 
 QString FormatTurnDuration(double seconds) {
   const int total = qMax(0, qRound(seconds));
@@ -553,7 +554,7 @@ class TranscriptWidget : public QWidget {
       }
       for (std::size_t b = 0; b < messages_[i].blocks.size(); ++b) {
         const LaidBlock& block = messages_[i].blocks[b];
-        if (block.source.kind == BlockKind::kCode) {
+        if (IsCodeLikeBlock(block.source.kind)) {
           targets.push_back({QStringLiteral("chat:copy:%1:%2").arg(i).arg(b),
                              CopyButtonRect(block)});
           if (IsPreviewableLanguage(block.source.language)) {
@@ -958,7 +959,10 @@ void TranscriptWidget::SetRequestRespondHandler(
 }
 
 QRectF TranscriptWidget::CopyButtonRect(const LaidBlock& block) {
-  return QRectF(block.rect.right() - 34, block.rect.top(), 30,
+  // The header label and its hit target share this rect. The old 30px target
+  // began inside the right-aligned "Copy" word, so most of the visible label
+  // did nothing when clicked.
+  return QRectF(block.rect.right() - 60, block.rect.top(), 56,
                 kCodeHeaderHeight);
 }
 
@@ -1058,10 +1062,7 @@ TranscriptWidget::SelectableRuns() const {
     }
 
     for (const LaidBlock& block : message.blocks) {
-      const bool code_like = block.source.kind == BlockKind::kCode ||
-                             block.source.kind == BlockKind::kDiff ||
-                             block.source.kind == BlockKind::kMath ||
-                             block.source.kind == BlockKind::kMermaid;
+      const bool code_like = IsCodeLikeBlock(block.source.kind);
       if (code_like) {
         add_plain(QRectF(block.rect.left() + 12, block.rect.top(), 120,
                          kCodeHeaderHeight),
@@ -1072,9 +1073,8 @@ TranscriptWidget::SelectableRuns() const {
             !copied_block_.isEmpty() && copied_block_ == block.source.text
                 ? QStringLiteral("Copied")
                 : QStringLiteral("Copy");
-        add_plain(QRectF(block.rect.right() - 64, block.rect.top(), 36,
-                         kCodeHeaderHeight),
-                  copy_text, theme_.UiFont(10, QFont::Normal),
+        add_plain(CopyButtonRect(block), copy_text,
+                  theme_.UiFont(10, QFont::Normal),
                   Qt::AlignRight | Qt::AlignVCenter);
         if (block.document) {
           add_document(QRectF(block.rect.left() + 12,
@@ -1178,10 +1178,7 @@ QRectF TranscriptWidget::BlockTextRect(const LaidBlock& block) const {
                   block.document->size().width(),
                   block.document->size().height());
   }
-  if (block.source.kind == BlockKind::kCode ||
-      block.source.kind == BlockKind::kDiff ||
-      block.source.kind == BlockKind::kMath ||
-      block.source.kind == BlockKind::kMermaid) {
+  if (IsCodeLikeBlock(block.source.kind)) {
     return QRectF(
         block.rect.left() + 12, block.rect.top() + kCodeHeaderHeight + 7,
         block.document->size().width(), block.document->size().height());
@@ -1717,7 +1714,7 @@ void TranscriptWidget::mousePressEvent(QMouseEvent* event) {
           event->accept();
           return;
         }
-        if (block.source.kind == BlockKind::kCode &&
+        if (IsCodeLikeBlock(block.source.kind) &&
             CopyButtonRect(block).contains(position)) {
           QGuiApplication::clipboard()->setText(block.source.text);
           copied_block_ = block.source.text;
@@ -2794,10 +2791,7 @@ void TranscriptWidget::PaintMessage(QPainter& painter,
   }
 
   for (const LaidBlock& block : message.blocks) {
-    if (block.source.kind == BlockKind::kCode ||
-        block.source.kind == BlockKind::kDiff ||
-        block.source.kind == BlockKind::kMath ||
-        block.source.kind == BlockKind::kMermaid) {
+    if (IsCodeLikeBlock(block.source.kind)) {
       PaintCodeBlock(painter, block);
     } else if (block.source.kind == BlockKind::kImage) {
       PaintImageBlock(painter, block);
@@ -2958,16 +2952,13 @@ void TranscriptWidget::PaintCodeBlock(QPainter& painter,
   painter.setFont(theme_.UiFont(10, QFont::Normal));
   painter.setPen(theme_.code_comment);
   if (IsPreviewableLanguage(block.source.language)) {
-    painter.drawText(QRectF(block.rect.right() - 116, block.rect.top(), 56,
-                            kCodeHeaderHeight),
+    painter.drawText(PreviewButtonRect(block),
                      Qt::AlignVCenter | Qt::AlignRight,
                      QStringLiteral("Preview"));
   }
   painter.setPen(copied ? theme_.accent : theme_.code_comment);
-  painter.drawText(
-      QRectF(block.rect.right() - 64, block.rect.top(), 36, kCodeHeaderHeight),
-      Qt::AlignVCenter | Qt::AlignRight,
-      copied ? QStringLiteral("Copied") : QStringLiteral("Copy"));
+  painter.drawText(CopyButtonRect(block), Qt::AlignVCenter | Qt::AlignRight,
+                   copied ? QStringLiteral("Copied") : QStringLiteral("Copy"));
 
   if (block.document) {
     painter.save();
@@ -3200,6 +3191,12 @@ ushort ToolIconFor(const QString& name) {
     return 0xEB6D;  // tools
   }
   return 0xEA7B;  // generic file/document
+}
+
+// Code, diffs, math, and Mermaid share the card header and copy affordance.
+bool IsCodeLikeBlock(BlockKind kind) {
+  return kind == BlockKind::kCode || kind == BlockKind::kDiff ||
+         kind == BlockKind::kMath || kind == BlockKind::kMermaid;
 }
 
 // Languages whose fenced block can be rendered rather than only copied.

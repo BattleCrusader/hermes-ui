@@ -239,6 +239,8 @@ class ChatViewTest : public QObject {
   void consecutiveToolRowsCollapseIntoOneGroup();
   void toolOutputWrapsLongLines();
   void quoteCardWrapsAndContainsText();
+  void consecutiveQuoteLinesRenderAsOneCard();
+  void codeCopyTargetCoversTheWholeLabel();
   void appearancePreferencesReshapeTranscript();
   void markdownParsesRichBlocksAndInlineSpans();
   void markdownBlocksRenderInTranscript();
@@ -514,6 +516,96 @@ void ChatViewTest::appearancePreferencesReshapeTranscript() {
   QVERIFY(!view.IsCaretAnimatingForTest());
   view.SetAnimationsEnabled(true);
   QVERIFY(view.IsCaretAnimatingForTest());
+}
+
+void ChatViewTest::consecutiveQuoteLinesRenderAsOneCard() {
+  const std::vector<hermes::ui::MessageBlock> blocks =
+      hermes::ui::ParseMarkdown(QStringLiteral(
+          "> first line\n"
+          "> second line\n"
+          ">\n"
+          "> fourth line\n"
+          "\n"
+          "after the quote"));
+  std::size_t quote_count = 0;
+  for (const hermes::ui::MessageBlock& block : blocks) {
+    if (block.kind == hermes::ui::BlockKind::kQuote) {
+      ++quote_count;
+      QCOMPARE(block.text,
+               QStringLiteral("first line\nsecond line\n\nfourth line"));
+    }
+  }
+  QCOMPARE(quote_count, std::size_t(1));
+
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::ChatView view(theme);
+  view.resize(620, 620);
+  view.show();
+  auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
+  snapshot->name = QStringLiteral("default");
+  snapshot->label = QStringLiteral("default");
+  snapshot->revision = 1;
+  hermes::ui::ChatMessage message;
+  message.role = hermes::ui::MessageRole::kAssistant;
+  message.author = QStringLiteral("Hermes");
+  message.timestamp = QDateTime::currentDateTime();
+  message.blocks = blocks;
+  snapshot->messages.push_back(message);
+  view.SetSnapshot(snapshot);
+  QTest::qWait(20);
+
+  const auto rects = view.BlockRectsForTest(hermes::ui::BlockKind::kQuote);
+  QCOMPARE(rects.size(), std::size_t(1));
+  // One document means a single selection can copy the whole quotation.
+  view.SelectAllTextForTest();
+  const QString selected = view.SelectedTextForTest();
+  QVERIFY(selected.contains(QStringLiteral("first line")));
+  QVERIFY(selected.contains(QStringLiteral("fourth line")));
+}
+
+void ChatViewTest::codeCopyTargetCoversTheWholeLabel() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::ChatView view(theme);
+  view.resize(720, 480);
+  view.show();
+  auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
+  snapshot->name = QStringLiteral("default");
+  snapshot->label = QStringLiteral("default");
+  snapshot->revision = 1;
+  hermes::ui::ChatMessage message;
+  message.role = hermes::ui::MessageRole::kAssistant;
+  message.author = QStringLiteral("Hermes");
+  message.timestamp = QDateTime::currentDateTime();
+  message.blocks = hermes::ui::ParseMarkdown(
+      QStringLiteral("```cpp\nint answer = 42;\n```"));
+  snapshot->messages.push_back(message);
+  view.SetSnapshot(snapshot);
+  QTest::qWait(20);
+
+  const auto rects = view.BlockRectsForTest(hermes::ui::BlockKind::kCode);
+  QCOMPARE(rects.size(), std::size_t(1));
+  const QRectF card = rects.front().first;
+  QRectF copy_rect;
+  for (const hermes::ui::ClickTarget& target : view.ClickTargets()) {
+    if (target.name.startsWith(QStringLiteral("chat:copy:"))) {
+      copy_rect = target.rect;
+      break;
+    }
+  }
+  QVERIFY(!copy_rect.isNull());
+  const QFontMetricsF metrics(theme.UiFont(10, QFont::Normal));
+  const qreal label_left =
+      card.right() - 4 - metrics.horizontalAdvance(QStringLiteral("Copy"));
+  QVERIFY2(copy_rect.left() <= label_left + 0.5,
+           "the copy hit target must begin at or before the visible label");
+  QVERIFY(copy_rect.right() >= card.right() - 5);
+
+  QGuiApplication::clipboard()->clear();
+  QTest::mouseClick(view.widget(), Qt::LeftButton, Qt::NoModifier,
+                    QPoint(qRound(label_left + 2),
+                           qRound(copy_rect.center().y())));
+  QCOMPARE(QGuiApplication::clipboard()->text(),
+           QStringLiteral("int answer = 42;"));
 }
 
 void ChatViewTest::markdownParsesRichBlocksAndInlineSpans() {
