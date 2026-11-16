@@ -245,6 +245,7 @@ class ChatViewTest : public QObject {
   void previewRoutesToSideRailHandler();
   void appearancePreferencesReshapeTranscript();
   void markdownParsesRichBlocksAndInlineSpans();
+  void markdownUnwrapsPlainTextFences();
   void markdownBlocksRenderInTranscript();
   void codePreviewRendersSvg();
   void codePreviewRendersRtf();
@@ -855,6 +856,40 @@ void ChatViewTest::markdownParsesRichBlocksAndInlineSpans() {
   QVERIFY(saw_math);
   QVERIFY(saw_artifact);
   QVERIFY(saw_footnote);
+}
+
+void ChatViewTest::markdownUnwrapsPlainTextFences() {
+  const auto explicit_text = hermes::ui::ParseMarkdown(QStringLiteral(
+      "```text\n"
+      "# Heading\n"
+      "\n"
+      "Body with **bold**.\n"
+      "```"));
+  QCOMPARE(explicit_text.size(), std::size_t(2));
+  QCOMPARE(explicit_text[0].kind, hermes::ui::BlockKind::kHeading);
+  QCOMPARE(explicit_text[0].text, QStringLiteral("Heading"));
+  QCOMPARE(explicit_text[1].kind, hermes::ui::BlockKind::kParagraph);
+  QCOMPARE(explicit_text[1].text, QStringLiteral("Body with **bold**."));
+  for (const hermes::ui::MessageBlock& block : explicit_text) {
+    QVERIFY(block.kind != hermes::ui::BlockKind::kCode);
+  }
+
+  const auto unlabeled = hermes::ui::ParseMarkdown(QStringLiteral(
+      "```\n"
+      "A normal answer, not source code.\n"
+      "```"));
+  QCOMPARE(unlabeled.size(), std::size_t(1));
+  QCOMPARE(unlabeled[0].kind, hermes::ui::BlockKind::kParagraph);
+  QCOMPARE(unlabeled[0].text,
+           QStringLiteral("A normal answer, not source code."));
+
+  const auto code = hermes::ui::ParseMarkdown(QStringLiteral(
+      "```cpp\n"
+      "int answer = 42;\n"
+      "```"));
+  QCOMPARE(code.size(), std::size_t(1));
+  QCOMPARE(code[0].kind, hermes::ui::BlockKind::kCode);
+  QCOMPARE(code[0].language, QStringLiteral("cpp"));
 }
 
 void ChatViewTest::markdownBlocksRenderInTranscript() {

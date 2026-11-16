@@ -370,6 +370,18 @@ QString InlineHtml(const QString& text) {
   return html;
 }
 
+namespace {
+
+bool IsPlainTextFence(const QString& language) {
+  const QString normalized = language.trimmed().toLower();
+  return normalized.isEmpty() || normalized == QStringLiteral("text") ||
+         normalized == QStringLiteral("txt") ||
+         normalized == QStringLiteral("plain") ||
+         normalized == QStringLiteral("plaintext");
+}
+
+}  // namespace
+
 std::vector<MessageBlock> ParseMarkdown(const QString& text) {
   std::vector<MessageBlock> blocks;
   const QStringList lines = text.split('\n');
@@ -408,21 +420,30 @@ std::vector<MessageBlock> ParseMarkdown(const QString& text) {
         language = line.mid(3).trimmed();
         code.clear();
       } else {
-        MessageBlock block;
-        const QString normalized = language.toLower();
-        block.kind = BlockKind::kCode;
-        if (normalized == QStringLiteral("diff")) {
-          block.kind = BlockKind::kDiff;
-        } else if (normalized == QStringLiteral("math") ||
-                   normalized == QStringLiteral("latex") ||
-                   normalized == QStringLiteral("tex")) {
-          block.kind = BlockKind::kMath;
-        } else if (normalized == QStringLiteral("mermaid")) {
-          block.kind = BlockKind::kMermaid;
+        if (IsPlainTextFence(language)) {
+          // A fenced `text` block is still a normal assistant response, not
+          // source code. Parse its body as markdown so the transcript does not
+          // grow a TEXT window for prose the model merely wrapped in a fence.
+          const std::vector<MessageBlock> nested = ParseMarkdown(code);
+          blocks.insert(blocks.end(), nested.begin(), nested.end());
+        } else {
+          MessageBlock block;
+          const QString normalized = language.toLower();
+          block.kind = BlockKind::kCode;
+          if (normalized == QStringLiteral("diff")) {
+            block.kind = BlockKind::kDiff;
+          } else if (normalized == QStringLiteral("math") ||
+                     normalized == QStringLiteral("latex") ||
+                     normalized == QStringLiteral("tex")) {
+            block.kind = BlockKind::kMath;
+          } else if (normalized == QStringLiteral("mermaid")) {
+            block.kind = BlockKind::kMermaid;
+          }
+          block.language =
+              language.isEmpty() ? QStringLiteral("text") : language;
+          block.text = code;
+          blocks.push_back(block);
         }
-        block.language = language.isEmpty() ? QStringLiteral("text") : language;
-        block.text = code;
-        blocks.push_back(block);
         in_code = false;
       }
       continue;
@@ -636,21 +657,26 @@ std::vector<MessageBlock> ParseMarkdown(const QString& text) {
 
   flush_paragraph();
   if (in_code && !code.isEmpty()) {
-    MessageBlock block;
-    const QString normalized = language.toLower();
-    block.kind = BlockKind::kCode;
-    if (normalized == QStringLiteral("diff")) {
-      block.kind = BlockKind::kDiff;
-    } else if (normalized == QStringLiteral("math") ||
-               normalized == QStringLiteral("latex") ||
-               normalized == QStringLiteral("tex")) {
-      block.kind = BlockKind::kMath;
-    } else if (normalized == QStringLiteral("mermaid")) {
-      block.kind = BlockKind::kMermaid;
+    if (IsPlainTextFence(language)) {
+      const std::vector<MessageBlock> nested = ParseMarkdown(code);
+      blocks.insert(blocks.end(), nested.begin(), nested.end());
+    } else {
+      MessageBlock block;
+      const QString normalized = language.toLower();
+      block.kind = BlockKind::kCode;
+      if (normalized == QStringLiteral("diff")) {
+        block.kind = BlockKind::kDiff;
+      } else if (normalized == QStringLiteral("math") ||
+                 normalized == QStringLiteral("latex") ||
+                 normalized == QStringLiteral("tex")) {
+        block.kind = BlockKind::kMath;
+      } else if (normalized == QStringLiteral("mermaid")) {
+        block.kind = BlockKind::kMermaid;
+      }
+      block.language = language.isEmpty() ? QStringLiteral("text") : language;
+      block.text = code;
+      blocks.push_back(block);
     }
-    block.language = language.isEmpty() ? QStringLiteral("text") : language;
-    block.text = code;
-    blocks.push_back(block);
   }
   return blocks;
 }

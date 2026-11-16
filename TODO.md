@@ -42,6 +42,22 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-17 (plain-text fences are prose, not code cards)
+
+**A fenced `text` or unlabeled block is now parsed as a normal assistant
+response. Only code-like fences keep the window header.**
+
+- [x] The markdown parser unwraps fences whose language is empty or one of
+      `text`, `txt`, `plain`, `plaintext`, then parses the body as markdown.
+      A model that wraps its whole answer in a `text` fence no longer produces a
+      `TEXT` code card; headings, lists and paragraphs inside render normally.
+- [x] Real code fences (`cpp`, `python`, …), diffs, math and Mermaid retain
+      their existing card header, Copy and Preview. Unclosed text fences still
+      stream as normal text.
+- [x] Regression test `markdownUnwrapsPlainTextFences` covers explicit `text`,
+      an unlabeled fence and a `cpp` control case. Full native suite
+      **10/10 passed**.
+
 ## Status update — 2026-11-17 (every block copies, generated previews use the rail)
 
 **Every assistant text block now has a hover copy affordance, and generated
