@@ -75,6 +75,8 @@ constexpr qreal kQuoteRadius = 7;
 
 // Forward declaration: hit targets are built before the renderer definition.
 bool IsCodeLikeBlock(BlockKind kind);
+bool HasCardHeader(BlockKind kind);
+QString QuoteMarkdownText(const QString& text);
 QString CopyableBlockText(const MessageBlock& block);
 bool HasCopyableBlockText(const MessageBlock& block);
 
@@ -559,7 +561,7 @@ class TranscriptWidget : public QWidget {
       }
       for (std::size_t b = 0; b < messages_[i].blocks.size(); ++b) {
         const LaidBlock& block = messages_[i].blocks[b];
-        if (IsCodeLikeBlock(block.source.kind)) {
+        if (HasCardHeader(block.source.kind)) {
           targets.push_back({QStringLiteral("chat:copy:%1:%2").arg(i).arg(b),
                              CopyButtonRect(block)});
           targets.push_back(
@@ -570,7 +572,7 @@ class TranscriptWidget : public QWidget {
                              QRectF(block.rect.left(), block.rect.top(),
                                     block.rect.width(), 28)});
         }
-        if (!IsCodeLikeBlock(block.source.kind) &&
+        if (!HasCardHeader(block.source.kind) &&
             HasCopyableBlockText(block.source)) {
           targets.push_back({QStringLiteral("chat:copyblock:%1:%2")
                                  .arg(i)
@@ -1083,12 +1085,14 @@ TranscriptWidget::SelectableRuns() const {
     }
 
     for (const LaidBlock& block : message.blocks) {
-      const bool code_like = IsCodeLikeBlock(block.source.kind);
-      if (code_like) {
+      if (HasCardHeader(block.source.kind)) {
+        const QString title =
+            block.source.kind == BlockKind::kQuote
+                ? QStringLiteral("QUOTE")
+                : block.source.language.toUpper();
         add_plain(QRectF(block.rect.left() + 12, block.rect.top(), 120,
                          kCodeHeaderHeight),
-                  block.source.language.toUpper(),
-                  theme_.UiFont(10, QFont::Normal),
+                  title, theme_.UiFont(10, QFont::Normal),
                   Qt::AlignLeft | Qt::AlignVCenter);
         add_plain(PreviewButtonRect(block), QStringLiteral("Preview"),
                   theme_.UiFont(10, QFont::Normal),
@@ -1101,11 +1105,7 @@ TranscriptWidget::SelectableRuns() const {
                   theme_.UiFont(10, QFont::Normal),
                   Qt::AlignRight | Qt::AlignVCenter);
         if (block.document) {
-          add_document(QRectF(block.rect.left() + 12,
-                              block.rect.top() + kCodeHeaderHeight + 7,
-                              block.document->size().width(),
-                              block.document->size().height()),
-                       block.document);
+          add_document(BlockTextRect(block), block.document);
         }
       } else if (block.source.kind == BlockKind::kImage) {
         if (block.preview.isNull()) {
@@ -1198,7 +1198,7 @@ QRectF TranscriptWidget::BlockTextRect(const LaidBlock& block) const {
   }
   if (block.source.kind == BlockKind::kQuote) {
     return QRectF(block.rect.left() + kQuoteTextInsetLeft,
-                  block.rect.top() + kQuoteTextInsetTop,
+                  block.rect.top() + kCodeHeaderHeight + kQuoteTextInsetTop,
                   block.document->size().width(),
                   block.document->size().height());
   }
@@ -1628,7 +1628,7 @@ void TranscriptWidget::mouseMoveEvent(QMouseEvent* event) {
     } else {
       for (std::size_t b = 0; b < message.blocks.size(); ++b) {
         const LaidBlock& block = message.blocks[b];
-        if (IsCodeLikeBlock(block.source.kind) ||
+        if (HasCardHeader(block.source.kind) ||
             !HasCopyableBlockText(block.source)) {
           continue;
         }
@@ -1737,7 +1737,7 @@ void TranscriptWidget::mousePressEvent(QMouseEvent* event) {
     }
     for (const LaidMessage& message : messages_) {
       for (const LaidBlock& block : message.blocks) {
-        if (!IsCodeLikeBlock(block.source.kind) &&
+        if (!HasCardHeader(block.source.kind) &&
             HasCopyableBlockText(block.source) &&
             BlockCopyButtonRect(block).contains(position)) {
           const QString text = CopyableBlockText(block.source);
@@ -1768,13 +1768,17 @@ void TranscriptWidget::mousePressEvent(QMouseEvent* event) {
           event->accept();
           return;
         }
-        if (IsCodeLikeBlock(block.source.kind) &&
+        if (HasCardHeader(block.source.kind) &&
             PreviewButtonRect(block).contains(position)) {
-          OpenCodePreview(block.source.text, block.source.language);
+          const bool quote = block.source.kind == BlockKind::kQuote;
+          OpenCodePreview(quote ? QuoteMarkdownText(block.source.text)
+                                : block.source.text,
+                          quote ? QStringLiteral("markdown")
+                                : block.source.language);
           event->accept();
           return;
         }
-        if (IsCodeLikeBlock(block.source.kind) &&
+        if (HasCardHeader(block.source.kind) &&
             CopyButtonRect(block).contains(position)) {
           QGuiApplication::clipboard()->setText(block.source.text);
           copied_block_ = block.source.text;
@@ -2328,9 +2332,10 @@ void TranscriptWidget::BuildAssistantMessage(const ChatMessage& message,
           1, content_width - kQuoteTextInsetLeft - kQuoteTextInsetRight);
       laid_block.document =
           MakeDocument(html, font, quote_width, kParagraphLineHeight);
-      laid_block.rect = QRectF(kContentLeft, y, content_width,
-                               laid_block.document->size().height() +
-                                   kQuoteTextInsetTop + kQuoteTextInsetBottom);
+      laid_block.rect = QRectF(
+          kContentLeft, y, content_width,
+          kCodeHeaderHeight + laid_block.document->size().height() +
+              kQuoteTextInsetTop + kQuoteTextInsetBottom);
       y += laid_block.rect.height() + 8;
     } else if (block.kind == BlockKind::kRule) {
       laid_block.rect = QRectF(kContentLeft, y, content_width, 1);
@@ -2903,12 +2908,43 @@ void TranscriptWidget::PaintMessage(QPainter& painter,
       FillRounded(painter, block.rect, kQuoteRadius,
                   Mix(theme_.background, theme_.surface, 0.72));
       StrokeRounded(painter, block.rect, kQuoteRadius, theme_.stroke);
+
+      painter.save();
+      QPainterPath header_clip;
+      header_clip.addRoundedRect(block.rect, kQuoteRadius, kQuoteRadius);
+      painter.setClipPath(header_clip);
+      painter.fillRect(QRectF(block.rect.left(), block.rect.top(),
+                              block.rect.width(), kCodeHeaderHeight),
+                       theme_.code_header);
+      painter.restore();
+
+      painter.setFont(theme_.UiFont(10, QFont::DemiBold));
+      painter.setPen(theme_.code_comment);
+      painter.drawText(QRectF(block.rect.left() + 12, block.rect.top(), 120,
+                              kCodeHeaderHeight),
+                       Qt::AlignLeft | Qt::AlignVCenter,
+                       QStringLiteral("QUOTE"));
+      painter.setFont(theme_.UiFont(10, QFont::Normal));
+      painter.setPen(theme_.code_comment);
+      painter.drawText(PreviewButtonRect(block),
+                       Qt::AlignRight | Qt::AlignVCenter,
+                       QStringLiteral("Preview"));
+      const bool copied =
+          !copied_block_.isEmpty() && copied_block_ == block.source.text;
+      painter.setPen(copied ? theme_.accent : theme_.code_comment);
+      painter.drawText(CopyButtonRect(block), Qt::AlignRight | Qt::AlignVCenter,
+                       copied ? QStringLiteral("Copied")
+                              : QStringLiteral("Copy"));
+
       painter.setPen(Qt::NoPen);
       painter.setBrush(theme_.text_tertiary);
+      const qreal quote_body_top =
+          block.rect.top() + kCodeHeaderHeight + kQuoteTextInsetTop;
       painter.drawRoundedRect(
-          QRectF(block.rect.left() + kQuoteBarInset,
-                 block.rect.top() + kQuoteTextInsetTop, kQuoteBarWidth,
-                 std::max<qreal>(8, block.rect.height() - kQuoteTextInsetTop -
+          QRectF(block.rect.left() + kQuoteBarInset, quote_body_top,
+                 kQuoteBarWidth,
+                 std::max<qreal>(8, block.rect.height() - kCodeHeaderHeight -
+                                        kQuoteTextInsetTop -
                                         kQuoteTextInsetBottom)),
           kQuoteBarWidth / 2.0, kQuoteBarWidth / 2.0);
       if (block.document) {
@@ -3282,6 +3318,17 @@ ushort ToolIconFor(const QString& name) {
 bool IsCodeLikeBlock(BlockKind kind) {
   return kind == BlockKind::kCode || kind == BlockKind::kDiff ||
          kind == BlockKind::kMath || kind == BlockKind::kMermaid;
+}
+
+// Blocks with a window header: code-like content plus block quotes.
+bool HasCardHeader(BlockKind kind) {
+  return IsCodeLikeBlock(kind) || kind == BlockKind::kQuote;
+}
+
+QString QuoteMarkdownText(const QString& text) {
+  QString quoted = text;
+  quoted.replace(QLatin1Char('\n'), QStringLiteral("\n> "));
+  return QStringLiteral("> ") + quoted;
 }
 
 // Every generated text block is copyable: prose, headings, list items,

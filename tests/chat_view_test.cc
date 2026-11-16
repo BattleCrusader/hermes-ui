@@ -240,6 +240,7 @@ class ChatViewTest : public QObject {
   void toolOutputWrapsLongLines();
   void quoteCardWrapsAndContainsText();
   void consecutiveQuoteLinesRenderAsOneCard();
+  void quoteCardGetsCodeStyleHeader();
   void codeCopyTargetCoversTheWholeLabel();
   void everyGeneratedBlockOffersCopy();
   void previewRoutesToSideRailHandler();
@@ -566,6 +567,72 @@ void ChatViewTest::consecutiveQuoteLinesRenderAsOneCard() {
   QVERIFY(selected.contains(QStringLiteral("fourth line")));
 }
 
+void ChatViewTest::quoteCardGetsCodeStyleHeader() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::ChatView view(theme);
+  view.resize(720, 480);
+  view.show();
+
+  QString previewed_text;
+  QString previewed_language;
+  view.SetCodePreviewHandler(
+      [&](const QString& text, const QString& language) {
+        previewed_text = text;
+        previewed_language = language;
+      });
+
+  auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
+  snapshot->name = QStringLiteral("default");
+  snapshot->label = QStringLiteral("default");
+  snapshot->revision = 1;
+  hermes::ui::ChatMessage message;
+  message.role = hermes::ui::MessageRole::kAssistant;
+  message.author = QStringLiteral("Hermes");
+  message.timestamp = QDateTime::currentDateTime();
+  message.blocks.push_back(hermes::ui::MessageBlock{
+      .kind = hermes::ui::BlockKind::kQuote,
+      .text = QStringLiteral("first line\nsecond line"),
+  });
+  snapshot->messages.push_back(message);
+  view.SetSnapshot(snapshot);
+  QTest::qWait(20);
+
+  QRectF copy;
+  QRectF preview;
+  bool has_gutter = false;
+  for (const hermes::ui::ClickTarget& target : view.ClickTargets()) {
+    if (target.name == QStringLiteral("chat:copy:0:0")) {
+      copy = target.rect;
+    } else if (target.name == QStringLiteral("chat:preview:0:0")) {
+      preview = target.rect;
+    } else if (target.name == QStringLiteral("chat:copyblock:0:0")) {
+      has_gutter = true;
+    }
+  }
+  QVERIFY(!copy.isNull());
+  QVERIFY(!preview.isNull());
+  QVERIFY2(!has_gutter, "quote cards use the header Copy, not the gutter");
+
+  view.SelectAllTextForTest();
+  const QString selected = view.SelectedTextForTest();
+  QVERIFY(selected.contains(QStringLiteral("QUOTE")));
+  QVERIFY(selected.contains(QStringLiteral("Preview")));
+  QVERIFY(selected.contains(QStringLiteral("Copy")));
+  QVERIFY(selected.contains(QStringLiteral("first line")));
+
+  QGuiApplication::clipboard()->clear();
+  QTest::mouseClick(view.widget(), Qt::LeftButton, Qt::NoModifier,
+                    copy.center().toPoint());
+  QTest::qWait(10);
+  QCOMPARE(QGuiApplication::clipboard()->text(),
+           QStringLiteral("first line\nsecond line"));
+
+  QTest::mouseClick(view.widget(), Qt::LeftButton, Qt::NoModifier,
+                    preview.center().toPoint());
+  QCOMPARE(previewed_language, QStringLiteral("markdown"));
+  QCOMPARE(previewed_text, QStringLiteral("> first line\n> second line"));
+}
+
 void ChatViewTest::codeCopyTargetCoversTheWholeLabel() {
   hermes::ui::Theme theme = hermes::ui::Theme::Light();
   hermes::ui::ChatView view(theme);
@@ -663,20 +730,21 @@ void ChatViewTest::everyGeneratedBlockOffersCopy() {
       copies.insert(target.name, target.rect);
     }
   }
-  QCOMPARE(copies.size(), 9);
-  for (int index = 0; index < 9; ++index) {
+  QCOMPARE(copies.size(), 8);
+  for (const int index : {0, 1, 2, 4, 5, 6, 7, 8}) {
     QVERIFY2(copies.contains(QStringLiteral("chat:copyblock:0:%1").arg(index)),
              qPrintable(QStringLiteral("missing block %1").arg(index)));
   }
   QVERIFY(!copies.contains(QStringLiteral("chat:copyblock:0:9")));
-  // Code-like blocks keep their header chip instead of a gutter duplicate.
+  // Quote and code-like blocks keep their header chip instead of a gutter
+  // duplicate.
+  QVERIFY(!copies.contains(QStringLiteral("chat:copyblock:0:3")));
   QVERIFY(!copies.contains(QStringLiteral("chat:copyblock:0:10")));
 
   const QMap<QString, QString> expected = {
       {QStringLiteral("chat:copyblock:0:0"), QStringLiteral("plain paragraph")},
       {QStringLiteral("chat:copyblock:0:1"), QStringLiteral("heading")},
       {QStringLiteral("chat:copyblock:0:2"), QStringLiteral("bullet")},
-      {QStringLiteral("chat:copyblock:0:3"), QStringLiteral("quote")},
       {QStringLiteral("chat:copyblock:0:4"), QStringLiteral("| a | b |")},
       {QStringLiteral("chat:copyblock:0:5"), QStringLiteral("footnote")},
       {QStringLiteral("chat:copyblock:0:6"),
@@ -730,21 +798,29 @@ void ChatViewTest::previewRoutesToSideRailHandler() {
       .text = QStringLiteral("{\"ok\": true}"),
       .language = QStringLiteral("json"),
   });
+  message.blocks.push_back(hermes::ui::MessageBlock{
+      .kind = hermes::ui::BlockKind::kQuote,
+      .text = QStringLiteral("quoted line\nsecond line"),
+  });
   snapshot->messages.push_back(message);
   view.SetSnapshot(snapshot);
   QTest::qWait(20);
 
   QRectF markdown_preview;
   QRectF json_preview;
+  QRectF quote_preview;
   for (const hermes::ui::ClickTarget& target : view.ClickTargets()) {
     if (target.name == QStringLiteral("chat:preview:0:1")) {
       markdown_preview = target.rect;
     } else if (target.name == QStringLiteral("chat:preview:0:2")) {
       json_preview = target.rect;
+    } else if (target.name == QStringLiteral("chat:preview:0:3")) {
+      quote_preview = target.rect;
     }
   }
   QVERIFY(!markdown_preview.isNull());
   QVERIFY(!json_preview.isNull());
+  QVERIFY(!quote_preview.isNull());
   QTest::mouseClick(view.widget(), Qt::LeftButton, Qt::NoModifier,
                     markdown_preview.center().toPoint());
   QCOMPARE(previewed_language, QStringLiteral("markdown"));
@@ -756,6 +832,14 @@ void ChatViewTest::previewRoutesToSideRailHandler() {
                     json_preview.center().toPoint());
   QCOMPARE(previewed_language, QStringLiteral("json"));
   QCOMPARE(previewed_text, QStringLiteral("{\"ok\": true}"));
+
+  // Quotes get the same title bar as code cards. Preview keeps the quote
+  // markers so the rail renders a blockquote, not a plain paragraph.
+  QTest::mouseClick(view.widget(), Qt::LeftButton, Qt::NoModifier,
+                    quote_preview.center().toPoint());
+  QCOMPARE(previewed_language, QStringLiteral("markdown"));
+  QCOMPARE(previewed_text,
+           QStringLiteral("> quoted line\n> second line"));
 
   // Normal generated prose is not a text card and has no Preview target.
   for (const hermes::ui::ClickTarget& target : view.ClickTargets()) {

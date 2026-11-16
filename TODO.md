@@ -42,6 +42,25 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-17 (quote cards get the code-style header)
+
+**Block quotes now share the code-card header: a `QUOTE` title, Preview and
+Copy. Normal prose still has no window chrome.**
+
+- [x] Quote layout reserves `kCodeHeaderHeight` above the quoted text; the
+      accent bar starts under the header, and selection/search geometry uses
+      the same `BlockTextRect` that painting uses.
+- [x] `HasCardHeader(kind)` groups code/diff/math/Mermaid with quotes for
+      header hit targets, selectable runs and header Copy/Preview handling.
+      Gutter Copy is suppressed for quote cards so there is only one Copy.
+- [x] Quote `Copy` copies the quoted text without `>` markers, matching code
+      cards copying the code body without fences.
+- [x] Quote `Preview` sends `> `-prefixed Markdown to the right rail, so the
+      preview renders a blockquote instead of a plain paragraph.
+- [x] New `quoteCardGetsCodeStyleHeader` covers header selectable text,
+      Copy, Preview and the absence of a gutter Copy. Preview routing also
+      covers a Markdown quote. Chat suite **37 passed**.
+
 ## Status update — 2026-11-17 (only code-like blocks get the title bar)
 
 **Normal assistant prose stays plain. Code, diff, math and Mermaid keep the
