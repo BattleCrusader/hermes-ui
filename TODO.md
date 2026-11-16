@@ -42,6 +42,25 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-16 (slash completion prefixes the draft)
+
+**Typing `/` at the start of an existing draft now opens completion, and
+accepting a command keeps the draft as its argument instead of replacing it.**
+
+- [x] The slash query is the first block in front of the caret, not the whole
+      first block. Previously `!text.contains(' ')` hid the menu as soon as the
+      draft had a space, so a command could not be prepended at 0,0 to an
+      existing prompt. The menu now opens on `/` before that prompt.
+- [x] Accepting a command replaces only the typed prefix and preserves all text
+      after the caret, including multi-line drafts. A separator is inserted
+      between the command and the preserved text, and leading spaces are
+      collapsed so the result is `/command <existing draft>`.
+- [x] The caret lands after the command separator, ready for arguments, and
+      the menu hides because the completed command now contains its space.
+- [x] `slashMenuFiltersAndAccepts` covers a single-line existing draft and a
+      multi-line draft, checking both the preserved text and the caret. Full
+      native suite **10/10 passed**.
+
 ## Status update — 2026-11-16 (history reaches every prompt)
 
 **Up now reaches compaction-archived prompts, and the caret rules are absolute:

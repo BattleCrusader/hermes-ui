@@ -399,6 +399,35 @@ void ClickAuditTest::slashMenuFiltersAndAccepts() {
   QCOMPARE(composer.Text(), QStringLiteral("/reasoning "));
   QVERIFY(!composer.SlashMenuVisible());
 
+  // A command typed at the start of an existing draft prefixes that draft
+  // instead of replacing it, and the caret stays after the command separator.
+  composer.SetText(QStringLiteral("summarize this"));
+  editor->moveCursor(QTextCursor::Start);
+  QTest::keyClick(editor, Qt::Key_Slash);
+  QTest::qWait(20);
+  QVERIFY(composer.SlashMenuVisible());
+  QTest::keyClicks(editor, QStringLiteral("reas"));
+  QTest::qWait(20);
+  QVERIFY(composer.SlashMenuVisible());
+  QTest::keyClick(editor, Qt::Key_Tab);
+  QTest::qWait(20);
+  QCOMPARE(composer.Text(), QStringLiteral("/reasoning summarize this"));
+  QCOMPARE(editor->textCursor().position(),
+           static_cast<int>(QStringLiteral("/reasoning ").size()));
+
+  // Multi-line drafts are preserved too: only the first block in front of the
+  // caret is the command query.
+  composer.SetText(QStringLiteral("first line\nsecond line"));
+  editor->moveCursor(QTextCursor::Start);
+  QTest::keyClick(editor, Qt::Key_Slash);
+  QTest::keyClicks(editor, QStringLiteral("reas"));
+  QTest::qWait(20);
+  QVERIFY(composer.SlashMenuVisible());
+  QTest::keyClick(editor, Qt::Key_Tab);
+  QTest::qWait(20);
+  QCOMPARE(composer.Text(),
+           QStringLiteral("/reasoning first line\nsecond line"));
+
   // A complete command submits instead of completing (so "/new<Enter>" runs).
   composer.SetText(QStringLiteral("/new"));
   QTest::qWait(20);

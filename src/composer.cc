@@ -61,6 +61,45 @@ QString CssColor(const QColor& color) {
       .arg(color.alpha());
 }
 
+// The slash query is the text in the first block before the caret. Existing
+// draft text after the caret is not part of the query, so a command can be
+// prepended without mistaking the draft's first word for command letters.
+struct SlashPrefix {
+  bool valid = false;
+  int cursor_position = 0;
+  QString text;
+};
+
+SlashPrefix SlashPrefixAtCursor(const QTextDocument* document,
+                                const QTextCursor& cursor) {
+  SlashPrefix result;
+  if (document == nullptr) {
+    return result;
+  }
+  const QTextBlock first = document->firstBlock();
+  if (!first.isValid() || cursor.block() != first) {
+    return result;
+  }
+  const int position = cursor.positionInBlock();
+  if (position <= 0) {
+    return result;
+  }
+  const QString block = first.text();
+  if (!block.startsWith(QLatin1Char('/'))) {
+    return result;
+  }
+  const QString prefix = block.left(position);
+  for (const QChar ch : prefix) {
+    if (ch.isSpace()) {
+      return result;
+    }
+  }
+  result.valid = true;
+  result.cursor_position = cursor.position();
+  result.text = prefix;
+  return result;
+}
+
 }  // namespace
 
 Composer::Composer(const Theme& theme, QWidget* parent)
@@ -1272,22 +1311,17 @@ void Composer::UpdateSlashMenu() {
   if (slash_menu_ == nullptr) {
     return;
   }
-  // A slash command is a single-line draft. Ask the document instead of
-  // flattening the whole editor on every keystroke: toPlainText() allocates a
-  // copy of the entire draft, and this runs from textChanged() while typing.
-  const QTextDocument* document = editor_->document();
-  if (document->blockCount() != 1) {
+  // Ask the first block instead of flattening the whole editor on every
+  // keystroke: toPlainText() allocates a copy of the entire draft, and this
+  // runs from textChanged() while typing. The caret divides the query from an
+  // existing draft, so "/" in front of a paragraph still completes.
+  const SlashPrefix input =
+      SlashPrefixAtCursor(editor_->document(), editor_->textCursor());
+  if (!input.valid) {
     HideSlashMenu();
     return;
   }
-  const QString text = document->firstBlock().text();
-  const bool candidate = text.startsWith(QLatin1Char('/')) &&
-                         !text.contains(QLatin1Char(' '));
-  if (!candidate) {
-    HideSlashMenu();
-    return;
-  }
-  const auto matches = MatchSlashCommands(slash_commands_, text);
+  const auto matches = MatchSlashCommands(slash_commands_, input.text);
   if (matches.empty()) {
     HideSlashMenu();
     return;
@@ -1338,6 +1372,12 @@ void Composer::AcceptSlashCommand() {
   if (item == nullptr) {
     return;
   }
+  const SlashPrefix input =
+      SlashPrefixAtCursor(editor_->document(), editor_->textCursor());
+  if (!input.valid) {
+    HideSlashMenu();
+    return;
+  }
   const QString name = item->data(Qt::UserRole).toString();
   // Resolve against the active catalog (the gateway's list): commands the
   // built-in table does not know, like /steer, still take arguments.
@@ -1354,8 +1394,21 @@ void Composer::AcceptSlashCommand() {
       break;
     }
   }
-  const QString completed = takes_args ? name + QLatin1Char(' ') : name;
-  SetText(completed);
+  // Keep whatever the user had already typed after the caret. A command that
+  // must sit in front of that text needs one separator, even when it takes no
+  // arguments; otherwise "/new" and the draft would fuse into one token.
+  QString suffix = Text().mid(input.cursor_position);
+  const bool has_suffix = !suffix.isEmpty();
+  const QString completed =
+      (takes_args || has_suffix) ? name + QLatin1Char(' ') : name;
+  while (suffix.startsWith(QLatin1Char(' ')) ||
+         suffix.startsWith(QLatin1Char('\t'))) {
+    suffix.remove(0, 1);
+  }
+  SetText(completed + suffix);
+  QTextCursor caret = editor_->textCursor();
+  caret.setPosition(completed.size());
+  editor_->setTextCursor(caret);
   HideSlashMenu();
   FocusEditor();
 }
