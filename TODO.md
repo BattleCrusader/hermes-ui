@@ -42,6 +42,33 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-17 (background turns notify immediately)
+
+**A turn that finishes in another chat now posts its completion notification
+without waiting for the user to click that session.**
+
+- [x] `ProfileWorker::OnSocketEvent` used to discard every event whose
+      `session_id` was not the selected session. That also dropped
+      `message.complete`, so a background turn left `state_.running` set and
+      the shell only noticed the completion after the session was resumed.
+- [x] Background `message.complete` now closes the running claim when that
+      session owns it, records the turn's prompt/start time, and queues a
+      `TurnCompletionNotice`. The visible transcript is still untouched.
+- [x] Per-session prompt/start stamps are kept beside the selected-session turn
+      state, so a background notice names the prompt that opened *that* turn;
+      steers do not replace it.
+- [x] `MainWindow::CheckProfileCompletions` drains notices newer than its last
+      per-profile serial and calls `OnGenerationFinished` with the notice's
+      session, prompt, error and elapsed fields. The old running→idle
+      transition remains only as a fallback for completions that arrived
+      without an event; it no longer double-notifies.
+- [x] The session list is refreshed shortly after a background completion so
+      the sidebar's running/unread row catches up. New
+      `backgroundTurnCompletionQueuesOneNoticePerTurn` covers clearing only the
+      matching running claim, queuing one notice per completion, prompt
+      trimming, elapsed time and failure text. Full native suite **10/10
+      passed, 0 failed**.
+
 ## Status update — 2026-11-17 (completed answers survive the history refresh)
 
 **A completed assistant answer no longer disappears during the post-turn
