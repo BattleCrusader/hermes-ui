@@ -36,6 +36,17 @@ bool HistoryContainsAssistant(const std::vector<ChatMessage>& hydrated,
 void PreserveLiveReasoning(std::vector<ChatMessage>* hydrated,
                            const std::vector<ChatMessage>& live);
 
+// Carries the most recent completed assistant row across a REST refresh whose
+// page predates the commit that persisted it. This is the normal
+// `message.complete` race: the live answer is authoritative for a few hundred
+// milliseconds, then the next refresh must show it instead of replacing the
+// transcript with the older page. If history already has the row, fill in
+// reasoning/answer fields it has not projected yet. Otherwise insert the live
+// row chronologically, but only when it is recent and history has not moved
+// well past it.
+void PreserveLiveAssistant(std::vector<ChatMessage>* hydrated,
+                           const std::vector<ChatMessage>& live);
+
 // Carries an optimistic user prompt across a REST refresh whose page predates
 // the commit that persisted it. Only a trailing local row (row_id 0) that is
 // not already present by text is appended; completed history stays

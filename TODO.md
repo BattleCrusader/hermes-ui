@@ -42,6 +42,25 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-17 (completed answers survive the history refresh)
+
+**A completed assistant answer no longer disappears during the post-turn
+REST reconciliation.**
+
+- [x] `message.complete` publishes the final answer immediately, then
+      `message_refresh_timer_` fetches REST history 700 ms later. The gateway
+      can commit that assistant row after the fetch, so the older page used to
+      replace the live transcript and drop the answer until the next prompt.
+- [x] New `PreserveLiveAssistant` carries the most recent completed assistant
+      row across a history refresh. If history already has the row, missing
+      answer/reasoning fields are filled; otherwise the live row is inserted
+      chronologically (including before a newer prompt row).
+- [x] A live row more than 30 seconds older than the newest history row is
+      treated as stale, so a replaced/interrupted turn still lets history win.
+- [x] `historyHydratesAndPreservesDisplayReasoning` covers lagging history,
+      duplicate avoidance, partial row projection, insertion before the next
+      prompt, and the stale-tail guard. Full native suite **10/10 passed**.
+
 ## Status update — 2026-11-17 (quote cards get the code-style header)
 
 **Block quotes now share the code-card header: a `QUOTE` title, Preview and

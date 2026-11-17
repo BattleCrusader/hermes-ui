@@ -7,6 +7,7 @@
 #include <QJsonDocument>
 #include <QStringList>
 #include <cmath>
+#include <iterator>
 #include <utility>
 #include <vector>
 
@@ -186,6 +187,78 @@ void PreserveLiveReasoning(std::vector<ChatMessage>* hydrated,
     }
     return;
   }
+}
+
+void PreserveLiveAssistant(std::vector<ChatMessage>* hydrated,
+                           const std::vector<ChatMessage>& live) {
+  if (hydrated == nullptr) {
+    return;
+  }
+  const ChatMessage* assistant = nullptr;
+  for (auto it = live.rbegin(); it != live.rend(); ++it) {
+    if (it->role != MessageRole::kAssistant || it->streaming ||
+        it->reasoning_streaming) {
+      continue;
+    }
+    if (!it->raw_text.trimmed().isEmpty() ||
+        !it->reasoning.trimmed().isEmpty()) {
+      assistant = &*it;
+      break;
+    }
+  }
+  if (assistant == nullptr) {
+    return;
+  }
+  const QDateTime now = QDateTime::currentDateTime();
+  if (!assistant->timestamp.isValid() ||
+      assistant->timestamp.secsTo(now) > 10 * 60) {
+    return;
+  }
+
+  for (ChatMessage& candidate : *hydrated) {
+    if (!SameAssistant(candidate, *assistant)) {
+      continue;
+    }
+    if (candidate.reasoning.trimmed().isEmpty()) {
+      candidate.reasoning = assistant->reasoning;
+      candidate.reasoning_streaming = false;
+    }
+    // A reasoning-only history row can land before its answer text. Do not
+    // blink the completed answer out while the transcript projection catches
+    // up with the same row.
+    if (candidate.raw_text.trimmed().isEmpty() &&
+        !assistant->raw_text.trimmed().isEmpty()) {
+      candidate.raw_text = assistant->raw_text;
+      candidate.blocks = assistant->blocks;
+    }
+    return;
+  }
+
+  // If history already carries rows well past this assistant, the live tail
+  // is stale (a replaced or interrupted turn). Prefer history.
+  QDateTime newest_hydrated;
+  for (const ChatMessage& message : *hydrated) {
+    if (message.timestamp.isValid() &&
+        (!newest_hydrated.isValid() ||
+         message.timestamp > newest_hydrated)) {
+      newest_hydrated = message.timestamp;
+    }
+  }
+  if (newest_hydrated.isValid() &&
+      assistant->timestamp.secsTo(newest_hydrated) > 30) {
+    return;
+  }
+
+  auto insert_at = hydrated->end();
+  for (auto it = hydrated->end(); it != hydrated->begin();) {
+    --it;
+    if (it->timestamp.isValid() &&
+        it->timestamp <= assistant->timestamp) {
+      insert_at = std::next(it);
+      break;
+    }
+  }
+  hydrated->insert(insert_at, *assistant);
 }
 
 void PreservePendingUserMessages(std::vector<ChatMessage>* hydrated,

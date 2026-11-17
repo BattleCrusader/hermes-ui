@@ -3737,6 +3737,7 @@ void PreferencesTest::historyHydratesAndPreservesDisplayReasoning() {
   using hermes::ui::ChatMessage;
   using hermes::ui::HistoryContainsAssistant;
   using hermes::ui::MessageRole;
+  using hermes::ui::PreserveLiveAssistant;
   using hermes::ui::PreserveLiveReasoning;
   using hermes::ui::PreservePendingUserMessages;
   using hermes::ui::ReasoningTextFromDetails;
@@ -3819,6 +3820,60 @@ void PreferencesTest::historyHydratesAndPreservesDisplayReasoning() {
   rows = {persisted_user, hydrated};
   PreservePendingUserMessages(&rows, {pending_user});
   QCOMPARE(rows.size(), std::size_t{2});
+
+  // `message.complete` publishes the answer before the REST history row is
+  // durable. The 700 ms refresh must keep that completed answer instead of
+  // replacing the transcript with the older page.
+  ChatMessage completed_user;
+  completed_user.row_id = 10;
+  completed_user.role = MessageRole::kUser;
+  completed_user.timestamp = now.addSecs(-2);
+  completed_user.raw_text = QStringLiteral("question");
+  ChatMessage completed;
+  completed.row_id = 0;
+  completed.role = MessageRole::kAssistant;
+  completed.timestamp = now;
+  completed.raw_text = QStringLiteral("Final answer.");
+  std::vector<ChatMessage> lagging{completed_user};
+  PreserveLiveAssistant(&lagging, {completed_user, completed});
+  QCOMPARE(lagging.size(), std::size_t{2});
+  QCOMPARE(lagging.back().raw_text, QStringLiteral("Final answer."));
+
+  // Once history contains the same answer, do not append a duplicate.
+  std::vector<ChatMessage> caught_up{completed_user, completed};
+  PreserveLiveAssistant(&caught_up, {completed_user, completed});
+  QCOMPARE(caught_up.size(), std::size_t{2});
+
+  // A history row can exist before its answer text is projected. Fill the
+  // missing content from the live row instead of rendering an empty answer.
+  ChatMessage projected = completed;
+  projected.row_id = 42;
+  projected.raw_text.clear();
+  std::vector<ChatMessage> projected_rows{projected};
+  PreserveLiveAssistant(&projected_rows, {projected, completed});
+  QCOMPARE(projected_rows.front().raw_text,
+           QStringLiteral("Final answer."));
+
+  // If a newer prompt has already reached history, insert the completed
+  // answer before it rather than appending it to the wrong turn.
+  ChatMessage next_user;
+  next_user.row_id = 11;
+  next_user.role = MessageRole::kUser;
+  next_user.timestamp = now.addSecs(5);
+  next_user.raw_text = QStringLiteral("next question");
+  std::vector<ChatMessage> next_turn{completed_user, next_user};
+  PreserveLiveAssistant(&next_turn, {completed_user, completed, next_user});
+  QCOMPARE(next_turn.size(), std::size_t{3});
+  QCOMPARE(next_turn[1].raw_text, QStringLiteral("Final answer."));
+  QCOMPARE(next_turn[2].raw_text, QStringLiteral("next question"));
+
+  // A page that has moved well past the live row means the live tail is
+  // stale; let history win.
+  ChatMessage much_newer = next_user;
+  much_newer.timestamp = now.addSecs(31);
+  std::vector<ChatMessage> stale{completed_user, much_newer};
+  PreserveLiveAssistant(&stale, {completed_user, completed});
+  QCOMPARE(stale.size(), std::size_t{2});
 }
 
 void PreferencesTest::rightRailStagesUnstagesAndIgnoresFiles() {

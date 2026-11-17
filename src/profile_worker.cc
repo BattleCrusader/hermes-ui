@@ -2836,6 +2836,11 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
     // `message.complete` refresh races the commit). Keep the optimistic user
     // row so an injected prompt never disappears after it was accepted.
     PreservePendingUserMessages(&messages, state_.messages);
+    // The same race applies to the completed assistant answer: history can
+    // return before the backend projects the final row. Keep that live answer
+    // until the page contains it, otherwise the transcript appears to lose the
+    // turn until the next prompt triggers another refresh.
+    PreserveLiveAssistant(&messages, state_.messages);
     if (!keep_live) {
       state_.messages = std::move(messages);
     }
