@@ -324,6 +324,18 @@ struct PendingAdmission {
   int execution_generation = -1;
 };
 
+// One completed turn that the shell has not announced yet. A profile worker
+// can finish a chat while the UI is viewing another one, so completion cannot
+// be inferred from the selected session's transcript or `running` flag alone.
+struct TurnCompletionNotice {
+  quint64 serial = 0;
+  QString session_id;
+  QString prompt;
+  QString error;
+  qint64 elapsed_ms = 0;
+  bool failed = false;
+};
+
 // Immutable snapshot published by a ProfileWorker. The UI holds a shared_ptr
 // and never blocks on the worker's socket, HTTP or state mutex.
 struct ProfileSnapshot {
@@ -354,6 +366,11 @@ struct ProfileSnapshot {
   // The prompt that opened the live turn. Steers deliberately leave it alone,
   // so a completion notification names what the user originally asked for.
   QString turn_prompt_text;
+  // Monotonic queue of finished turns. `CheckProfileCompletions` drains rows
+  // newer than the last serial it announced, so a background chat notifies
+  // even when its `message.complete` never reaches the selected transcript.
+  quint64 turn_completion_serial = 0;
+  std::vector<TurnCompletionNotice> turn_completions;
   QString gateway_version;
   QString model;
   QString provider;

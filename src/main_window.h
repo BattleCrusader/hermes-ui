@@ -253,6 +253,9 @@ class MainWindow : public QWidget {
   quint64 last_reaction_serial_ = 0;
   std::vector<QString> pinned_context_;
   std::vector<bool> last_running_;
+  // Last completion serial announced per profile. The worker queues these
+  // explicitly so a background chat can notify without being selected.
+  std::vector<quint64> last_turn_completion_serial_;
   QStringList queued_prompts_;
   // Recently steered prompts, newest last. They are already delivered, so the
   // review dialog shows them read-only but can load one back for editing.
@@ -286,8 +289,8 @@ class MainWindow : public QWidget {
   std::unique_ptr<NotificationService> notifications_;
   QSet<QString> notified_requests_;
   NotificationThrottle notification_throttle_;
-  void OnGenerationFinished(const ProfileSnapshot& snapshot, qint64 elapsed_ms,
-                            const QString& finished_session_id = QString(),
+  void OnGenerationFinished(const ProfileSnapshot& snapshot,
+                            const TurnCompletionNotice& completion,
                             int profile_index = -1);
   void NotifyPendingRequests(const ProfileSnapshot& snapshot);
   void EditMessage(const ChatMessage& message, const QString& text);

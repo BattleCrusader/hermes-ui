@@ -223,6 +223,12 @@ class ProfileWorker : public QObject {
   void AppendUserPromptLocked(const QString& text,
                               const QString& local_bubble_id = {},
                               bool begin_turn = true);
+  // Remember which prompt opened a session's turn and when. A completion can
+  // arrive after the user switched chats, so it cannot read the selected
+  // session's `turn_prompt_text`.
+  void NoteTurnStartedLocked(const QString& session_id, const QString& prompt);
+  void NoteBackgroundTurnCompleteLocked(const QString& session_id,
+                                        const QString& failure);
   bool HasLocalPromptBubbleLocked(const QString& local_bubble_id) const;
   void RemoveLocalPromptBubbleLocked(const QString& local_bubble_id);
   void AppendReasoningDelta(const QString& text, bool streaming);
@@ -296,6 +302,10 @@ class ProfileWorker : public QObject {
   std::deque<DeferredPrompt> deferred_prompts_;
   QString admission_id_;
   QString admission_status_;
+  // Per-session prompt/start stamps. Guarded by mutex_. Entries are consumed
+  // by the completion that closes the turn.
+  QHash<QString, QString> turn_prompt_by_session_;
+  QHash<QString, qint64> turn_started_by_session_;
   PendingPromptTracker pending_prompts_;
   bool pending_prompts_baseline_ready_ = false;
   int pending_receipt_id_ = -1;

@@ -3,6 +3,10 @@
 #ifndef HERMES_UI_TURN_OUTCOME_H_
 #define HERMES_UI_TURN_OUTCOME_H_
 
+#include <algorithm>
+#include <cstddef>
+#include <utility>
+
 #include "src/model.h"
 
 namespace hermes::ui {
@@ -76,6 +80,50 @@ inline void CompleteTurn(ProfileSnapshot* snapshot, const QString& failure) {
   snapshot->turn_error_text = failure;
   snapshot->error_text = failure;
   snapshot->status_text = QStringLiteral("error");
+}
+
+inline void RecordTurnCompletion(ProfileSnapshot* snapshot,
+                                 const QString& session_id,
+                                 const QString& prompt, const QString& failure,
+                                 qint64 elapsed_ms) {
+  if (snapshot == nullptr || session_id.isEmpty()) {
+    return;
+  }
+  TurnCompletionNotice notice;
+  notice.serial = ++snapshot->turn_completion_serial;
+  notice.session_id = session_id;
+  notice.prompt = prompt.trimmed();
+  notice.failed = !failure.isEmpty();
+  notice.error = failure;
+  notice.elapsed_ms = std::max<qint64>(0, elapsed_ms);
+  snapshot->turn_completions.push_back(std::move(notice));
+  // A long-lived worker must not grow this queue without bound if the shell
+  // polls slowly. The UI only needs the newest handful.
+  constexpr std::size_t kMaxCompletionNotices = 16;
+  if (snapshot->turn_completions.size() > kMaxCompletionNotices) {
+    snapshot->turn_completions.erase(
+        snapshot->turn_completions.begin(),
+        snapshot->turn_completions.end() - kMaxCompletionNotices);
+  }
+}
+
+// Completes a turn for a chat that is not currently selected. The transcript
+// stays put, but the profile's running claim is cleared when it belongs to the
+// finished session, and the shell gets one notification row either way.
+inline void CompleteBackgroundTurn(ProfileSnapshot* snapshot,
+                                   const QString& session_id,
+                                   const QString& prompt,
+                                   const QString& failure,
+                                   qint64 elapsed_ms) {
+  if (snapshot == nullptr || session_id.isEmpty()) {
+    return;
+  }
+  if (snapshot->running &&
+      (snapshot->running_session_id.isEmpty() ||
+       snapshot->running_session_id == session_id)) {
+    CompleteTurn(snapshot, failure);
+  }
+  RecordTurnCompletion(snapshot, session_id, prompt, failure, elapsed_ms);
 }
 
 }  // namespace hermes::ui

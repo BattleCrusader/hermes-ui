@@ -3222,7 +3222,9 @@ void MainWindow::RunSlashForProbe(const QString& command) {
 
 void MainWindow::DemoCompleteForProbe() {
   ProfileSnapshot snapshot;
-  OnGenerationFinished(snapshot, 12400);
+  TurnCompletionNotice completion;
+  completion.elapsed_ms = 12400;
+  OnGenerationFinished(snapshot, completion);
   composer_->SetRunning(false);
   sidebar_->SetRunning(false);
   status_bar_->SetWorkState(false, 0);
@@ -5146,11 +5148,25 @@ void MainWindow::CheckProfileCompletions() {
   if (static_cast<int>(last_running_.size()) < count) {
     last_running_.resize(static_cast<std::size_t>(count), false);
   }
+  if (static_cast<int>(last_turn_completion_serial_.size()) < count) {
+    last_turn_completion_serial_.resize(static_cast<std::size_t>(count), 0);
+  }
   for (int index = 0; index < count; ++index) {
     const std::shared_ptr<const ProfileSnapshot> snapshot =
         supervisor_.SnapshotAt(index);
     if (!snapshot) {
       continue;
+    }
+    bool announced_completion = false;
+    quint64& announced_serial =
+        last_turn_completion_serial_[static_cast<std::size_t>(index)];
+    for (const TurnCompletionNotice& completion : snapshot->turn_completions) {
+      if (completion.serial <= announced_serial) {
+        continue;
+      }
+      announced_serial = completion.serial;
+      OnGenerationFinished(*snapshot, completion, index);
+      announced_completion = true;
     }
     const bool was_running = last_running_[static_cast<std::size_t>(index)];
     const bool streaming = !snapshot->messages.empty() &&
@@ -5173,7 +5189,18 @@ void MainWindow::CheckProfileCompletions() {
           running_session_by_profile_.count(profile) > 0
               ? running_session_by_profile_[profile]
               : snapshot->selected_session_id;
-      OnGenerationFinished(*snapshot, elapsed, finished_session, index);
+      // The worker queues a notice for every normal message.complete. This
+      // transition is only a fallback for a turn that ended without one (for
+      // example a resume after the socket dropped). Do not announce twice.
+      if (!announced_completion) {
+        TurnCompletionNotice completion;
+        completion.session_id = finished_session;
+        completion.prompt = snapshot->turn_prompt_text;
+        completion.failed = snapshot->turn_failed;
+        completion.error = snapshot->turn_error_text;
+        completion.elapsed_ms = elapsed;
+        OnGenerationFinished(*snapshot, completion, index);
+      }
       run_started_by_profile_.erase(profile);
       running_session_by_profile_.erase(profile);
       if (index == supervisor_.active_index()) {
@@ -5231,14 +5258,14 @@ void MainWindow::ApplyRunIndicators(const ProfileSnapshot& snapshot) {
   }
 }
 
-void MainWindow::OnGenerationFinished(const ProfileSnapshot& snapshot,
-                                      qint64 elapsed_ms,
-                                      const QString& finished_session_id,
-                                      int profile_index) {
-  const QString seconds = QString::number(elapsed_ms / 1000.0, 'f', 1);
-  const QString session_id = finished_session_id.isEmpty()
+void MainWindow::OnGenerationFinished(
+    const ProfileSnapshot& snapshot, const TurnCompletionNotice& completion,
+    int profile_index) {
+  const QString seconds =
+      QString::number(completion.elapsed_ms / 1000.0, 'f', 1);
+  const QString session_id = completion.session_id.isEmpty()
                                  ? snapshot.selected_session_id
-                                 : finished_session_id;
+                                 : completion.session_id;
   const QString profile_label = profile_index >= 0
                                     ? supervisor_.ProfileLabel(profile_index)
                                     : snapshot.label;
@@ -5263,7 +5290,7 @@ void MainWindow::OnGenerationFinished(const ProfileSnapshot& snapshot,
   if (completion_flash_enabled_) {
     title_bar_->Flash();
   }
-  const NotificationKind kind = snapshot.turn_failed
+  const NotificationKind kind = completion.failed
                                     ? NotificationKind::kTurnError
                                     : NotificationKind::kTurnDone;
   const QString session_name = SessionNotificationName(snapshot, session_id);
@@ -5282,13 +5309,12 @@ void MainWindow::OnGenerationFinished(const ProfileSnapshot& snapshot,
         kind == NotificationKind::kTurnError
             ? QStringLiteral("Turn failed · %1").arg(profile_label)
             : QStringLiteral("Turn complete · %1").arg(profile_label);
-    const QString failure_text = snapshot.turn_error_text.isEmpty()
+    const QString failure_text = completion.error.isEmpty()
                                      ? QStringLiteral("The turn failed")
-                                     : snapshot.turn_error_text;
+                                     : completion.error;
     // Name the prompt that opened the turn; a steer never replaces it. Fall
     // back to the session title only when the snapshot never saw the prompt.
-    const QString prompt_summary =
-        NotificationPromptSummary(snapshot.turn_prompt_text);
+    const QString prompt_summary = NotificationPromptSummary(completion.prompt);
     const QString body =
         kind == NotificationKind::kTurnError
             ? (prompt_summary.isEmpty()

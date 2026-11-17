@@ -133,6 +133,7 @@ class PreferencesTest : public QObject {
   void notificationPolicyMatchesDesktopAttentionRules();
   void notificationPromptSummaryKeepsTheOpeningPrompt();
   void turnOutcomeSeparatesSyncErrorsFromTurnFailures();
+  void backgroundTurnCompletionQueuesOneNoticePerTurn();
   void subagentEventsBuildALiveDelegationTree();
   void audioDataUrlDecodesSpeechAndRejectsJunk();
   void attachmentAttachRpcMatchesMediaType();
@@ -4237,6 +4238,53 @@ void PreferencesTest::turnOutcomeSeparatesSyncErrorsFromTurnFailures() {
   QVERIFY(!streaming.messages.back().streaming);
   QVERIFY(streaming.turn_failed);
   QCOMPARE(streaming.turn_error_text, QStringLiteral("stream lost"));
+}
+
+void PreferencesTest::backgroundTurnCompletionQueuesOneNoticePerTurn() {
+  using hermes::ui::CompleteBackgroundTurn;
+  using hermes::ui::ProfileSnapshot;
+
+  ProfileSnapshot snapshot;
+  snapshot.selected_session_id = QStringLiteral("session-b");
+  snapshot.running = true;
+  snapshot.running_session_id = QStringLiteral("session-a");
+
+  // The user switched away while session-a was still generating. Its
+  // completion must clear the profile claim and queue a notice even though its
+  // transcript is not on screen.
+  CompleteBackgroundTurn(&snapshot, QStringLiteral("session-a"),
+                         QStringLiteral("  Fix the login bug  "), QString(),
+                         4200);
+  QVERIFY(!snapshot.running);
+  QVERIFY(snapshot.running_session_id.isEmpty());
+  QCOMPARE(snapshot.turn_completions.size(), std::size_t{1});
+  const hermes::ui::TurnCompletionNotice& first =
+      snapshot.turn_completions.back();
+  QCOMPARE(first.serial, quint64{1});
+  QCOMPARE(first.session_id, QStringLiteral("session-a"));
+  QCOMPARE(first.prompt, QStringLiteral("Fix the login bug"));
+  QCOMPARE(first.elapsed_ms, qint64{4200});
+  QVERIFY(!first.failed);
+  QVERIFY(first.error.isEmpty());
+
+  // If another chat has since started its own turn, finishing the background
+  // one must not steal the running claim. It still queues its own notice.
+  snapshot.running = true;
+  snapshot.running_session_id = QStringLiteral("session-b");
+  CompleteBackgroundTurn(&snapshot, QStringLiteral("session-a"),
+                         QStringLiteral("background retry"),
+                         QStringLiteral("provider timeout"), 900);
+  QVERIFY(snapshot.running);
+  QCOMPARE(snapshot.running_session_id, QStringLiteral("session-b"));
+  QCOMPARE(snapshot.turn_completions.size(), std::size_t{2});
+  const hermes::ui::TurnCompletionNotice& second =
+      snapshot.turn_completions.back();
+  QCOMPARE(second.serial, quint64{2});
+  QCOMPARE(second.session_id, QStringLiteral("session-a"));
+  QCOMPARE(second.prompt, QStringLiteral("background retry"));
+  QCOMPARE(second.elapsed_ms, qint64{900});
+  QVERIFY(second.failed);
+  QCOMPARE(second.error, QStringLiteral("provider timeout"));
 }
 
 void PreferencesTest::rightRailMultipleProjectGitPanes() {

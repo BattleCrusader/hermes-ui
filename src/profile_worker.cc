@@ -583,6 +583,7 @@ void ProfileWorker::SendPromptInternal(const QString& text,
           state_.messages.push_back(std::move(message));
         }
         BeginTurn(&state_, trimmed);
+        NoteTurnStartedLocked(session_id, trimmed);
         foreground_ = true;
         state_.unread = 0;
       }
@@ -2144,10 +2145,31 @@ void ProfileWorker::AppendUserPromptLocked(const QString& text,
   state_.messages.push_back(std::move(message));
   if (begin_turn) {
     BeginTurn(&state_, trimmed);
+    NoteTurnStartedLocked(state_.selected_session_id, trimmed);
   }
   foreground_ = true;
   state_.unread = 0;
   NoteActivityLocked();
+}
+
+void ProfileWorker::NoteTurnStartedLocked(const QString& session_id,
+                                          const QString& prompt) {
+  const QString key =
+      session_id.isEmpty() ? state_.selected_session_id : session_id;
+  if (key.isEmpty()) {
+    return;
+  }
+  turn_prompt_by_session_[key] = prompt.trimmed();
+  turn_started_by_session_[key] = QDateTime::currentMSecsSinceEpoch();
+}
+
+void ProfileWorker::NoteBackgroundTurnCompleteLocked(
+    const QString& session_id, const QString& failure) {
+  const QString prompt = turn_prompt_by_session_.take(session_id);
+  const qint64 started = turn_started_by_session_.take(session_id);
+  const qint64 elapsed_ms =
+      started > 0 ? QDateTime::currentMSecsSinceEpoch() - started : 0;
+  CompleteBackgroundTurn(&state_, session_id, prompt, failure, elapsed_ms);
 }
 
 bool ProfileWorker::HasLocalPromptBubbleLocked(
@@ -3466,12 +3488,40 @@ void ProfileWorker::OnSocketEvent(const QString& type,
   }
 
   QString selected;
+  QString runtime_session;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     selected = state_.selected_session_id;
+    runtime_session = runtime_session_id_;
   }
-  if (!session_id.isEmpty() && !selected.isEmpty() && session_id != selected &&
-      session_id != runtime_session_id_) {
+  const bool background_session =
+      !session_id.isEmpty() && !selected.isEmpty() &&
+      session_id != selected && session_id != runtime_session;
+  if (background_session) {
+    // A turn can finish while the user is reading another chat. Keep its
+    // transcript out of the visible page, but close its running claim and
+    // queue a completion notice so the shell can notify immediately.
+    if (type == QStringLiteral("message.complete")) {
+      const QString text = payload.value(QStringLiteral("text")).toString();
+      const QString error = payload.value(QStringLiteral("error")).toString();
+      const bool failed = payload.value(QStringLiteral("status")).toString() ==
+                          QStringLiteral("error");
+      const QString failure =
+          failed
+              ? (error.isEmpty() ? QStringLiteral("The turn failed") : error)
+              : QString();
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        NoteBackgroundTurnCompleteLocked(session_id, failure);
+        PublishLocked();
+      }
+      qInfo("background turn complete session=%.12s chars=%lld error=%d",
+            qUtf8Printable(session_id), static_cast<qint64>(text.size()),
+            failed ? 1 : 0);
+      // The visible transcript is another chat, but the sidebar still wants
+      // the finished session's unread/running row refreshed.
+      QTimer::singleShot(800, this, [this]() { FetchSessions(); });
+    }
     return;
   }
   // Only a claim for the session on screen may fence Stop/Steer. A late event
@@ -4382,6 +4432,7 @@ void ProfileWorker::CompleteAssistant(const QString& text,
   bool superseded = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    qint64 elapsed_ms = 0;
     ChatMessage* target = nullptr;
     // Walk backwards: a user row newer than the streaming answer means this
     // completion belongs to a turn that Inject already replaced. Cancelling a
@@ -4418,10 +4469,11 @@ void ProfileWorker::CompleteAssistant(const QString& text,
       target->blocks = ParseMarkdown(target->raw_text);
     }
     if (target->timestamp.isValid()) {
-      const qint64 elapsed_ms =
-          target->timestamp.msecsTo(QDateTime::currentDateTime());
+      elapsed_ms = target->timestamp.msecsTo(QDateTime::currentDateTime());
       if (elapsed_ms >= 0) {
         target->duration_secs = static_cast<double>(elapsed_ms) / 1000.0;
+      } else {
+        elapsed_ms = 0;
       }
     }
     target->streaming = false;
@@ -4435,9 +4487,18 @@ void ProfileWorker::CompleteAssistant(const QString& text,
             static_cast<qint64>(text.size()), error ? 1 : 0);
       return;
     }
+    const QString completed_session = state_.selected_session_id;
+    const qint64 started = turn_started_by_session_.take(completed_session);
+    if (started > 0) {
+      elapsed_ms = QDateTime::currentMSecsSinceEpoch() - started;
+    }
+    const QString completed_prompt =
+        turn_prompt_by_session_.take(completed_session);
     state_.running = false;
     state_.running_session_id.clear();
     CompleteTurn(&state_, failure);
+    RecordTurnCompletion(&state_, completed_session, completed_prompt, failure,
+                         elapsed_ms);
     NoteActivityLocked();
     state_.requests.clear();
     admission_id_.clear();
