@@ -26,6 +26,9 @@ namespace hermes::ui {
 //   * steered  — already delivered to the live turn; edits/deletes update the
 //                local history only, so the row stays honest about what was
 //                sent while still letting the prompt be loaded back.
+//   * background — a gateway side agent (`prompt.background` / `prompt.btw`).
+//                The task runs independently, so edits update local history;
+//                "Run again" starts a fresh side task with the edited text.
 // The dialog owns copies through caller-owned QStringList pointers; it is
 // modal and never outlives MainWindow's prompt lists.
 class PromptHistoryDialog : public QDialog {
@@ -43,6 +46,18 @@ class PromptHistoryDialog : public QDialog {
     int execution_generation = -1;
     bool steering = false;
   };
+  // One background side task and its eventual answer. A running task cannot
+  // be mutated live; the row is history plus a "Run again" action.
+  struct BackgroundPrompt {
+    QString task_id;
+    QString verb;
+    QString text;
+    QString output;
+    QString error;
+    bool complete = false;
+    qint64 created_ms = 0;
+    qint64 completed_ms = 0;
+  };
   using ActionDone = std::function<void(bool ok, const QString& message)>;
 
   PromptHistoryDialog(const Theme& theme, QStringList* queued,
@@ -51,6 +66,7 @@ class PromptHistoryDialog : public QDialog {
   // Replaces the authoritative backend queue. Safe to call while the dialog is
   // open: selection follows the admission id when it survives.
   void SetServerPrompts(std::vector<ServerPrompt> prompts);
+  void SetBackgroundPrompts(std::vector<BackgroundPrompt> prompts);
   void RemoveServerPrompt(const QString& admission_id);
   void SetStatus(const QString& text);
 
@@ -67,13 +83,21 @@ class PromptHistoryDialog : public QDialog {
   // Local queued/steered rows have no backend admission. Sending submits the
   // text as a fresh prompt; a successful local queue entry is removed on ACK.
   std::function<void(const QString&, ActionDone)> on_send_local;
+  // Background rows are local history. Updates never reach a live side agent;
+  // "Run again" starts a new task and reports through ActionDone.
+  std::function<void(const BackgroundPrompt&, const QString& text)>
+      on_update_background;
+  std::function<void(const BackgroundPrompt&)> on_delete_background;
+  std::function<void(const BackgroundPrompt&, ActionDone)>
+      on_send_background;
 
  private:
-  enum class Kind { kServer, kQueued, kSteered };
+  enum class Kind { kServer, kQueued, kSteered, kBackground };
 
   void RebuildList();
   bool Selected(Kind* kind, int* index) const;
   bool SelectedServer(ServerPrompt* prompt) const;
+  bool SelectedBackground(BackgroundPrompt* prompt) const;
   void RefreshEditor();
   void SaveSelected();
   void DeleteSelected();
@@ -82,9 +106,12 @@ class PromptHistoryDialog : public QDialog {
   QStringList* queued_ = nullptr;
   QStringList* steered_ = nullptr;
   std::vector<ServerPrompt> server_;
+  std::vector<BackgroundPrompt> background_;
   QString selected_admission_;
+  QString selected_task_;
   QListWidget* list_ = nullptr;
   QPlainTextEdit* editor_ = nullptr;
+  QPlainTextEdit* output_ = nullptr;
   QLabel* status_ = nullptr;
   QPushButton* save_ = nullptr;
   QPushButton* remove_ = nullptr;

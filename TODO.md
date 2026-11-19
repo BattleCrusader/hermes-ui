@@ -33,7 +33,7 @@ not enough; only then is the row removed.
 | 2 | Providers, keys, vault, gateway | Provider accounts, API keys, custom endpoints, `/api/env`, credential vault, web access | **done** |
 | 3 | Plugins, billing, updates | Plugin inventory, billing/plans, managed updates | **partial** — list + rescan + hub enable/disable/update/remove + lazy catalog install + manifest `settings_schema` forms; billing/plans and plugin deep-link pages missing |
 | 4 | Cron, artifacts, capabilities | Cron jobs/runs/actions; artifact browser/preview; skills/toolsets/MCP | **partial** — cron jobs + runs + blueprints + delivery targets + create/edit, with wrapped 80%-width cards and an icon action row per task; artifacts browse/edit/save/mkdir/delete/upload/download/image preview, file browser rooted at the scoped project (home when unscoped) with refresh-safe list/preview scroll and docs-style Markdown preview; capability inventory + MCP add/test/toggle/OAuth/catalog/raw edit + skill enable/lock/edit/new + hub sources/search/preview/scan/install/update/uninstall + per-toolset provider/env/model config; connector accounts (rename/remove), tools (cached/refresh), catalog browse, list/connect + operation polling; generated HTML/SVG/code artifact browser with version history, copy/save and source toggle; generated artifact project binding missing |
-| 5 | Chat parity | Full markdown, attachments/images, inline cards, message actions, session import/export | **partial** — full markdown (headings/lists/tasks/quotes/rules/tables/links/images/diff/math/mermaid/artifacts/footnotes/citations), reasoning blocks, attachment chips/thumbnails/clipboard paste/overflow drawer/removal/drag-drop, prompt history with view/edit/delete for queued and steered entries plus backend pending-admission edit/replace/cancel/steer plus ACK-gated “Inject now” into the live turn, context meter, `@` path completion, queue/steer, file dictation and gateway live-voice input, session export/import, edit/regenerate, the desktop hover action row on every message item (assistant: duration/branch/copy/copy-full/read-aloud/refresh/react; user: branch/copy/copy-full/read-aloud/edit/react; system/tool-only: copy/copy-full), right-click branch/rewind/react/delete, read-aloud, inline transcript cards, client-side prompt pinning, profile-scoped projects (backend-derived membership, sidebar scope filter, project-entry session selection/blank-chat creation, create/edit/delete, folder mutators, project cwd for new chats), right rail Project/Git/Terminal + Context/Agents/Todo/Timeline/Outputs accordion (collapsible/resizable shell splitter, project file tree with themed Markdown/HTML/image/code preview, one collapsible
+| 5 | Chat parity | Full markdown, attachments/images, inline cards, message actions, session import/export | **partial** — full markdown (headings/lists/tasks/quotes/rules/tables/links/images/diff/math/mermaid/artifacts/footnotes/citations), reasoning blocks, attachment chips/thumbnails/clipboard paste/overflow drawer/removal/drag-drop, prompt history with view/edit/delete for queued and steered entries plus background side tasks (running/completed output, Run again, dismiss) and backend pending-admission edit/replace/cancel/steer plus ACK-gated “Inject now” into the live turn, context meter, `@` path completion, queue/steer, file dictation and gateway live-voice input, session export/import, edit/regenerate, the desktop hover action row on every message item (assistant: duration/branch/copy/copy-full/read-aloud/refresh/react; user: branch/copy/copy-full/read-aloud/edit/react; system/tool-only: copy/copy-full), right-click branch/rewind/react/delete, read-aloud, inline transcript cards, client-side prompt pinning, profile-scoped projects (backend-derived membership, sidebar scope filter, project-entry session selection/blank-chat creation, create/edit/delete, folder mutators, project cwd for new chats), right rail Project/Git/Terminal + Context/Agents/Todo/Timeline/Outputs accordion (collapsible/resizable shell splitter, project file tree with themed Markdown/HTML/image/code preview, one collapsible
 Git card per project repository with independent status, per-file
 stage/unstage, a `.gitignore` editor, a staged-only commit path, a textual
 diff preview, push/AI message, PTY-backed embedded shell, prompt filtering, row
@@ -41,6 +41,40 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 6 | Platform surfaces | Agents/teams, messaging onboarding, webhooks, voice, browser/computer use, HUD/pets/starmap, multi-window, quick entry | **partial** — messaging inventory/toggles/test + Telegram and WhatsApp QR onboarding, Bots, Webhooks, event-driven agents panel with steer/stop/handoff, read-aloud TTS with output-device selection, gateway live microphone input, starmap, quick entry, computer-use diagnostics/grant, terminal-backend picker, desktop-pet overlay, a detachable chat window, and browser/CDP automation (`browser.manage` discovery plus a native CDP client for screenshots and coordinate input, with real-profile consent); GPT-Live/WebRTC voice sessions, floating HUD/wake indicator and the remaining multi-window panes still missing |
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
+
+## Status update — 2026-11-19 (plain Send never mutates a live turn)
+
+**While a turn is running, Enter and Ctrl+Enter keep the draft instead of
+implicitly steering, queueing or interrupting it.** Busy semantics are now
+explicit: only `/steer`, `/queue` and `/bg` choose those actions. `/bg` starts a
+gateway side agent; its receipt and completion are tracked separately and
+remain reviewable after the parent turn ends.
+
+- [x] `Composer` replaced the old `SteerRequested` / `QueueRequested` busy
+      signals with `BusySendRequested`. Plain/Ctrl+Enter keeps the draft and
+      attachments and asks the user to choose `/steer`, `/queue` or `/bg`;
+      only an attachment-free `/`-prefixed prompt still calls `Submit()`.
+- [x] `MainWindow::SubmitText` repeats the busy gate before and after slash
+      dispatch, and restores the draft if a caller already cleared it. Plain
+      text can never become a live correction by bypassing the composer.
+- [x] `/steer` now waits for the `session.steer` receipt before recording
+      history; a rejected steer restores the prompt. `/bg` failures restore the
+      prompt too. `/queue` keeps `queued=true` semantics.
+- [x] Added `/steer`, `/queue` and `/bg` to the slash catalog. `/bg` with no
+      prompt opens the prompt-history dialog, so completed side tasks have a
+      permanent door after their transcript row goes away.
+- [x] `ProfileSnapshot::background_prompts` tracks `prompt.background` /
+      `prompt.btw` task ids, prompts, `BTW`/`Background` verb, output and
+      errors. Completion events are consumed before the selected-session
+      filter and upsert by task id, so an event that races the ACK still keeps
+      its answer. Running side tasks count toward the queue badge.
+- [x] The queued/steered prompt dialog now also lists background rows with a
+      read-only output pane. Prompt text can be edited locally, **Run again**
+      starts a fresh side task, and finished rows can be dismissed. Running
+      rows cannot be deleted or mutated live.
+- [x] Tests cover busy Send preserving drafts/attachments, background
+      upsert/completion ordering, and the background history dialog. Full
+      native suite **10/10 passed, 0 failed**.
 
 ## Status update — 2026-11-19 (prompt lists keep their markers)
 

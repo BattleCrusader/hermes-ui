@@ -625,6 +625,22 @@ void Supervisor::QueuePrompt(int index, const QString& text) {
   }
 }
 
+void Supervisor::TrackBackgroundPrompt(int index, const QString& task_id,
+                                       const QString& session_id,
+                                       const QString& verb,
+                                       const QString& text) {
+  if (index < 0 || index >= profile_count()) {
+    return;
+  }
+  ProfileWorker* worker = entries_[static_cast<std::size_t>(index)].worker;
+  if (worker != nullptr) {
+    QMetaObject::invokeMethod(worker, "TrackBackgroundPrompt",
+                              Qt::QueuedConnection, Q_ARG(QString, task_id),
+                              Q_ARG(QString, session_id), Q_ARG(QString, verb),
+                              Q_ARG(QString, text));
+  }
+}
+
 void Supervisor::SendPromptWithAttachments(int index, const QString& text,
                                            const QStringList& attachments) {
   if (index < 0 || index >= profile_count()) {

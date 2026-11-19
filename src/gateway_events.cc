@@ -268,6 +268,85 @@ std::vector<ChatReaction> ParseChatReactions(const QJsonArray& reactions) {
   return parsed;
 }
 
+BackgroundPrompt* FindBackgroundPrompt(std::vector<BackgroundPrompt>* prompts,
+                                       const QString& task_id) {
+  if (prompts == nullptr || task_id.isEmpty()) {
+    return nullptr;
+  }
+  for (BackgroundPrompt& prompt : *prompts) {
+    if (prompt.task_id == task_id) {
+      return &prompt;
+    }
+  }
+  return nullptr;
+}
+
+BackgroundPrompt* UpsertBackgroundPrompt(
+    std::vector<BackgroundPrompt>* prompts, const QString& task_id,
+    const QString& session_id, const QString& verb, const QString& text,
+    qint64 now_ms, std::size_t limit) {
+  if (prompts == nullptr || task_id.isEmpty()) {
+    return nullptr;
+  }
+  BackgroundPrompt* prompt = FindBackgroundPrompt(prompts, task_id);
+  if (prompt == nullptr) {
+    BackgroundPrompt fresh;
+    fresh.task_id = task_id;
+    fresh.created_ms = now_ms;
+    prompts->push_back(std::move(fresh));
+    prompt = &prompts->back();
+  }
+  if (!session_id.isEmpty()) {
+    prompt->session_id = session_id;
+  }
+  if (!verb.isEmpty()) {
+    prompt->verb = verb;
+  }
+  // A completion can arrive before the verb ACK. Do not erase the task's
+  // output when the ACK eventually supplies the prompt text.
+  if (!text.isEmpty()) {
+    prompt->text = text;
+  }
+  while (limit > 0 && prompts->size() > limit) {
+    prompts->erase(prompts->begin());
+  }
+  return FindBackgroundPrompt(prompts, task_id);
+}
+
+BackgroundPrompt* ApplyBackgroundPromptCompletion(
+    std::vector<BackgroundPrompt>* prompts, const QJsonObject& payload,
+    qint64 now_ms, std::size_t limit) {
+  const QString task_id =
+      payload.value(QStringLiteral("task_id")).toString().trimmed();
+  if (prompts == nullptr || task_id.isEmpty()) {
+    return nullptr;
+  }
+  const QString session_id =
+      payload.value(QStringLiteral("session_id")).toString();
+  const QString verb = payload.value(QStringLiteral("verb")).toString();
+  BackgroundPrompt* prompt =
+      UpsertBackgroundPrompt(prompts, task_id, session_id, verb, QString(),
+                             now_ms, limit);
+  if (prompt == nullptr) {
+    return nullptr;
+  }
+  const QString text = payload.value(QStringLiteral("text")).toString();
+  QString failure = payload.value(QStringLiteral("error")).toString().trimmed();
+  if (failure.isEmpty() && text.startsWith(QStringLiteral("error: "))) {
+    failure = text.mid(7).trimmed();
+  }
+  if (!failure.isEmpty()) {
+    prompt->error = failure;
+    prompt->output.clear();
+  } else {
+    prompt->output = text;
+    prompt->error.clear();
+  }
+  prompt->complete = true;
+  prompt->completed_ms = now_ms;
+  return prompt;
+}
+
 QString ReactionSummary(const QJsonArray& reactions) {
   QStringList labels;
   std::vector<int> counts;

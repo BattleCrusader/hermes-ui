@@ -1467,32 +1467,14 @@ void MainWindow::BuildUi() {
           [this](const QString& text) { SubmitText(text); });
   connect(composer_, &Composer::VoiceToggleRequested, this,
           [this]() { ToggleLiveVoice(); });
-  connect(composer_, &Composer::SteerRequested, this,
-          [this](const QString& text) {
-            const int active = supervisor_.active_index();
-            composer_->Clear();
-            status_bar_->ShowTransient(QStringLiteral("Steering…"));
-            supervisor_.Steer(
-                active, text, [this, text](bool ok, const QString& message) {
-                  if (ok) {
-                    RecordSteeredPrompt(text);
-                    return;
-                  }
-                  if (composer_->Text().trimmed().isEmpty()) {
-                    composer_->SetText(text);
-                    composer_->setFocus();
-                  }
-                  status_bar_->ShowTransient(
-                      QStringLiteral("Steer failed: %1").arg(message));
-                });
+  connect(composer_, &Composer::BusySendRequested, this,
+          [this](const QString&) {
+            status_bar_->ShowTransient(
+                QStringLiteral("Turn is running — use /steer, /queue, or /bg"));
+            composer_->FocusEditor();
           });
   connect(composer_, &Composer::QueuedReviewRequested, this,
           [this]() { ShowQueuedPromptsDialog(); });
-  connect(composer_, &Composer::QueueRequested, this,
-          [this](const QString& text) {
-            QueuePromptText(text);
-            composer_->Clear();
-          });
   connect(composer_, &Composer::AttachRequested, this, [this]() {
     const QString path =
         QFileDialog::getOpenFileName(this, QStringLiteral("Attach a file"));
@@ -1969,10 +1951,24 @@ void MainWindow::SubmitText(const QString& text) {
   if (trimmed.isEmpty()) {
     return;
   }
-  RememberComposerInput(trimmed);
   const QStringList attachments = composer_->AttachmentPaths();
   const bool slash_command =
       attachments.isEmpty() && trimmed.startsWith(QLatin1Char('/'));
+  // Plain text is never allowed to steer or interrupt a live turn. Only an
+  // explicit /steer, /queue or /bg may choose one of those actions; keeping
+  // this gate in the shell also protects callers that bypass the composer.
+  if (!slash_command) {
+    const auto snapshot = supervisor_.ActiveSnapshot();
+    if (snapshot != nullptr && SelectedTurnRunning(*snapshot)) {
+      if (composer_->Text().trimmed().isEmpty()) {
+        composer_->SetText(trimmed);
+      }
+      status_bar_->ShowTransient(
+          QStringLiteral("Turn is running — use /steer, /queue, or /bg"));
+      return;
+    }
+  }
+  RememberComposerInput(trimmed);
   // A connector directory card owns plain typed text. Attachments and slash
   // commands cannot be an answer (desktop parity), so they settle the card
   // with Continue and then route normally.
@@ -1986,6 +1982,17 @@ void MainWindow::SubmitText(const QString& text) {
   }
   if (slash_command && RunSlashCommand(trimmed)) {
     composer_->Clear();
+    return;
+  }
+  if (const auto snapshot = supervisor_.ActiveSnapshot();
+      snapshot != nullptr && SelectedTurnRunning(*snapshot)) {
+    // Submit() may already have cleared the editor (an unrecognized slash
+    // prompt, or a caller that bypassed the composer); keep the draft.
+    if (composer_->Text().trimmed().isEmpty()) {
+      composer_->SetText(trimmed);
+    }
+    status_bar_->ShowTransient(
+        QStringLiteral("Turn is running — use /steer, /queue, or /bg"));
     return;
   }
   QStringList pinned;
@@ -2028,9 +2035,20 @@ bool MainWindow::RunSlashCommand(const QString& text) {
     // The worker owns the decision: steer when a turn holds the session,
     // otherwise send the text as the next prompt. The snapshot's `running`
     // flag lags the gateway by design, so it must not gate this.
-    supervisor_.Steer(active, args);
-    RecordSteeredPrompt(args);
     status_bar_->ShowTransient(QStringLiteral("Steering…"));
+    supervisor_.Steer(
+        active, args, [this, args](bool ok, const QString& message) {
+          if (ok) {
+            RecordSteeredPrompt(args);
+            return;
+          }
+          if (composer_->Text().trimmed().isEmpty()) {
+            composer_->SetText(args);
+            composer_->FocusEditor();
+          }
+          status_bar_->ShowTransient(
+              QStringLiteral("Steer failed: %1").arg(message));
+        });
     return true;
   }
   if (name == QStringLiteral("/queue") || name == QStringLiteral("/q")) {
@@ -2050,6 +2068,30 @@ bool MainWindow::RunSlashCommand(const QString& text) {
     }
     return true;
   }
+  if (name == QStringLiteral("/bg") || name == QStringLiteral("/btw")) {
+    if (args.isEmpty()) {
+      // With no prompt, /bg is the background-task history. Completed side
+      // agents leave the live transcript, so this is their permanent door.
+      ShowQueuedPromptsDialog();
+      return true;
+    }
+    StartBackgroundPrompt(
+        args,
+        name == QStringLiteral("/btw") ? QStringLiteral("btw")
+                                       : QStringLiteral("background"),
+        [this, args](bool ok, const QString&) {
+          if (ok) {
+            return;
+          }
+          // Submit() already cleared the draft; a failed side task must not
+          // silently take the prompt with it.
+          if (composer_->Text().trimmed().isEmpty()) {
+            composer_->SetText(args);
+            composer_->FocusEditor();
+          }
+        });
+    return true;
+  }
   if (name == QStringLiteral("/retry")) {
     QString last_user;
     if (active_snapshot) {
@@ -2065,9 +2107,9 @@ bool MainWindow::RunSlashCommand(const QString& text) {
     } else if (running) {
       supervisor_.Note(
           active,
-          QStringLiteral("The turn is still running — use /steer or /queue"));
+          QStringLiteral("The turn is still running — use /steer, /queue, or /bg"));
       status_bar_->ShowTransient(
-          QStringLiteral("Turn is still running — use /steer or /queue"));
+          QStringLiteral("Turn is still running — use /steer, /queue, or /bg"));
     } else {
       supervisor_.SendPrompt(active, last_user);
     }
@@ -2701,24 +2743,18 @@ void MainWindow::ShowDetachedChat() {
             }
             composer->Clear();
           });
-  connect(composer, &Composer::SteerRequested, this,
-          [this, composer](const QString& text) {
-            RememberComposerInput(text);
-            supervisor_.Steer(supervisor_.active_index(), text);
-            steered_prompts_.append(text);
-            while (steered_prompts_.size() > 20) {
-              steered_prompts_.removeFirst();
+  connect(composer, &Composer::BusySendRequested, this,
+          [this, composer](const QString&) {
+            const QString hint =
+                QStringLiteral("Turn is running — use /steer, /queue, or /bg");
+            if (detached_chat_ != nullptr) {
+              detached_chat_->SetStatus(hint);
             }
-            composer->Clear();
-            status_bar_->ShowTransient(QStringLiteral("Steering…"));
+            status_bar_->ShowTransient(hint);
+            composer->FocusEditor();
           });
   connect(composer, &Composer::QueuedReviewRequested, this,
           [this]() { ShowQueuedPromptsDialog(); });
-  connect(composer, &Composer::QueueRequested, this,
-          [this, composer](const QString& text) {
-            QueuePromptText(text);
-            composer->Clear();
-          });
   connect(composer, &Composer::FilesDropped, this,
           [this](const QStringList& paths) {
             for (const QString& path : paths) {
@@ -3741,6 +3777,14 @@ int MainWindow::PendingQueueCount(const ProfileSnapshot& snapshot) const {
       ++count;
     }
   }
+  // Running side tasks are pending work too. Completed/failed rows stay
+  // available through /bg even after the badge clears.
+  for (const BackgroundPrompt& task : snapshot.background_prompts) {
+    if (!task.complete && task.session_id == snapshot.selected_session_id &&
+        !dismissed_background_prompts_.contains(task.task_id)) {
+      ++count;
+    }
+  }
   return count;
 }
 
@@ -3784,6 +3828,75 @@ void MainWindow::QueuePromptText(const QString& text) {
   SyncComposerQueueBadge(running ? pending : -1);
 }
 
+void MainWindow::StartBackgroundPrompt(const QString& text,
+                                       const QString& verb,
+                                       Supervisor::SteerCallback done) {
+  const QString trimmed = text.trimmed();
+  if (trimmed.isEmpty()) {
+    if (done) {
+      done(false, QStringLiteral("A prompt cannot be empty."));
+    }
+    return;
+  }
+  const int active = supervisor_.active_index();
+  const auto snapshot = supervisor_.ActiveSnapshot();
+  if (active < 0 || snapshot == nullptr ||
+      snapshot->selected_session_id.isEmpty()) {
+    const QString message =
+        QStringLiteral("Open a chat before starting a background task");
+    status_bar_->ShowTransient(message);
+    if (done) {
+      done(false, message);
+    }
+    return;
+  }
+  const QString normalized =
+      verb == QStringLiteral("btw") ? QStringLiteral("btw")
+                                    : QStringLiteral("background");
+  const QString session_id = snapshot->selected_session_id;
+  RememberComposerInput(trimmed);
+  QJsonObject params{
+      {QStringLiteral("session_id"), session_id},
+      {QStringLiteral("text"), trimmed},
+  };
+  if (!snapshot->name.isEmpty()) {
+    params.insert(QStringLiteral("profile"), snapshot->name);
+  }
+  status_bar_->ShowTransient(QStringLiteral("Starting background task…"));
+  supervisor_.RequestRpc(
+      active, QStringLiteral("prompt.") + normalized, params,
+      [this, active, normalized, trimmed,
+       session_id, done](const QJsonObject& result, const QString& error) {
+        if (!error.isEmpty()) {
+          const QString message =
+              QStringLiteral("Background task failed to start: %1").arg(error);
+          status_bar_->ShowTransient(message);
+          if (done) {
+            done(false, message);
+          }
+          return;
+        }
+        const QString task_id =
+            result.value(QStringLiteral("task_id")).toString().trimmed();
+        if (task_id.isEmpty()) {
+          const QString message = QStringLiteral(
+              "Background task started without a task id");
+          status_bar_->ShowTransient(message);
+          if (done) {
+            done(false, message);
+          }
+          return;
+        }
+        supervisor_.TrackBackgroundPrompt(active, task_id, session_id,
+                                          normalized, trimmed);
+        status_bar_->ShowTransient(
+            QStringLiteral("Background task started — /bg to review"));
+        if (done) {
+          done(true, QString());
+        }
+      });
+}
+
 void MainWindow::ShowQueuedPromptsDialog() {
   PromptHistoryDialog dialog(theme_, &queued_prompts_, &steered_prompts_, this);
   const int profile_index = supervisor_.active_index();
@@ -3816,6 +3929,36 @@ void MainWindow::ShowQueuedPromptsDialog() {
     }
     return prompts;
   };
+  const auto collect_background =
+      [this, profile_index,
+       session_id]() -> std::vector<PromptHistoryDialog::BackgroundPrompt> {
+    std::vector<PromptHistoryDialog::BackgroundPrompt> prompts;
+    const auto current = supervisor_.SnapshotAt(profile_index);
+    if (current == nullptr || current->selected_session_id != session_id) {
+      return prompts;
+    }
+    for (const BackgroundPrompt& task : current->background_prompts) {
+      if (task.task_id.isEmpty() || task.session_id != session_id ||
+          dismissed_background_prompts_.contains(task.task_id)) {
+        continue;
+      }
+      PromptHistoryDialog::BackgroundPrompt prompt;
+      prompt.task_id = task.task_id;
+      prompt.verb = task.verb;
+      prompt.text = task.text;
+      prompt.output = task.output;
+      prompt.error = task.error;
+      prompt.complete = task.complete;
+      prompt.created_ms = task.created_ms;
+      prompt.completed_ms = task.completed_ms;
+      const auto edited = background_prompt_edits_.constFind(task.task_id);
+      if (edited != background_prompt_edits_.constEnd()) {
+        prompt.text = edited.value();
+      }
+      prompts.push_back(std::move(prompt));
+    }
+    return prompts;
+  };
   const auto prompt_signature =
       [](const std::vector<PromptHistoryDialog::ServerPrompt>& prompts) {
         QStringList parts;
@@ -3828,10 +3971,27 @@ void MainWindow::ShowQueuedPromptsDialog() {
         }
         return parts.join(QLatin1Char('\n'));
       };
+  const auto background_signature =
+      [](const std::vector<PromptHistoryDialog::BackgroundPrompt>& prompts) {
+        QStringList parts;
+        for (const auto& prompt : prompts) {
+          parts << QStringLiteral("%1\x1f%2\x1f%3\x1f%4\x1f%5\x1f%6")
+                       .arg(prompt.task_id, prompt.verb, prompt.text,
+                            prompt.complete ? QStringLiteral("1")
+                                            : QStringLiteral("0"),
+                            prompt.output, prompt.error);
+        }
+        return parts.join(QLatin1Char('\n'));
+      };
   std::vector<PromptHistoryDialog::ServerPrompt> server_prompts =
       collect_prompts();
   auto signature = std::make_shared<QString>(prompt_signature(server_prompts));
   dialog.SetServerPrompts(std::move(server_prompts));
+  std::vector<PromptHistoryDialog::BackgroundPrompt> background_prompts =
+      collect_background();
+  auto background_sig =
+      std::make_shared<QString>(background_signature(background_prompts));
+  dialog.SetBackgroundPrompts(std::move(background_prompts));
   dialog.on_changed = [this]() { SyncComposerQueueBadge(); };
   dialog.on_load = [this](const QString& text) {
     composer_->SetText(text);
@@ -3942,23 +4102,50 @@ void MainWindow::ShowQueuedPromptsDialog() {
                              PromptHistoryDialog::ActionDone done) {
     supervisor_.SendPrompt(profile_index, text, follow_injected(done));
   };
+  dialog.on_update_background =
+      [this](const PromptHistoryDialog::BackgroundPrompt& prompt,
+             const QString& text) {
+        background_prompt_edits_.insert(prompt.task_id, text);
+      };
+  dialog.on_delete_background =
+      [this](const PromptHistoryDialog::BackgroundPrompt& prompt) {
+        dismissed_background_prompts_.insert(prompt.task_id);
+        background_prompt_edits_.remove(prompt.task_id);
+      };
+  dialog.on_send_background =
+      [this](const PromptHistoryDialog::BackgroundPrompt& prompt,
+             PromptHistoryDialog::ActionDone done) {
+        StartBackgroundPrompt(
+            prompt.text,
+            prompt.verb == QStringLiteral("btw") ? QStringLiteral("btw")
+                                                 : QStringLiteral("background"),
+            std::move(done));
+      };
 
   // The backend queue changes while the modal is open (a queued prompt drains,
   // a steer settles, or another client cancels). Refresh by content so a
   // processed row disappears without wiping an unrelated edit.
   auto* sync_timer = new QTimer(&dialog);
   sync_timer->setInterval(400);
-  QObject::connect(sync_timer, &QTimer::timeout, &dialog,
-                   [&dialog, collect_prompts, prompt_signature, signature]() {
-                     std::vector<PromptHistoryDialog::ServerPrompt> prompts =
-                         collect_prompts();
-                     const QString next = prompt_signature(prompts);
-                     if (next == *signature) {
-                       return;
-                     }
-                     *signature = next;
-                     dialog.SetServerPrompts(std::move(prompts));
-                   });
+  QObject::connect(
+      sync_timer, &QTimer::timeout, &dialog,
+      [&dialog, collect_prompts, collect_background, prompt_signature,
+       background_signature, signature, background_sig]() {
+        std::vector<PromptHistoryDialog::ServerPrompt> prompts =
+            collect_prompts();
+        const QString next = prompt_signature(prompts);
+        if (next != *signature) {
+          *signature = next;
+          dialog.SetServerPrompts(std::move(prompts));
+        }
+        std::vector<PromptHistoryDialog::BackgroundPrompt> background =
+            collect_background();
+        const QString next_background = background_signature(background);
+        if (next_background != *background_sig) {
+          *background_sig = next_background;
+          dialog.SetBackgroundPrompts(std::move(background));
+        }
+      });
   sync_timer->start();
   dialog.exec();
   sync_timer->stop();

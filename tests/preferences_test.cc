@@ -159,6 +159,7 @@ class PreferencesTest : public QObject {
   void projectsParseListTreeAndMutators();
   void promptHistoryEditsQueuedAndSteeredEntries();
   void promptHistorySendsLocalAndServerQueuesAsNewPrompts();
+  void promptHistoryShowsAndRerunsBackgroundTasks();
   void promptHistoryEditsAndCancelsServerQueue();
   void projectDialogEditsCreateAndDisplayFields();
   void projectAppearanceParsesColorsIconsAndFiltersDismissedAutos();
@@ -610,22 +611,47 @@ void PreferencesTest::composerSteersQueuesAndPastesImages() {
   hermes::ui::Composer composer(theme);
   auto* editor = composer.findChild<QTextEdit*>();
   QVERIFY(editor != nullptr);
-  QString steered;
-  QString queued;
-  QObject::connect(&composer, &hermes::ui::Composer::SteerRequested,
-                   [&](const QString& text) { steered = text; });
-  QObject::connect(&composer, &hermes::ui::Composer::QueueRequested,
-                   [&](const QString& text) { queued = text; });
+  QStringList busy;
+  QStringList submitted;
+  QObject::connect(&composer, &hermes::ui::Composer::BusySendRequested,
+                   [&](const QString& text) { busy.append(text); });
+  QObject::connect(&composer, &hermes::ui::Composer::Submitted,
+                   [&](const QString& text) { submitted.append(text); });
   composer.SetRunning(true);
   composer.SetQueuedPrompts(2);
   composer.SetText(QStringLiteral("keep going"));
   editor->setFocus();
+  // Plain Enter while busy never mutates the live turn and never clears the
+  // draft; the user has to choose /steer, /queue, or /bg explicitly.
   QTest::keyClick(editor, Qt::Key_Return);
-  QCOMPARE(steered, QStringLiteral("keep going"));
-  composer.SetText(QStringLiteral("next turn"));
+  QCOMPARE(busy, QStringList{QStringLiteral("keep going")});
+  QVERIFY(submitted.isEmpty());
+  QCOMPARE(composer.Text(), QStringLiteral("keep going"));
   QTest::keyClick(editor, Qt::Key_Return, Qt::ControlModifier);
-  QCOMPARE(queued, QStringLiteral("next turn"));
-  QVERIFY(steered != queued);
+  QCOMPARE(busy.size(), 2);
+  QCOMPARE(busy.at(1), QStringLiteral("keep going"));
+  QVERIFY(submitted.isEmpty());
+
+  // Explicit slash commands are the only busy path through Submit().
+  composer.SetText(QStringLiteral("/queue next turn"));
+  QTest::keyClick(editor, Qt::Key_Return);
+  QCOMPARE(submitted, QStringList{QStringLiteral("/queue next turn")});
+  QCOMPARE(busy.size(), 2);
+
+  // An attachment-bearing slash-looking prompt is still a normal draft: block
+  // it before Submit() can clear attachments or thumbnails.
+  composer.SetText(QStringLiteral("/queue with a file"));
+  composer.AddAttachment(QStringLiteral("note.txt"),
+                         QStringLiteral("/tmp/hermes-note.txt"));
+  QTest::keyClick(editor, Qt::Key_Return);
+  QCOMPARE(busy.size(), 3);
+  QVERIFY(busy.at(2).startsWith(QStringLiteral("/queue with a file")));
+  QVERIFY(busy.at(2).contains(QStringLiteral("note.txt")));
+  QCOMPARE(composer.Text(), QStringLiteral("/queue with a file"));
+  QCOMPARE(composer.AttachmentPaths(),
+           QStringList{QStringLiteral("/tmp/hermes-note.txt")});
+  QCOMPARE(submitted.size(), 1);
+  composer.Clear();
 
   QSignalSpy dropped(&composer, &hermes::ui::Composer::FilesDropped);
   QImage image(8, 8, QImage::Format_ARGB32);
@@ -2915,6 +2941,120 @@ void PreferencesTest::promptHistorySendsLocalAndServerQueuesAsNewPrompts() {
   delete late;
   finish_late(true, QString());
   QCOMPARE(late_queued.size(), 0);
+}
+
+void PreferencesTest::promptHistoryShowsAndRerunsBackgroundTasks() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  QStringList queued;
+  QStringList steered;
+  hermes::ui::PromptHistoryDialog dialog(theme, &queued, &steered);
+  std::vector<hermes::ui::PromptHistoryDialog::BackgroundPrompt> tasks;
+
+  hermes::ui::PromptHistoryDialog::BackgroundPrompt running;
+  running.task_id = QStringLiteral("task-running");
+  running.verb = QStringLiteral("btw");
+  running.text = QStringLiteral("inspect the build");
+  running.complete = false;
+  tasks.push_back(running);
+
+  hermes::ui::PromptHistoryDialog::BackgroundPrompt complete;
+  complete.task_id = QStringLiteral("task-complete");
+  complete.verb = QStringLiteral("background");
+  complete.text = QStringLiteral("summarize the logs");
+  complete.output = QStringLiteral("all green");
+  complete.complete = true;
+  tasks.push_back(complete);
+
+  hermes::ui::PromptHistoryDialog::BackgroundPrompt failed;
+  failed.task_id = QStringLiteral("task-failed");
+  failed.verb = QStringLiteral("background");
+  failed.text = QStringLiteral("try the flaky test");
+  failed.error = QStringLiteral("boom");
+  failed.complete = true;
+  tasks.push_back(failed);
+
+  QString updated_id;
+  QString updated_text;
+  QString deleted_id;
+  QString rerun_text;
+  hermes::ui::PromptHistoryDialog::ActionDone start_done;
+  dialog.on_update_background =
+      [&updated_id, &updated_text](
+          const hermes::ui::PromptHistoryDialog::BackgroundPrompt& prompt,
+          const QString& text) {
+        updated_id = prompt.task_id;
+        updated_text = text;
+      };
+  dialog.on_delete_background =
+      [&deleted_id](
+          const hermes::ui::PromptHistoryDialog::BackgroundPrompt& prompt) {
+        deleted_id = prompt.task_id;
+      };
+  dialog.on_send_background =
+      [&rerun_text, &start_done](
+          const hermes::ui::PromptHistoryDialog::BackgroundPrompt& prompt,
+          hermes::ui::PromptHistoryDialog::ActionDone done) {
+        rerun_text = prompt.text;
+        start_done = std::move(done);
+      };
+
+  dialog.SetBackgroundPrompts(tasks);
+  dialog.show();
+  QTest::qWait(10);
+
+  auto* list =
+      dialog.findChild<QListWidget*>(QStringLiteral("queuedPromptList"));
+  auto* editor =
+      dialog.findChild<QPlainTextEdit*>(QStringLiteral("queuedPromptEditor"));
+  auto* output =
+      dialog.findChild<QPlainTextEdit*>(QStringLiteral("queuedPromptOutput"));
+  auto* save =
+      dialog.findChild<QPushButton*>(QStringLiteral("queuedPromptEdit"));
+  auto* remove =
+      dialog.findChild<QPushButton*>(QStringLiteral("queuedPromptRemove"));
+  auto* rerun =
+      dialog.findChild<QPushButton*>(QStringLiteral("queuedPromptSteer"));
+  QVERIFY(list != nullptr);
+  QVERIFY(editor != nullptr);
+  QVERIFY(output != nullptr);
+  QVERIFY(save != nullptr);
+  QVERIFY(remove != nullptr);
+  QVERIFY(rerun != nullptr);
+  QCOMPARE(list->count(), 3);
+  QVERIFY(list->item(0)->text().startsWith(QStringLiteral("BTW running ·")));
+  QVERIFY(list->item(1)->text().startsWith(
+      QStringLiteral("Background ·")));
+  QVERIFY(list->item(2)->text().startsWith(
+      QStringLiteral("Background failed ·")));
+
+  list->setCurrentRow(0);
+  QVERIFY(output->isVisible());
+  QCOMPARE(editor->toPlainText(), QStringLiteral("inspect the build"));
+  QVERIFY(!remove->isEnabled());
+  QCOMPARE(output->toPlainText(), QString());
+
+  editor->setPlainText(QStringLiteral("inspect the release build"));
+  QTest::mouseClick(save, Qt::LeftButton);
+  QCOMPARE(updated_id, QStringLiteral("task-running"));
+  QCOMPARE(updated_text, QStringLiteral("inspect the release build"));
+  QVERIFY(list->item(0)->text().contains(
+      QStringLiteral("inspect the release build")));
+
+  QTest::mouseClick(rerun, Qt::LeftButton);
+  QCOMPARE(rerun_text, QStringLiteral("inspect the release build"));
+  QVERIFY(start_done != nullptr);
+  start_done(true, QString());
+
+  list->setCurrentRow(1);
+  QCOMPARE(output->toPlainText(), QStringLiteral("all green"));
+  QVERIFY(remove->isEnabled());
+  QTest::mouseClick(remove, Qt::LeftButton);
+  QCOMPARE(deleted_id, QStringLiteral("task-complete"));
+  QCOMPARE(list->count(), 2);
+
+  list->setCurrentRow(1);
+  QCOMPARE(output->toPlainText(), QStringLiteral("Failed: boom"));
+  QCOMPARE(editor->toPlainText(), QStringLiteral("try the flaky test"));
 }
 
 void PreferencesTest::promptHistoryEditsAndCancelsServerQueue() {

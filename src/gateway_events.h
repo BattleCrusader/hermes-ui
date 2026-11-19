@@ -41,6 +41,19 @@ QString ToolProgressText(const QJsonObject& payload);
 std::vector<ChatReaction> ParseChatReactions(const QJsonArray& reactions);
 QString ReactionSummary(const QJsonArray& reactions);
 
+// `prompt.background` / `prompt.btw` receipts and their completion events.
+// Upsert by task id so a completion that races ahead of the ACK can fill in the
+// prompt text later instead of creating a second row.
+BackgroundPrompt* FindBackgroundPrompt(std::vector<BackgroundPrompt>* prompts,
+                                       const QString& task_id);
+BackgroundPrompt* UpsertBackgroundPrompt(
+    std::vector<BackgroundPrompt>* prompts, const QString& task_id,
+    const QString& session_id, const QString& verb, const QString& text,
+    qint64 now_ms, std::size_t limit = 200);
+BackgroundPrompt* ApplyBackgroundPromptCompletion(
+    std::vector<BackgroundPrompt>* prompts, const QJsonObject& payload,
+    qint64 now_ms, std::size_t limit = 200);
+
 }  // namespace hermes::ui
 
 #endif  // HERMES_UI_GATEWAY_EVENTS_H_

@@ -1718,10 +1718,17 @@ bool Composer::eventFilter(QObject* watched, QEvent* event) {
           if (text.isEmpty()) {
             return true;
           }
-          if (key_event->modifiers() & Qt::ControlModifier) {
-            emit QueueRequested(text);
+          // Slash commands remain the explicit escape hatch while busy:
+          // /steer, /queue and /bg own those choices. Plain text must not
+          // silently mutate the live turn, so it stays in the composer.
+          const bool explicit_command =
+              attachments_.empty() &&
+              text.trimmed().startsWith(QLatin1Char('/'));
+          if (explicit_command) {
+            Submit();
           } else {
-            emit SteerRequested(text);
+            emit BusySendRequested(text);
+            update();
           }
           return true;
         }

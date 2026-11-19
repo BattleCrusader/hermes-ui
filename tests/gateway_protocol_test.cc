@@ -53,6 +53,7 @@ class GatewayProtocolTest : public QObject {
   void pendingPromptTrackerAnnouncesOnlyProcessedQueueRows();
   void promptOperationsStayFifoAndWaitForAck();
   void promptFallbackKeepsPlaceAheadOfLaterSends();
+  void backgroundPromptUpsertSurvivesCompletionOrdering();
   void connectionOperationParsesTargetsAndBuildsAnswer();
   void handoffPlatformAndStatusText();
 };
@@ -528,6 +529,64 @@ void GatewayProtocolTest::promptFallbackKeepsPlaceAheadOfLaterSends() {
   QVERIFY(queue.BeginNext());
   QCOMPARE(queue.Active()->text, QStringLiteral("back"));
   QVERIFY(queue.FinishActive());
+}
+
+void GatewayProtocolTest::backgroundPromptUpsertSurvivesCompletionOrdering() {
+  std::vector<BackgroundPrompt> tasks;
+  BackgroundPrompt* task = UpsertBackgroundPrompt(
+      &tasks, QStringLiteral("task-1"), QStringLiteral("s1"),
+      QStringLiteral("btw"), QStringLiteral("inspect the build"), 1000);
+  QVERIFY(task != nullptr);
+  QCOMPARE(tasks.size(), static_cast<std::size_t>(1));
+  QCOMPARE(task->created_ms, qint64(1000));
+  QVERIFY(!task->complete);
+
+  // A late ACK may only fill fields; it must not erase an answer that already
+  // arrived, and an empty field must not blank a known value.
+  QJsonObject completion;
+  completion.insert(QStringLiteral("task_id"), QStringLiteral("task-1"));
+  completion.insert(QStringLiteral("text"), QStringLiteral("build is clean"));
+  BackgroundPrompt* completed =
+      ApplyBackgroundPromptCompletion(&tasks, completion, 2000);
+  QVERIFY(completed != nullptr);
+  QVERIFY(completed->complete);
+  QCOMPARE(completed->output, QStringLiteral("build is clean"));
+  QCOMPARE(completed->completed_ms, qint64(2000));
+  task = UpsertBackgroundPrompt(&tasks, QStringLiteral("task-1"), QString(),
+                                QString(), QString(), 2500);
+  QVERIFY(task != nullptr);
+  QCOMPARE(tasks.size(), static_cast<std::size_t>(1));
+  QCOMPARE(task->output, QStringLiteral("build is clean"));
+  QVERIFY(task->complete);
+
+  // An `error: ` completion is a failure, never output.
+  QJsonObject failed;
+  failed.insert(QStringLiteral("task_id"), QStringLiteral("task-error"));
+  failed.insert(QStringLiteral("text"), QStringLiteral("error: boom"));
+  BackgroundPrompt* failure =
+      ApplyBackgroundPromptCompletion(&tasks, failed, 3000);
+  QVERIFY(failure != nullptr);
+  QVERIFY(failure->complete);
+  QVERIFY(failure->output.isEmpty());
+  QCOMPARE(failure->error, QStringLiteral("boom"));
+
+  // Explicit error payloads win too.
+  QJsonObject explicit_error;
+  explicit_error.insert(QStringLiteral("task_id"),
+                        QStringLiteral("task-explicit"));
+  explicit_error.insert(QStringLiteral("error"), QStringLiteral("nope"));
+  BackgroundPrompt* explicit_failure =
+      ApplyBackgroundPromptCompletion(&tasks, explicit_error, 3100);
+  QVERIFY(explicit_failure != nullptr);
+  QVERIFY(explicit_failure->output.isEmpty());
+  QCOMPARE(explicit_failure->error, QStringLiteral("nope"));
+
+  // Bounded history drops the oldest entries, independent of task ids.
+  UpsertBackgroundPrompt(&tasks, QStringLiteral("task-last"), QString(),
+                         QString(), QStringLiteral("last"), 4000, 2);
+  QCOMPARE(tasks.size(), static_cast<std::size_t>(2));
+  QCOMPARE(tasks[0].task_id, QStringLiteral("task-explicit"));
+  QCOMPARE(tasks[1].task_id, QStringLiteral("task-last"));
 }
 
 void GatewayProtocolTest::connectionOperationParsesTargetsAndBuildsAnswer() {

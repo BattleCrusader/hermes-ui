@@ -495,6 +495,23 @@ void ProfileWorker::QueuePrompt(const QString& text) {
   SendPromptInternal(text, 0, false, false, {}, true);
 }
 
+void ProfileWorker::TrackBackgroundPrompt(const QString& task_id,
+                                          const QString& session_id,
+                                          const QString& verb,
+                                          const QString& text) {
+  if (task_id.trimmed().isEmpty()) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(mutex_);
+  BackgroundPrompt* prompt = UpsertBackgroundPrompt(
+      &state_.background_prompts, task_id.trimmed(), session_id, verb, text,
+      QDateTime::currentMSecsSinceEpoch());
+  if (prompt != nullptr) {
+    ++state_.background_prompt_serial;
+    PublishLocked();
+  }
+}
+
 void ProfileWorker::SendPromptWithAttachments(const QString& text,
                                               const QStringList& attachments) {
   SendPromptInternal(text, 0, false, false, attachments);
@@ -3482,6 +3499,35 @@ void ProfileWorker::OnSocketEvent(const QString& type,
       return;
     }
     AttachIfForeground();
+    return;
+  }
+
+  if (type == QStringLiteral("background.complete") ||
+      type == QStringLiteral("btw.complete")) {
+    // Side-agent results carry the parent session id but arrive outside the
+    // selected-session stream. Consume them before the session filter so a
+    // task started here remains visible after the user switches chats.
+    std::lock_guard<std::mutex> lock(mutex_);
+    QJsonObject event = payload;
+    QString key = event.value(QStringLiteral("session_id")).toString();
+    if (key.isEmpty()) {
+      key = session_id;
+    }
+    if (!key.isEmpty()) {
+      event.insert(QStringLiteral("session_id"), StoredSessionKeyLocked(key));
+    }
+    if (event.value(QStringLiteral("verb")).toString().isEmpty()) {
+      event.insert(QStringLiteral("verb"),
+                   type.startsWith(QStringLiteral("btw"))
+                       ? QStringLiteral("btw")
+                       : QStringLiteral("background"));
+    }
+    if (ApplyBackgroundPromptCompletion(
+            &state_.background_prompts, event,
+            QDateTime::currentMSecsSinceEpoch()) != nullptr) {
+      ++state_.background_prompt_serial;
+      PublishLocked();
+    }
     return;
   }
 

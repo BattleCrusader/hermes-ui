@@ -39,13 +39,25 @@ QString ServerLabel(const PromptHistoryDialog::ServerPrompt& prompt) {
   return QStringLiteral("%1 · %2").arg(prefix, Preview(prompt.text));
 }
 
+QString BackgroundLabel(
+    const PromptHistoryDialog::BackgroundPrompt& prompt) {
+  QString prefix = prompt.verb == QStringLiteral("btw") ? QStringLiteral("BTW")
+                                                        : QStringLiteral("Background");
+  if (!prompt.error.isEmpty()) {
+    prefix += QStringLiteral(" failed");
+  } else if (!prompt.complete) {
+    prefix += QStringLiteral(" running");
+  }
+  return QStringLiteral("%1 · %2").arg(prefix, Preview(prompt.text));
+}
+
 }  // namespace
 
 PromptHistoryDialog::PromptHistoryDialog(const Theme& theme,
                                          QStringList* queued,
                                          QStringList* steered, QWidget* parent)
     : QDialog(parent), queued_(queued), steered_(steered) {
-  setWindowTitle(QStringLiteral("Queued & steered prompts"));
+  setWindowTitle(QStringLiteral("Queued, steered & background prompts"));
   setObjectName(QStringLiteral("queuedPromptsDialog"));
   resize(720, 560);
 
@@ -63,7 +75,9 @@ PromptHistoryDialog::PromptHistoryDialog(const Theme& theme,
           "it from the queue first, so it cannot run twice. Steered history "
           "was already delivered — editing it updates this history only, but "
           "you can send it again as a new prompt or load it back into the "
-          "composer."),
+          "composer. Background tasks run as side agents: their output stays "
+          "here after the parent turn ends, and Run again starts a fresh "
+          "task with the edited prompt."),
       this);
   hint->setObjectName(QStringLiteral("queuedPromptsHint"));
   hint->setWordWrap(true);
@@ -83,6 +97,15 @@ PromptHistoryDialog::PromptHistoryDialog(const Theme& theme,
       QStringLiteral("Select a prompt to view or edit it."));
   editor_->setMinimumHeight(120);
   layout->addWidget(editor_, 1);
+
+  output_ = new QPlainTextEdit(this);
+  output_->setObjectName(QStringLiteral("queuedPromptOutput"));
+  output_->setReadOnly(true);
+  output_->setPlaceholderText(
+      QStringLiteral("Background output appears here when it arrives."));
+  output_->setMinimumHeight(80);
+  output_->setVisible(false);
+  layout->addWidget(output_, 1);
 
   status_ = new QLabel(this);
   status_->setObjectName(QStringLiteral("queuedPromptStatus"));
@@ -142,6 +165,22 @@ void PromptHistoryDialog::SetServerPrompts(std::vector<ServerPrompt> prompts) {
   RebuildList();
 }
 
+void PromptHistoryDialog::SetBackgroundPrompts(
+    std::vector<BackgroundPrompt> prompts) {
+  const QString preserve = selected_task_;
+  background_ = std::move(prompts);
+  selected_task_.clear();
+  if (!preserve.isEmpty()) {
+    for (const BackgroundPrompt& prompt : background_) {
+      if (prompt.task_id == preserve) {
+        selected_task_ = preserve;
+        break;
+      }
+    }
+  }
+  RebuildList();
+}
+
 void PromptHistoryDialog::RemoveServerPrompt(const QString& admission_id) {
   for (auto it = server_.begin(); it != server_.end(); ++it) {
     if (it->admission_id == admission_id) {
@@ -187,21 +226,32 @@ void PromptHistoryDialog::RebuildList() {
     item->setData(Qt::UserRole + 1, i);
     item->setToolTip(prompt);
   }
+  for (std::size_t i = 0; i < background_.size(); ++i) {
+    const BackgroundPrompt& prompt = background_[i];
+    auto* item = new QListWidgetItem(BackgroundLabel(prompt), list_);
+    item->setData(Qt::UserRole, static_cast<int>(Kind::kBackground));
+    item->setData(Qt::UserRole + 1, static_cast<int>(i));
+    item->setData(Qt::UserRole + 2, prompt.task_id);
+    item->setToolTip(prompt.text);
+  }
   if (list_->count() > 0) {
     int row = 0;
-    if (!selected_admission_.isEmpty()) {
-      for (int i = 0; i < list_->count(); ++i) {
-        if (list_->item(i)->data(Qt::UserRole + 2).toString() ==
-            selected_admission_) {
-          row = i;
-          break;
-        }
+    const QString wanted = !selected_admission_.isEmpty()
+                               ? selected_admission_
+                               : selected_task_;
+    for (int i = 0; i < list_->count() && !wanted.isEmpty(); ++i) {
+      if (list_->item(i)->data(Qt::UserRole + 2).toString() == wanted) {
+        row = i;
+        break;
       }
     }
     list_->setCurrentRow(row);
   } else {
     editor_->clear();
-    status_->setText(QStringLiteral("No queued or steered prompts."));
+    output_->clear();
+    output_->setVisible(false);
+    status_->setText(
+        QStringLiteral("No queued, steered, or background prompts."));
   }
   RefreshEditor();
 }
@@ -216,6 +266,19 @@ bool PromptHistoryDialog::Selected(Kind* kind, int* index) const {
   }
   if (index != nullptr) {
     *index = item->data(Qt::UserRole + 1).toInt();
+  }
+  return true;
+}
+
+bool PromptHistoryDialog::SelectedBackground(BackgroundPrompt* prompt) const {
+  Kind kind = Kind::kQueued;
+  int index = -1;
+  if (!Selected(&kind, &index) || kind != Kind::kBackground || index < 0 ||
+      index >= static_cast<int>(background_.size())) {
+    return false;
+  }
+  if (prompt != nullptr) {
+    *prompt = background_[static_cast<std::size_t>(index)];
   }
   return true;
 }
@@ -238,6 +301,8 @@ void PromptHistoryDialog::RefreshEditor() {
   int index = -1;
   if (!Selected(&kind, &index)) {
     editor_->clear();
+    output_->clear();
+    output_->setVisible(false);
     editor_->setReadOnly(false);
     save_->setEnabled(false);
     remove_->setEnabled(false);
@@ -254,6 +319,9 @@ void PromptHistoryDialog::RefreshEditor() {
     const bool can_replace =
         HasControl(prompt.controls, QStringLiteral("replace"));
     selected_admission_ = prompt.admission_id;
+    selected_task_.clear();
+    output_->clear();
+    output_->setVisible(false);
     editor_->setPlainText(prompt.text);
     editor_->setReadOnly(!can_replace);
     save_->setEnabled(can_replace);
@@ -285,6 +353,51 @@ void PromptHistoryDialog::RefreshEditor() {
     }
     return;
   }
+  if (kind == Kind::kBackground) {
+    if (index < 0 || index >= static_cast<int>(background_.size())) {
+      return;
+    }
+    const BackgroundPrompt& prompt =
+        background_[static_cast<std::size_t>(index)];
+    selected_admission_.clear();
+    selected_task_ = prompt.task_id;
+    editor_->setPlainText(prompt.text);
+    editor_->setReadOnly(false);
+    save_->setEnabled(true);
+    // A running side agent is still part of the record. Hide/delete is only
+    // offered once it has settled, so it cannot disappear mid-flight.
+    remove_->setEnabled(prompt.complete);
+    inject_->setVisible(true);
+    inject_->setText(QStringLiteral("Run again"));
+    inject_->setEnabled(!prompt.text.trimmed().isEmpty());
+    load_->setEnabled(true);
+    output_->setVisible(true);
+    if (!prompt.error.isEmpty()) {
+      output_->setPlainText(
+          QStringLiteral("Failed: %1").arg(prompt.error));
+    } else if (prompt.complete) {
+      output_->setPlainText(prompt.output.isEmpty()
+                                ? QStringLiteral("(no output)")
+                                : prompt.output);
+    } else {
+      output_->clear();
+      output_->setPlaceholderText(
+          QStringLiteral("Background task is still running…"));
+    }
+    if (!prompt.complete) {
+      status_->setText(
+          QStringLiteral("Background task %1 is running. Editing updates this "
+                         "history only; a side agent cannot be changed after "
+                         "it starts.")
+              .arg(prompt.task_id));
+    } else {
+      status_->setText(
+          QStringLiteral("Background task %1 finished. Run again starts a new "
+                         "side task with this prompt.")
+              .arg(prompt.task_id));
+    }
+    return;
+  }
   const QStringList* source = kind == Kind::kQueued ? queued_ : steered_;
   const bool valid = source != nullptr && index >= 0 && index < source->size();
   if (!valid) {
@@ -292,6 +405,9 @@ void PromptHistoryDialog::RefreshEditor() {
     return;
   }
   selected_admission_.clear();
+  selected_task_.clear();
+  output_->clear();
+  output_->setVisible(false);
   editor_->setPlainText(source->at(index));
   editor_->setReadOnly(false);
   save_->setEnabled(true);
@@ -363,6 +479,29 @@ void PromptHistoryDialog::SaveSelected() {
         });
     return;
   }
+  if (kind == Kind::kBackground) {
+    BackgroundPrompt prompt;
+    if (!SelectedBackground(&prompt)) {
+      return;
+    }
+    const QString text = editor_->toPlainText();
+    if (text.trimmed().isEmpty()) {
+      status_->setText(QStringLiteral("A prompt cannot be empty."));
+      return;
+    }
+    if (on_update_background) {
+      on_update_background(prompt, text);
+    }
+    if (index >= 0 && index < static_cast<int>(background_.size())) {
+      background_[static_cast<std::size_t>(index)].text = text;
+    }
+    if (on_changed) {
+      on_changed();
+    }
+    RebuildList();
+    status_->setText(QStringLiteral("Background prompt history updated."));
+    return;
+  }
 
   QStringList* target = kind == Kind::kQueued ? queued_ : steered_;
   if (target == nullptr || index < 0 || index >= target->size()) {
@@ -421,6 +560,31 @@ void PromptHistoryDialog::DeleteSelected() {
         });
     return;
   }
+  if (kind == Kind::kBackground) {
+    BackgroundPrompt prompt;
+    if (!SelectedBackground(&prompt)) {
+      return;
+    }
+    if (!prompt.complete) {
+      status_->setText(
+          QStringLiteral("A running background task cannot be deleted; wait "
+                         "for its output or leave the row in history."));
+      return;
+    }
+    if (on_delete_background) {
+      on_delete_background(prompt);
+    }
+    if (index >= 0 && index < static_cast<int>(background_.size())) {
+      background_.erase(background_.begin() + index);
+    }
+    selected_task_.clear();
+    if (on_changed) {
+      on_changed();
+    }
+    RebuildList();
+    status_->setText(QStringLiteral("Background history entry removed."));
+    return;
+  }
 
   QStringList* target = kind == Kind::kQueued ? queued_ : steered_;
   if (target == nullptr || index < 0 || index >= target->size()) {
@@ -474,6 +638,38 @@ void PromptHistoryDialog::SendSelected() {
                              ? QStringLiteral("Could not send the prompt.")
                              : message);
       }
+    });
+    return;
+  }
+  if (kind == Kind::kBackground) {
+    BackgroundPrompt prompt;
+    if (!SelectedBackground(&prompt)) {
+      return;
+    }
+    if (!on_send_background) {
+      status_->setText(
+          QStringLiteral("No background send handler is wired."));
+      return;
+    }
+    if (prompt.text.trimmed().isEmpty()) {
+      status_->setText(QStringLiteral("A prompt cannot be empty."));
+      return;
+    }
+    save_->setEnabled(false);
+    remove_->setEnabled(false);
+    inject_->setEnabled(false);
+    status_->setText(QStringLiteral("Starting a new background task…"));
+    QPointer<PromptHistoryDialog> guard(this);
+    on_send_background(prompt, [guard](bool ok, const QString& message) {
+      if (guard == nullptr) {
+        return;
+      }
+      guard->RefreshEditor();
+      guard->SetStatus(
+          ok ? QStringLiteral("Background task started again.")
+             : (message.isEmpty()
+                    ? QStringLiteral("Could not start the background task.")
+                    : message));
     });
     return;
   }
@@ -540,6 +736,16 @@ void PromptHistoryDialog::LoadSelected() {
     }
     if (on_load) {
       on_load(server_[static_cast<std::size_t>(index)].text);
+    }
+    accept();
+    return;
+  }
+  if (kind == Kind::kBackground) {
+    if (!SelectedBackground(nullptr)) {
+      return;
+    }
+    if (on_load) {
+      on_load(background_[static_cast<std::size_t>(index)].text);
     }
     accept();
     return;

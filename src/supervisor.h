@@ -50,6 +50,10 @@ class Supervisor {
   void SendPrompt(int index, const QString& text, SteerCallback done = {});
   // Queue behind the active turn; the gateway FIFO owns the admission.
   void QueuePrompt(int index, const QString& text);
+  // Keep a background/side-agent task visible in the worker snapshot.
+  void TrackBackgroundPrompt(int index, const QString& task_id,
+                             const QString& session_id, const QString& verb,
+                             const QString& text);
   void SendPromptWithAttachments(int index, const QString& text,
                                  const QStringList& attachments);
   void SendPromptAt(int index, const QString& text, qint64 truncate_row_id,

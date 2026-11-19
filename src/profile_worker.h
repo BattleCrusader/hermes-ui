@@ -66,6 +66,12 @@ class ProfileWorker : public QObject {
   // Queue behind the running turn. The gateway owns the admission; `queued`
   // forces queue mode so run-after input can never become a live steer.
   void QueuePrompt(const QString& text);
+  // Record a `prompt.background` / `prompt.btw` receipt so side-task output
+  // remains visible even after the user switches chats. Completion events
+  // upsert the same row by task id.
+  void TrackBackgroundPrompt(const QString& task_id,
+                             const QString& session_id, const QString& verb,
+                             const QString& text);
   // Image/PDF/files are queued on the gateway (image.attach / pdf.attach /
   // file.attach) before the prompt is submitted, so the model receives real
   // image tickets instead of only paths in the text.

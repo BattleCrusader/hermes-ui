@@ -140,6 +140,10 @@ class MainWindow : public QWidget {
   int PendingQueueCount(const ProfileSnapshot& snapshot) const;
   void SyncComposerQueueBadge(int override_count = -1);
   void QueuePromptText(const QString& text);
+  // Start a gateway side agent (`prompt.background` / `prompt.btw`). The ACK
+  // carries a task id; the answer arrives later as a completion event.
+  void StartBackgroundPrompt(const QString& text, const QString& verb,
+                             Supervisor::SteerCallback done = {});
   void RefreshProjects(bool force = false);
   void LoadProjectCacheForProfile(const QString& profile);
   void ScheduleProjectCacheSave();
@@ -220,6 +224,11 @@ class MainWindow : public QWidget {
   // Profile-wide history is the fallback when the active session has no
   // prompts yet (a fresh chat) and is persisted across restarts.
   QHash<QString, QStringList> composer_profile_history_;
+  // Local history edits/dismissals for gateway side tasks. The gateway owns
+  // the running agent, so these never mutate it; they only shape the review
+  // list until the task is re-run.
+  QHash<QString, QString> background_prompt_edits_;
+  QSet<QString> dismissed_background_prompts_;
   bool composer_profile_history_loaded_ = false;
   SessionSearchBar* session_search_ = nullptr;
   RightRail* right_rail_ = nullptr;

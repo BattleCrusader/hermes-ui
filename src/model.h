@@ -324,6 +324,22 @@ struct PendingAdmission {
   int execution_generation = -1;
 };
 
+// One `prompt.background` / `prompt.btw` side task. The verb acknowledges
+// immediately with a task id; the answer lands later on the parent session as
+// `background.complete` / `btw.complete`. Keep these beside the transcript so
+// switching chats cannot make a running or finished side task disappear.
+struct BackgroundPrompt {
+  QString task_id;
+  QString session_id;
+  QString verb;  // background or btw
+  QString text;
+  QString output;
+  QString error;
+  bool complete = false;
+  qint64 created_ms = 0;
+  qint64 completed_ms = 0;
+};
+
 // One completed turn that the shell has not announced yet. A profile worker
 // can finish a chat while the UI is viewing another one, so completion cannot
 // be inferred from the selected session's transcript or `running` flag alone.
@@ -417,6 +433,10 @@ struct ProfileSnapshot {
   std::vector<PendingAdmission> pending_admissions;
   int pending_authority_epoch = 0;
   int pending_revision = -1;
+  // Background/side-agent tasks started from this profile. They are not
+  // pending admissions, so they need their own list and revision stamp.
+  std::vector<BackgroundPrompt> background_prompts;
+  quint64 background_prompt_serial = 0;
   std::vector<SessionSummary> sessions;
   std::vector<ChatMessage> messages;
   // Newest-first user prompts from the display lineage, including rows that
