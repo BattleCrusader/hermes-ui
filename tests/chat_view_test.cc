@@ -264,6 +264,7 @@ class ChatViewTest : public QObject {
   void hoverActionRowMatchesDesktop();
   void everyMessageItemUsesHoverActionRow();
   void transcriptTextSelectionCopiesToClipboard();
+  void doubleClickDragSelectsWholeWords();
   void userPromptKeepsListMarkers();
   void transcriptSelectionMatchesVisibleUrl();
   void transcriptTableSelectionHighlightsClickedCell();
@@ -1627,6 +1628,70 @@ void ChatViewTest::transcriptTextSelectionCopiesToClipboard() {
   QGuiApplication::clipboard()->clear();
   QTest::keySequence(transcript, QKeySequence::Copy);
   QCOMPARE(QGuiApplication::clipboard()->text(), dragged);
+}
+
+void ChatViewTest::doubleClickDragSelectsWholeWords() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::ChatView view(theme);
+  view.resize(800, 400);
+  view.show();
+  view.SetContentMaxWidth(600);
+
+  auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
+  snapshot->name = QStringLiteral("default");
+  snapshot->label = QStringLiteral("default");
+  snapshot->revision = 1;
+  hermes::ui::ChatMessage answer;
+  answer.role = hermes::ui::MessageRole::kAssistant;
+  answer.author = QStringLiteral("Hermes");
+  answer.timestamp = QDateTime::currentDateTime();
+  hermes::ui::MessageBlock paragraph;
+  paragraph.kind = hermes::ui::BlockKind::kParagraph;
+  paragraph.text = QStringLiteral("alpha beta gamma delta");
+  answer.blocks.push_back(paragraph);
+  snapshot->messages.push_back(answer);
+  view.SetSnapshot(snapshot);
+  QTest::qWait(30);
+
+  const auto rects =
+      view.BlockRectsForTest(hermes::ui::BlockKind::kParagraph);
+  QCOMPARE(rects.size(), std::size_t(1));
+  const QRectF text = rects.front().second;
+  const QString body = QStringLiteral("alpha beta gamma delta");
+  const QFontMetricsF metrics(theme.UiFont(13, QFont::Normal));
+  const auto center_of = [&](const QString& word) {
+    const int index = body.indexOf(word);
+    const qreal x = text.left() + metrics.horizontalAdvance(body.left(index)) +
+                    metrics.horizontalAdvance(word) / 2.0;
+    return QPointF(x, text.top() + text.height() / 2.0);
+  };
+  QWidget* transcript = view.widget();
+
+  // A double-click selects the whole word; dragging over the next word then
+  // extends the selection a whole word at a time instead of dropping back to
+  // a character caret.
+  const QPointF alpha = center_of(QStringLiteral("alpha"));
+  const QPointF gamma = center_of(QStringLiteral("gamma"));
+  QTest::mouseDClick(transcript, Qt::LeftButton, Qt::NoModifier,
+                     alpha.toPoint());
+  QCOMPARE(view.SelectedTextForTest(), QStringLiteral("alpha"));
+  QMouseEvent move(QEvent::MouseMove, gamma, gamma, Qt::NoButton,
+                   Qt::LeftButton, Qt::NoModifier);
+  QApplication::sendEvent(transcript, &move);
+  QTest::mouseRelease(transcript, Qt::LeftButton, Qt::NoModifier,
+                      gamma.toPoint());
+  QCOMPARE(view.SelectedTextForTest(), QStringLiteral("alpha beta gamma"));
+
+  // Dragging back across the original word keeps both ends whole.
+  QTest::mouseDClick(transcript, Qt::LeftButton, Qt::NoModifier,
+                     gamma.toPoint());
+  QCOMPARE(view.SelectedTextForTest(), QStringLiteral("gamma"));
+  QMouseEvent reverse(QEvent::MouseMove, alpha, alpha, Qt::NoButton,
+                      Qt::LeftButton, Qt::NoModifier);
+  QApplication::sendEvent(transcript, &reverse);
+  QTest::mouseRelease(transcript, Qt::LeftButton, Qt::NoModifier,
+                      alpha.toPoint());
+  QCOMPARE(view.SelectedTextForTest(), QStringLiteral("alpha beta gamma"));
 }
 
 void ChatViewTest::userPromptKeepsListMarkers() {

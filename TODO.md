@@ -42,6 +42,26 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-20 (double-click drag selects words)
+
+**Double-clicking a word in the transcript and then dragging now extends the
+selection by whole words instead of dropping back to a character caret.**
+
+- [x] Extracted the double-click word lookup into `WordRangeAt`, shared by the
+      initial selection and the drag. It keeps the existing URL expansion, so
+      dragging across `pinderlog.com` still selects the whole domain.
+- [x] After a double-click the transcript enters word-granular drag mode. The
+      original word stays whole; moving right selects through the end of the
+      word under the pointer, and moving left selects through its start.
+- [x] Dragging before the original word swaps the anchor so both endpoints stay
+      whole. Repaints use the union of the old and new selection because that
+      reversal changes the anchor as well as the cursor, preventing stale word
+      highlights.
+- [x] Whitespace and punctuation fall back to the exact caret instead of
+      freezing the selection. A normal click or Select All resets word mode.
+- [x] Added `doubleClickDragSelectsWholeWords` covering forward and reverse
+      word drags. Full native suite **10/10 passed, 0 failed**.
+
 ## Status update — 2026-11-19 (plain Send never mutates a live turn)
 
 **While a turn is running, Enter and Ctrl+Enter keep the draft instead of

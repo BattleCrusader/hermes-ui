@@ -733,6 +733,10 @@ class TranscriptWidget : public QWidget {
       const std::vector<SelectionFragment>& fragments) const;
   QRectF SelectionBoundsBetween(TextPosition start, TextPosition end) const;
   TextPosition TextPositionAt(const QPointF& position) const;
+  bool WordRangeAt(const TextPosition& hit, TextPosition* start,
+                   TextPosition* end) const;
+  void ApplyWordDragSelection(const TextPosition& hit);
+  static bool PositionBefore(const TextPosition& a, const TextPosition& b);
   static int DocumentOffsetAt(const QTextDocument& document,
                               const QPointF& local);
   static int PlainOffsetAt(const TextRun& run, const QPointF& position);
@@ -814,6 +818,11 @@ class TranscriptWidget : public QWidget {
   // Repaints during a drag can then be limited to the old/new selection band
   // instead of every visible message.
   bool selecting_ = false;
+  // After a double-click the drag is word-granular: the selection keeps the
+  // original whole word and extends to the whole word under the pointer.
+  bool selecting_words_ = false;
+  TextPosition word_anchor_start_;
+  TextPosition word_anchor_end_;
   int content_height_ = 0;
   bool caret_visible_ = true;
   QTimer* caret_timer_ = nullptr;
@@ -1292,6 +1301,93 @@ int TranscriptWidget::PlainOffsetAt(const TextRun& run,
   return run.plain.size();
 }
 
+bool TranscriptWidget::PositionBefore(const TextPosition& a,
+                                       const TextPosition& b) {
+  return a.run < b.run || (a.run == b.run && a.offset < b.offset);
+}
+
+bool TranscriptWidget::WordRangeAt(const TextPosition& hit,
+                                   TextPosition* start,
+                                   TextPosition* end) const {
+  if (hit.run < 0) {
+    return false;
+  }
+  const std::vector<TextRun>& runs = SelectableRuns();
+  if (hit.run >= static_cast<int>(runs.size())) {
+    return false;
+  }
+  const TextRun& run = runs[hit.run];
+  TextPosition word_start{hit.run, 0};
+  TextPosition word_end{hit.run, 0};
+  if (run.document) {
+    QTextCursor cursor(const_cast<QTextDocument*>(run.document.get()));
+    const int limit = std::max(0, run.document->characterCount() - 1);
+    cursor.setPosition(std::clamp(hit.offset, 0, limit));
+    cursor.select(QTextCursor::WordUnderCursor);
+    if (!cursor.hasSelection()) {
+      return false;
+    }
+    const QTextBlock block = cursor.block();
+    const auto expanded = ExpandUrlWord(
+        block.text(), cursor.selectionStart() - block.position(),
+        cursor.selectionEnd() - block.position());
+    word_start.offset = block.position() + expanded.first;
+    word_end.offset = block.position() + expanded.second;
+  } else {
+    auto is_word = [](QChar ch) {
+      return ch.isLetterOrNumber() || ch == QLatin1Char('_') ||
+             ch == QLatin1Char('-');
+    };
+    int first = std::clamp(hit.offset, 0, static_cast<int>(run.plain.size()));
+    int last = first;
+    while (first > 0 && is_word(run.plain.at(first - 1))) {
+      --first;
+    }
+    while (last < run.plain.size() && is_word(run.plain.at(last))) {
+      ++last;
+    }
+    const auto expanded = ExpandUrlWord(run.plain, first, last);
+    word_start.offset = expanded.first;
+    word_end.offset = expanded.second;
+  }
+  if (word_end.offset <= word_start.offset) {
+    return false;
+  }
+  if (start != nullptr) {
+    *start = word_start;
+  }
+  if (end != nullptr) {
+    *end = word_end;
+  }
+  return true;
+}
+
+void TranscriptWidget::ApplyWordDragSelection(const TextPosition& hit) {
+  TextPosition target_start = hit;
+  TextPosition target_end = hit;
+  if (WordRangeAt(hit, &target_start, &target_end)) {
+    if (PositionBefore(target_start, word_anchor_start_)) {
+      // Dragged before the original word: keep the original word whole at the
+      // far end and extend to the start of the word under the pointer.
+      selection_anchor_ = word_anchor_end_;
+      selection_cursor_ = target_start;
+    } else {
+      selection_anchor_ = word_anchor_start_;
+      selection_cursor_ = target_end;
+    }
+    return;
+  }
+  // Over whitespace or punctuation there is no word boundary to snap to. Fall
+  // back to the exact caret so the drag still tracks the pointer.
+  if (PositionBefore(hit, word_anchor_start_)) {
+    selection_anchor_ = word_anchor_end_;
+    selection_cursor_ = hit;
+  } else {
+    selection_anchor_ = word_anchor_start_;
+    selection_cursor_ = hit;
+  }
+}
+
 TranscriptWidget::TextPosition TranscriptWidget::TextPositionAt(
     const QPointF& position) const {
   const std::vector<TextRun>& runs = SelectableRuns();
@@ -1352,13 +1448,17 @@ bool TranscriptWidget::HasSelection() const {
 }
 
 void TranscriptWidget::ClearSelection() {
-  if (selection_anchor_.run < 0 && selection_cursor_.run < 0) {
-    return;
-  }
+  const bool had_selection =
+      selection_anchor_.run >= 0 || selection_cursor_.run >= 0;
   selection_anchor_ = {};
   selection_cursor_ = {};
   selecting_ = false;
-  update();
+  selecting_words_ = false;
+  word_anchor_start_ = {};
+  word_anchor_end_ = {};
+  if (had_selection) {
+    update();
+  }
 }
 
 void TranscriptWidget::SelectAllText() {
@@ -1374,6 +1474,7 @@ void TranscriptWidget::SelectAllText() {
                          : last.plain.size();
   selection_cursor_ = {static_cast<int>(runs.size()) - 1, offset};
   selecting_ = false;
+  selecting_words_ = false;
   setFocus(Qt::OtherFocusReason);
   update();
 }
@@ -1612,14 +1713,27 @@ void TranscriptWidget::PaintSelection(QPainter& painter) {
 void TranscriptWidget::mouseMoveEvent(QMouseEvent* event) {
   const QPointF position = event->position();
   if (selecting_ && (event->buttons() & Qt::LeftButton)) {
-    const TextPosition next = TextPositionAt(position);
-    if (next.run != selection_cursor_.run ||
-        next.offset != selection_cursor_.offset) {
-      // Only the span between the old and new cursor changed. Repainting the
-      // whole selection made dragging get slower as the selection grew.
-      const TextPosition previous = selection_cursor_;
-      selection_cursor_ = next;
-      QRectF dirty = SelectionBoundsBetween(previous, next);
+    const TextPosition previous = selection_cursor_;
+    const TextPosition previous_anchor = selection_anchor_;
+    const QRectF word_bounds = selecting_words_ ? SelectionBounds() : QRectF();
+    if (selecting_words_) {
+      ApplyWordDragSelection(TextPositionAt(position));
+    } else {
+      selection_cursor_ = TextPositionAt(position);
+    }
+    const bool changed =
+        selection_cursor_.run != previous.run ||
+        selection_cursor_.offset != previous.offset ||
+        selection_anchor_.run != previous_anchor.run ||
+        selection_anchor_.offset != previous_anchor.offset;
+    if (changed) {
+      // Word drags can swap the anchor when the pointer reverses direction.
+      // Repaint the union of the old and new selection so no previous word
+      // highlight is left behind. Character drags only change the cursor, so
+      // they keep the smaller old/new cursor band.
+      QRectF dirty =
+          selecting_words_ ? word_bounds.united(SelectionBounds())
+                           : SelectionBoundsBetween(previous, selection_cursor_);
       if (!dirty.isNull()) {
         dirty = dirty.toAlignedRect().adjusted(-3, -3, 3, 3);
         update(dirty.toRect().intersected(rect()));
@@ -1849,6 +1963,7 @@ void TranscriptWidget::mousePressEvent(QMouseEvent* event) {
       selection_anchor_ = selected;
       selection_cursor_ = selected;
       selecting_ = true;
+      selecting_words_ = false;
       setFocus(Qt::MouseFocusReason);
       update();
       event->accept();
@@ -1863,6 +1978,14 @@ void TranscriptWidget::mouseReleaseEvent(QMouseEvent* event) {
   if (event->button() == Qt::LeftButton && selecting_) {
     const TextPosition previous = selection_cursor_;
     const TextPosition next = TextPositionAt(event->position());
+    if (selecting_words_) {
+      ApplyWordDragSelection(next);
+      selecting_ = false;
+      selecting_words_ = false;
+      update();
+      event->accept();
+      return;
+    }
     selection_cursor_ = next;
     selecting_ = false;
     QRectF dirty = next.run < 0 ? SelectionBounds()
@@ -1885,45 +2008,21 @@ void TranscriptWidget::mouseDoubleClickEvent(QMouseEvent* event) {
     return;
   }
   const TextPosition hit = TextPositionAt(event->position());
-  if (hit.run < 0) {
-    QWidget::mouseDoubleClickEvent(event);
+  TextPosition start;
+  TextPosition end;
+  if (!WordRangeAt(hit, &start, &end)) {
+    selecting_ = false;
+    selecting_words_ = false;
+    update();
+    event->accept();
     return;
   }
-  const std::vector<TextRun>& runs = SelectableRuns();
-  if (hit.run >= static_cast<int>(runs.size())) {
-    return;
-  }
-  const TextRun& run = runs[hit.run];
-  if (run.document) {
-    QTextCursor cursor(const_cast<QTextDocument*>(run.document.get()));
-    cursor.setPosition(hit.offset);
-    cursor.select(QTextCursor::WordUnderCursor);
-    if (cursor.hasSelection()) {
-      const QTextBlock block = cursor.block();
-      const auto expanded =
-          ExpandUrlWord(block.text(), cursor.selectionStart() - block.position(),
-                        cursor.selectionEnd() - block.position());
-      selection_anchor_ = {hit.run, block.position() + expanded.first};
-      selection_cursor_ = {hit.run, block.position() + expanded.second};
-    }
-  } else {
-    auto is_word = [](QChar ch) {
-      return ch.isLetterOrNumber() || ch == QLatin1Char('_') ||
-             ch == QLatin1Char('-');
-    };
-    int start = std::clamp(hit.offset, 0, static_cast<int>(run.plain.size()));
-    int end = start;
-    while (start > 0 && is_word(run.plain.at(start - 1))) {
-      --start;
-    }
-    while (end < run.plain.size() && is_word(run.plain.at(end))) {
-      ++end;
-    }
-    const auto expanded = ExpandUrlWord(run.plain, start, end);
-    selection_anchor_ = {hit.run, expanded.first};
-    selection_cursor_ = {hit.run, expanded.second};
-  }
-  selecting_ = false;
+  selection_anchor_ = start;
+  selection_cursor_ = end;
+  word_anchor_start_ = start;
+  word_anchor_end_ = end;
+  selecting_ = true;
+  selecting_words_ = true;
   setFocus(Qt::MouseFocusReason);
   update();
   event->accept();
