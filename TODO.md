@@ -42,6 +42,35 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-19 (completion banners require a live turn)
+
+**A completion notification can no longer fire for a replay, a stray close
+frame, or a turn that already belongs to the previous prompt.**
+
+- [x] `CompleteAssistant` now ignores an idle, empty `message.complete`
+      instead of fabricating a blank assistant row, and only records a
+      `TurnCompletionNotice` when it saw the turn begin (`started > 0`) or the
+      profile was actually running. A completion for a turn that started
+      before this UI attached still folds into the transcript but does not
+      post a phantom “finished in 0.0s” banner.
+- [x] Background completions resolve the event's runtime session id back to
+      the durable session id (`stored_session_by_runtime_`). Prompt/start
+      stamps and the running claim are keyed by the durable id, so a resumed
+      or compressed chat now names the right prompt and clears the right
+      claim.
+- [x] `CompletionNoticeIsCurrent` drops a notice when the same chat has
+      already started a replacement turn, or when the notice is more than ten
+      seconds old (held behind a modal, an event-loop stall, or reconnect
+      replay). The shell still consumes the serial so the running→idle
+      fallback cannot announce the same completion twice.
+- [x] Announced serials are keyed by profile **name**, not profile index, and
+      reset if the worker restarts its counter. Reordering profiles can no
+      longer replay one profile's notice under another.
+- [x] `backgroundTurnCompletionQueuesOneNoticePerTurn` covers the no-start
+      claim-only path, `created_ms`, same-session staleness, other-session
+      freshness and the ten-second age limit. Full native suite **10/10
+      passed, 0 failed**.
+
 ## Status update — 2026-11-17 (background turns notify immediately)
 
 **A turn that finishes in another chat now posts its completion notification

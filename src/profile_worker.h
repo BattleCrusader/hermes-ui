@@ -229,6 +229,10 @@ class ProfileWorker : public QObject {
   void NoteTurnStartedLocked(const QString& session_id, const QString& prompt);
   void NoteBackgroundTurnCompleteLocked(const QString& session_id,
                                         const QString& failure);
+  // A session's live runtime id can differ from the durable id the sidebar
+  // shows (owner resume, compression). Events carry the runtime id, while
+  // prompt/start stamps and the running claim use the stored id.
+  QString StoredSessionKeyLocked(const QString& session_id) const;
   bool HasLocalPromptBubbleLocked(const QString& local_bubble_id) const;
   void RemoveLocalPromptBubbleLocked(const QString& local_bubble_id);
   void AppendReasoningDelta(const QString& text, bool streaming);
@@ -269,6 +273,7 @@ class ProfileWorker : public QObject {
   qint64 last_event_ms_ = 0;
   QString attached_session_id_;
   QString runtime_session_id_;
+  QHash<QString, QString> stored_session_by_runtime_;
   int pending_create_id_ = -1;
   QString pending_create_project_id_;
   int pending_catalog_id_ = -1;

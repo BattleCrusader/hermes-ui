@@ -333,6 +333,10 @@ struct TurnCompletionNotice {
   QString prompt;
   QString error;
   qint64 elapsed_ms = 0;
+  // Wall clock at the moment the worker observed the completion. The shell
+  // polls quickly, so a notice that first appears long after this stamp is a
+  // replay or was held behind a modal, not news worth interrupting for.
+  qint64 created_ms = 0;
   bool failed = false;
 };
 

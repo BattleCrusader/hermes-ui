@@ -2169,7 +2169,21 @@ void ProfileWorker::NoteBackgroundTurnCompleteLocked(
   const qint64 started = turn_started_by_session_.take(session_id);
   const qint64 elapsed_ms =
       started > 0 ? QDateTime::currentMSecsSinceEpoch() - started : 0;
-  CompleteBackgroundTurn(&state_, session_id, prompt, failure, elapsed_ms);
+  // Only a turn this UI watched begin is news. A replayed or late completion
+  // for a turn that started before the app attached has no prompt/start stamp
+  // and must not turn into a phantom "finished in 0.0s" banner.
+  CompleteBackgroundTurn(&state_, session_id, prompt, failure, elapsed_ms,
+                         started > 0);
+}
+
+QString ProfileWorker::StoredSessionKeyLocked(
+    const QString& session_id) const {
+  if (session_id.isEmpty()) {
+    return state_.selected_session_id;
+  }
+  const auto alias = stored_session_by_runtime_.constFind(session_id);
+  return alias == stored_session_by_runtime_.constEnd() ? session_id
+                                                        : alias.value();
 }
 
 bool ProfileWorker::HasLocalPromptBubbleLocked(
@@ -2935,6 +2949,7 @@ void ProfileWorker::OnSocketDisconnected() {
     state_.status_text = QStringLiteral("reconnecting");
     attached_session_id_.clear();
     runtime_session_id_.clear();
+    stored_session_by_runtime_.clear();
     pending_session_mutations_.clear();
     pending_receipt_id_ = -1;
     state_.requests.clear();
@@ -3488,15 +3503,15 @@ void ProfileWorker::OnSocketEvent(const QString& type,
   }
 
   QString selected;
-  QString runtime_session;
+  QString stored_session;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     selected = state_.selected_session_id;
-    runtime_session = runtime_session_id_;
+    stored_session = StoredSessionKeyLocked(session_id);
   }
   const bool background_session =
       !session_id.isEmpty() && !selected.isEmpty() &&
-      session_id != selected && session_id != runtime_session;
+      stored_session != selected;
   if (background_session) {
     // A turn can finish while the user is reading another chat. Keep its
     // transcript out of the visible page, but close its running claim and
@@ -3512,12 +3527,13 @@ void ProfileWorker::OnSocketEvent(const QString& type,
               : QString();
       {
         std::lock_guard<std::mutex> lock(mutex_);
-        NoteBackgroundTurnCompleteLocked(session_id, failure);
+        NoteBackgroundTurnCompleteLocked(stored_session, failure);
         PublishLocked();
       }
-      qInfo("background turn complete session=%.12s chars=%lld error=%d",
-            qUtf8Printable(session_id), static_cast<qint64>(text.size()),
-            failed ? 1 : 0);
+      qInfo("background turn complete session=%.12s stored=%.12s chars=%lld "
+            "error=%d",
+            qUtf8Printable(session_id), qUtf8Printable(stored_session),
+            static_cast<qint64>(text.size()), failed ? 1 : 0);
       // The visible transcript is another chat, but the sidebar still wants
       // the finished session's unread/running row refreshed.
       QTimer::singleShot(800, this, [this]() { FetchSessions(); });
@@ -3844,6 +3860,11 @@ void ProfileWorker::OnSocketEvent(const QString& type,
       // Compression can hand the same conversation a fresh runtime id; keep
       // accepting its events for the stored session the sidebar names.
       runtime_session_id_ = session_id;
+    }
+    if (!session_id.isEmpty() && !stored.isEmpty()) {
+      // Even a background session's events carry the runtime id. Remember the
+      // durable id so its completion can find the prompt and running claim.
+      stored_session_by_runtime_[session_id] = stored;
     }
     if (state_.selected_session_id.isEmpty() && !stored.isEmpty()) {
       state_.selected_session_id = stored;
@@ -4228,6 +4249,9 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
         stored == state_.selected_session_id) {
       runtime_session_id_ = runtime;
     }
+    if (!runtime.isEmpty() && !stored.isEmpty()) {
+      stored_session_by_runtime_[runtime] = stored;
+    }
     if (state_.selected_session_id.isEmpty() && !stored.isEmpty()) {
       state_.selected_session_id = stored;
     }
@@ -4432,6 +4456,7 @@ void ProfileWorker::CompleteAssistant(const QString& text,
   bool superseded = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    const bool was_running = state_.running;
     qint64 elapsed_ms = 0;
     ChatMessage* target = nullptr;
     // Walk backwards: a user row newer than the streaming answer means this
@@ -4451,6 +4476,17 @@ void ProfileWorker::CompleteAssistant(const QString& text,
     }
     if (target == nullptr && superseded) {
       qInfo("ignoring completion for superseded turn session=%.12s",
+            qUtf8Printable(state_.selected_session_id));
+      return;
+    }
+    if (target == nullptr && text.trimmed().isEmpty() &&
+        failure.isEmpty()) {
+      // No streaming answer exists and the frame carries neither text nor an
+      // error. This is a replayed or relayed close frame, not a turn this UI
+      // watched produce anything. Ignore it: painting a blank answer here also
+      // queues a phantom "finished in 0.0s" notice right as the next prompt is
+      // starting.
+      qInfo("ignoring stray empty completion session=%.12s",
             qUtf8Printable(state_.selected_session_id));
       return;
     }
@@ -4497,8 +4533,13 @@ void ProfileWorker::CompleteAssistant(const QString& text,
     state_.running = false;
     state_.running_session_id.clear();
     CompleteTurn(&state_, failure);
-    RecordTurnCompletion(&state_, completed_session, completed_prompt, failure,
-                         elapsed_ms);
+    // A completion for a turn that began before this UI attached has no start
+    // stamp and no prompt. It is still worth folding into the transcript, but
+    // a banner for it would arrive as a phantom "finished in 0.0s".
+    if (started > 0 || was_running) {
+      RecordTurnCompletion(&state_, completed_session, completed_prompt, failure,
+                           elapsed_ms);
+    }
     NoteActivityLocked();
     state_.requests.clear();
     admission_id_.clear();

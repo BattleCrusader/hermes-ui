@@ -253,9 +253,10 @@ class MainWindow : public QWidget {
   quint64 last_reaction_serial_ = 0;
   std::vector<QString> pinned_context_;
   std::vector<bool> last_running_;
-  // Last completion serial announced per profile. The worker queues these
-  // explicitly so a background chat can notify without being selected.
-  std::vector<quint64> last_turn_completion_serial_;
+  // Last completion serial announced per profile name. Profile indexes can be
+  // reordered when the supervisor reloads, so serials must not be keyed by
+  // position or a stale notice from one profile fires under another.
+  QHash<QString, quint64> last_turn_completion_serial_;
   QStringList queued_prompts_;
   // Recently steered prompts, newest last. They are already delivered, so the
   // review dialog shows them read-only but can load one back for editing.

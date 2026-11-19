@@ -4242,6 +4242,7 @@ void PreferencesTest::turnOutcomeSeparatesSyncErrorsFromTurnFailures() {
 
 void PreferencesTest::backgroundTurnCompletionQueuesOneNoticePerTurn() {
   using hermes::ui::CompleteBackgroundTurn;
+  using hermes::ui::CompletionNoticeIsCurrent;
   using hermes::ui::ProfileSnapshot;
 
   ProfileSnapshot snapshot;
@@ -4266,6 +4267,7 @@ void PreferencesTest::backgroundTurnCompletionQueuesOneNoticePerTurn() {
   QCOMPARE(first.elapsed_ms, qint64{4200});
   QVERIFY(!first.failed);
   QVERIFY(first.error.isEmpty());
+  QVERIFY(first.created_ms > 0);
 
   // If another chat has since started its own turn, finishing the background
   // one must not steal the running claim. It still queues its own notice.
@@ -4285,6 +4287,29 @@ void PreferencesTest::backgroundTurnCompletionQueuesOneNoticePerTurn() {
   QCOMPARE(second.elapsed_ms, qint64{900});
   QVERIFY(second.failed);
   QCOMPARE(second.error, QStringLiteral("provider timeout"));
+
+  // A completion for a turn that began before this UI attached has no prompt
+  // and no start stamp. It still settles the claim, but it must not create a
+  // phantom "finished in 0.0s" notification.
+  snapshot.running = true;
+  snapshot.running_session_id = QStringLiteral("session-a");
+  const std::size_t before = snapshot.turn_completions.size();
+  CompleteBackgroundTurn(&snapshot, QStringLiteral("session-a"), QString(),
+                         QString(), 0, false);
+  QVERIFY(!snapshot.running);
+  QVERIFY(snapshot.running_session_id.isEmpty());
+  QCOMPARE(snapshot.turn_completions.size(), before);
+
+  // A notice for the chat that is already running a replacement turn is stale
+  // by the time the shell drains it, even when its age is still fresh.
+  snapshot.running = true;
+  snapshot.running_session_id = QStringLiteral("session-a");
+  QVERIFY(!CompletionNoticeIsCurrent(snapshot, second, 0));
+  snapshot.running_session_id = QStringLiteral("session-b");
+  QVERIFY(CompletionNoticeIsCurrent(snapshot, second, second.created_ms));
+  // A notice held behind a modal or an event-loop stall is no longer news.
+  QVERIFY(!CompletionNoticeIsCurrent(snapshot, second,
+                                     second.created_ms + 10001));
 }
 
 void PreferencesTest::rightRailMultipleProjectGitPanes() {

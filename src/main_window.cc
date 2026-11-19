@@ -87,6 +87,7 @@
 #include "src/slash_commands.h"
 #include "src/status_bar.h"
 #include "src/title_bar.h"
+#include "src/turn_outcome.h"
 #include "src/widget_theme.h"
 
 namespace hermes::ui {
@@ -5148,25 +5149,34 @@ void MainWindow::CheckProfileCompletions() {
   if (static_cast<int>(last_running_.size()) < count) {
     last_running_.resize(static_cast<std::size_t>(count), false);
   }
-  if (static_cast<int>(last_turn_completion_serial_.size()) < count) {
-    last_turn_completion_serial_.resize(static_cast<std::size_t>(count), 0);
-  }
   for (int index = 0; index < count; ++index) {
     const std::shared_ptr<const ProfileSnapshot> snapshot =
         supervisor_.SnapshotAt(index);
     if (!snapshot) {
       continue;
     }
-    bool announced_completion = false;
-    quint64& announced_serial =
-        last_turn_completion_serial_[static_cast<std::size_t>(index)];
+    bool consumed_completion = false;
+    quint64& announced_serial = last_turn_completion_serial_[snapshot->name];
+    if (snapshot->turn_completion_serial < announced_serial) {
+      // The worker restarted and its serial counter began again at zero.
+      announced_serial = 0;
+    }
+    const qint64 now_ms = QDateTime::currentMSecsSinceEpoch();
     for (const TurnCompletionNotice& completion : snapshot->turn_completions) {
       if (completion.serial <= announced_serial) {
         continue;
       }
       announced_serial = completion.serial;
+      consumed_completion = true;
+      if (!CompletionNoticeIsCurrent(*snapshot, completion, now_ms)) {
+        qInfo("skipping stale completion notification profile=%s "
+              "session=%.12s age_ms=%lld",
+              qUtf8Printable(snapshot->name),
+              qUtf8Printable(completion.session_id),
+              static_cast<qint64>(now_ms - completion.created_ms));
+        continue;
+      }
       OnGenerationFinished(*snapshot, completion, index);
-      announced_completion = true;
     }
     const bool was_running = last_running_[static_cast<std::size_t>(index)];
     const bool streaming = !snapshot->messages.empty() &&
@@ -5192,7 +5202,7 @@ void MainWindow::CheckProfileCompletions() {
       // The worker queues a notice for every normal message.complete. This
       // transition is only a fallback for a turn that ended without one (for
       // example a resume after the socket dropped). Do not announce twice.
-      if (!announced_completion) {
+      if (!consumed_completion) {
         TurnCompletionNotice completion;
         completion.session_id = finished_session;
         completion.prompt = snapshot->turn_prompt_text;
