@@ -21,6 +21,7 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPalette>
 #include <QPixmap>
 #include <QPointer>
 #include <QPushButton>
@@ -59,6 +60,24 @@ QString CssColor(const QColor& color) {
       .arg(color.green())
       .arg(color.blue())
       .arg(color.alpha());
+}
+
+// Popups are separate tool windows, so a translucent theme surface would let
+// the transcript show through the list. Composite it over the opaque window
+// background and keep the resulting token fully opaque.
+QColor OpaqueColor(const QColor& color, const QColor& backdrop) {
+  QColor base = backdrop;
+  base.setAlpha(255);
+  if (color.alpha() >= 255) {
+    QColor opaque = color;
+    opaque.setAlpha(255);
+    return opaque;
+  }
+  const double alpha = color.alphaF();
+  return QColor::fromRgbF(
+      color.redF() * alpha + base.redF() * (1.0 - alpha),
+      color.greenF() * alpha + base.greenF() * (1.0 - alpha),
+      color.blueF() * alpha + base.blueF() * (1.0 - alpha));
 }
 
 // The slash query is the text in the first block before the caret. Existing
@@ -161,6 +180,8 @@ Composer::Composer(const Theme& theme, QWidget* parent)
   mention_menu_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
   connect(mention_menu_, &QListWidget::itemClicked, this,
           [this](QListWidgetItem*) { AcceptMention(); });
+  StyleCompletionMenu(slash_menu_);
+  StyleCompletionMenu(mention_menu_);
   connect(editor_, &QTextEdit::textChanged, this, [this]() {
     UpdateSlashMenu();
     UpdateMentionMenu();
@@ -567,42 +588,101 @@ QString Composer::MentionDisplayPath(const QString& absolute) const {
   return absolute.startsWith(root) ? absolute.mid(root.size()) : absolute;
 }
 
+void Composer::StyleCompletionMenu(QListWidget* menu) {
+  if (menu == nullptr) {
+    return;
+  }
+  const QColor surface = OpaqueColor(theme_.surface, theme_.background);
+  const QColor border = OpaqueColor(theme_.stroke, surface);
+  const QColor selected = OpaqueColor(theme_.hover, surface);
+  menu->setStyleSheet(
+      QStringLiteral(
+          "QListWidget { background: %1; color: %2; border: 1px solid %3; "
+          "border-radius: 8px; padding: 4px; outline: none; "
+          "selection-background-color: %4; selection-color: %2; }"
+          "QListWidget::item { padding: 5px 8px; border-radius: 5px; "
+          "color: %2; }"
+          "QListWidget::item:selected { background: %4; color: %2; }")
+          .arg(surface.name(QColor::HexArgb),
+               theme_.foreground.name(QColor::HexArgb),
+               border.name(QColor::HexArgb),
+               selected.name(QColor::HexArgb)));
+  // The tool window has no parent surface behind it; without an explicit
+  // opaque palette the platform can paint the list viewport through.
+  QPalette palette = menu->palette();
+  palette.setColor(QPalette::Base, surface);
+  palette.setColor(QPalette::Window, surface);
+  palette.setColor(QPalette::Text, theme_.foreground);
+  palette.setColor(QPalette::Highlight, selected);
+  palette.setColor(QPalette::HighlightedText, theme_.foreground);
+  menu->setPalette(palette);
+  menu->viewport()->setPalette(palette);
+  // QStyleSheetStyle clears the viewport's auto-fill flag during polish; set
+  // it after polishing and mark the viewport styled so the opaque surface is
+  // painted even though the tool window has no backing parent.
+  menu->ensurePolished();
+  menu->viewport()->setAttribute(Qt::WA_StyledBackground, true);
+  menu->setAutoFillBackground(true);
+  menu->viewport()->setAutoFillBackground(true);
+}
+
 void Composer::UpdateMentionMenu() {
   if (mention_menu_ == nullptr || !path_lister_ || mention_root_.isEmpty()) {
     HideMentionMenu();
     return;
   }
-  const QTextCursor cursor = editor_->textCursor();
-  // Mentions live inside the current paragraph. Reading the block avoids
-  // copying the whole draft into a temporary string for every keystroke.
-  const QString before = cursor.block().text().left(cursor.positionInBlock());
-  const int at = before.lastIndexOf(QLatin1Char('@'));
-  if (at < 0) {
+  // A leading slash command owns the popup while it has matches. Typing
+  // `/Volumes/...` stops matching the catalog and falls through to paths.
+  if (SlashMenuVisible()) {
     HideMentionMenu();
     return;
   }
-  if (at > 0) {
-    const QChar previous = before.at(at - 1);
-    if (!previous.isSpace() && previous != QLatin1Char('(') &&
-        previous != QLatin1Char('[')) {
+  const QTextCursor cursor = editor_->textCursor();
+  // Paths live inside the current paragraph. Reading the block avoids
+  // copying the whole draft into a temporary string for every keystroke.
+  const QString before = cursor.block().text().left(cursor.positionInBlock());
+  // A trigger only opens the popup at the start of a whitespace-delimited
+  // token. Scanning to the token boundary also keeps `/` inside an absolute
+  // path (`/work/src`) from being mistaken for a second trigger, and leaves
+  // prose such as `and/or`, `http://`, or `(@name` untouched.
+  int trigger_position = before.size();
+  while (trigger_position > 0 &&
+         !before.at(trigger_position - 1).isSpace()) {
+    --trigger_position;
+  }
+  if (trigger_position >= before.size()) {
+    HideMentionMenu();
+    return;
+  }
+  const QChar trigger = before.at(trigger_position);
+  if (trigger != QLatin1Char('@') && trigger != QLatin1Char('/')) {
+    HideMentionMenu();
+    return;
+  }
+  const QString token = before.mid(trigger_position);
+  for (const QChar ch : token) {
+    if (ch.isSpace()) {
       HideMentionMenu();
       return;
     }
   }
-  const QString token = before.mid(at);
-  if (token.contains(QLatin1Char(' ')) || token.contains(QLatin1Char('\n')) ||
-      token.startsWith(QStringLiteral("@file:")) ||
-      token.startsWith(QStringLiteral("@folder:"))) {
+  if (trigger == QLatin1Char('@') &&
+      (token.startsWith(QStringLiteral("@file:")) ||
+       token.startsWith(QStringLiteral("@folder:")))) {
     HideMentionMenu();
     return;
   }
-  const QString query = token.mid(1);
+  const QString after_trigger = token.mid(1);
+  const int separator = after_trigger.lastIndexOf(QLatin1Char('/'));
+  const QString prefix = separator >= 0 ? after_trigger.mid(separator + 1)
+                                        : after_trigger;
   QString directory_part;
-  QString prefix = query;
-  const int slash = query.lastIndexOf(QLatin1Char('/'));
-  if (slash >= 0) {
-    directory_part = query.left(slash + 1);
-    prefix = query.mid(slash + 1);
+  if (trigger == QLatin1Char('/')) {
+    // The sigil is the path's first slash, so keep it when resolving an
+    // absolute path. A slash path is always shown and inserted absolutely.
+    directory_part = token.left(token.lastIndexOf(QLatin1Char('/')) + 1);
+  } else if (separator >= 0) {
+    directory_part = after_trigger.left(separator + 1);
   }
 
   QString directory;
@@ -671,6 +751,7 @@ void Composer::UpdateMentionMenu() {
   mention_directory_ = directory;
   mention_prefix_ = prefix;
   mention_token_ = token;
+  mention_trigger_ = trigger;
   mention_menu_->setCurrentRow(0);
   const QRectF card = CardRect();
   const int width = std::min<int>(440, std::max<int>(240, card.width()));
@@ -680,6 +761,7 @@ void Composer::UpdateMentionMenu() {
       origin.x(), origin.y(), width,
       std::min<int>(180, mention_menu_->count() * 24 + 8));
   mention_menu_->show();
+  mention_menu_->viewport()->setAutoFillBackground(true);
 }
 
 void Composer::HideMentionMenu() {
@@ -695,8 +777,14 @@ void Composer::AcceptMention() {
   QListWidgetItem* item = mention_menu_->currentItem();
   const QString absolute = item->data(Qt::UserRole).toString();
   const bool is_directory = item->data(Qt::UserRole + 1).toBool();
-  const QString display = MentionDisplayPath(absolute);
-  QString replacement = QStringLiteral("@") + display;
+  // `@` mentions are shown relative to the project so they survive moves;
+  // slash paths are absolute and must keep their leading directories.
+  const QString display = mention_trigger_ == QLatin1Char('/')
+                              ? absolute
+                              : MentionDisplayPath(absolute);
+  QString replacement = mention_trigger_ == QLatin1Char('/')
+                            ? display
+                            : QStringLiteral("@") + display;
   if (is_directory && !replacement.endsWith(QLatin1Char('/'))) {
     replacement += QLatin1Char('/');
   }
@@ -880,6 +968,8 @@ void Composer::SetTheme(const Theme& theme) {
   theme_ = theme;
   UpdateEditorStyle();
   UpdateChipStyles();
+  StyleCompletionMenu(slash_menu_);
+  StyleCompletionMenu(mention_menu_);
   update();
 }
 
@@ -1346,22 +1436,8 @@ void Composer::UpdateSlashMenu() {
       mapToGlobal(QPoint(static_cast<int>(card.left()),
                          static_cast<int>(card.top()) - height - 6));
   slash_menu_->move(anchor);
-  // QColor::name() drops alpha, which turned the 10%-black hover token into
-  // an opaque near-black bar over the selected row; stylesheet colours must
-  // keep the alpha channel.
-  slash_menu_->setStyleSheet(
-      QStringLiteral(
-          "QListWidget { background: %1; color: %2; border: 1px solid %3; "
-          "border-radius: 8px; padding: 4px; outline: none; "
-          "selection-background-color: %4; selection-color: %2; }"
-          "QListWidget::item { padding: 5px 8px; border-radius: 5px; "
-          "color: %2; }"
-          "QListWidget::item:selected { background: %4; color: %2; }")
-          .arg(theme_.surface.name(QColor::HexArgb),
-               theme_.foreground.name(QColor::HexArgb),
-               theme_.stroke.name(QColor::HexArgb),
-               theme_.hover.name(QColor::HexArgb)));
   slash_menu_->show();
+  slash_menu_->viewport()->setAutoFillBackground(true);
 }
 
 void Composer::AcceptSlashCommand() {

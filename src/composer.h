@@ -74,9 +74,10 @@ class Composer : public QWidget {
   // only when the caret cannot leave the first/last visual line, so multiline
   // editing still works; Down restores the unsent draft after the newest entry.
   void SetHistory(const QStringList& history);
-  // `@` completion. The shell supplies a gateway-backed directory lister and
-  // the profile home that relative mentions resolve against. Listing is async
-  // so typing a mention never blocks the UI on a gateway round-trip.
+  // `@` mention and `/` filesystem-path completion. The shell supplies a
+  // gateway-backed directory lister and the project working directory that
+  // relative paths resolve against. Listing is async so typing a path never
+  // blocks the UI on a gateway round-trip.
   using PathListCallback =
       std::function<void(const QJsonArray&, const QString&)>;
   void SetPathLister(
@@ -155,6 +156,7 @@ class Composer : public QWidget {
   void UpdateMentionMenu();
   void AcceptMention();
   void HideMentionMenu();
+  void StyleCompletionMenu(QListWidget* menu);
   QString MentionDisplayPath(const QString& absolute) const;
   QListWidget* slash_menu_ = nullptr;
   QListWidget* mention_menu_ = nullptr;
@@ -165,6 +167,10 @@ class Composer : public QWidget {
   QString mention_directory_;
   QString mention_prefix_;
   QString mention_token_;
+  // The path popup serves both `@` mentions and `/` filesystem paths. Keep the
+  // trigger so accepting a row re-inserts the same sigil (and so a slash path
+  // is displayed as an absolute path rather than relative to the project).
+  QChar mention_trigger_ = QLatin1Char('@');
   QHash<QString, QJsonArray> path_cache_;
   std::vector<SlashCommand> slash_commands_;
   QRectF ModelChipRect() const;

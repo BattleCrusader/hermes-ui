@@ -42,6 +42,31 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-19 (path completion and folder browsing)
+
+**The composer now completes filesystem paths with `/`, and project dialogs can
+browse for folders instead of requiring hand-typed absolute paths.**
+
+- [x] `@` mentions and `/` paths share the existing async path popup. A trigger
+      only opens at a whitespace-delimited token start, so `and/or`,
+      `http://`, `foo/@bar` and `(@name` stay prose. Leading `/` slash commands
+      keep the popup until their catalog has no matches; `/Users/...` then
+      falls through to absolute path completion.
+- [x] `@` insertion still displays project-relative paths. `/` insertion keeps
+      the absolute path and reuses the same menu for the next directory.
+- [x] `@` completion resolves against the active project working directory
+      (`ProjectWorkingDirectory`), falling back to the profile home only when
+      no project scope is active. Scope changes refresh the root immediately.
+- [x] Completion menus composite the theme surface over the opaque window
+      background, set an opaque palette, and mark the viewport styled after
+      polish; popups no longer show the transcript through their background.
+- [x] Project create/edit dialogs have an **Add folder…** filesystem browser.
+      Edit mode stages new directories and applies `projects.add_folder` after
+      `projects.update`, refreshing once all receipts return.
+- [x] Expanded `composerMentionsCompletePathsAndPromoteRefs` and
+      `projectDialogEditsCreateAndDisplayFields`. Full native suite **10/10
+      passed, 0 failed**.
+
 ## Status update — 2026-11-19 (completion banners require a live turn)
 
 **A completion notification can no longer fire for a replay, a stray close

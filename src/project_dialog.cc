@@ -5,6 +5,10 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -64,7 +68,20 @@ ProjectDialog::ProjectDialog(const Theme& theme, const ProjectInfo* existing,
   folders_->setObjectName(QStringLiteral("projectFolders"));
   folders_->setPlaceholderText(QStringLiteral("/Users/you/code/project"));
   folders_->setMinimumHeight(110);
-  layout->addWidget(folders_, 1);
+  auto* folder_row = new QHBoxLayout();
+  folder_row->addWidget(folders_, 1);
+  auto* browse = new QPushButton(QStringLiteral("Add folder…"), this);
+  browse->setObjectName(QStringLiteral("projectBrowseFolder"));
+  browse->setToolTip(QStringLiteral("Choose a folder in the filesystem"));
+  QObject::connect(browse, &QPushButton::clicked, this, [this]() {
+    const QStringList current = folders();
+    const QString start = current.isEmpty() ? QDir::homePath() : current.last();
+    const QString path = QFileDialog::getExistingDirectory(
+        this, QStringLiteral("Add project folder"), start);
+    AddFolderPath(path);
+  });
+  folder_row->addWidget(browse, 0, Qt::AlignTop);
+  layout->addLayout(folder_row, 1);
 
   layout->addWidget(new QLabel(QStringLiteral("Primary folder"), this));
   primary_ = new QComboBox(this);
@@ -113,13 +130,14 @@ ProjectDialog::ProjectDialog(const Theme& theme, const ProjectInfo* existing,
     primary_->setCurrentIndex(
         std::max(0, primary_->findData(existing->primary_path)));
     // Folder membership and the primary path are separate mutator verbs.
-    // Keep this dialog focused on display fields; the sidebar menu applies
-    // add/remove/set-primary so every step has its own gateway receipt.
+    // Keep the text editor read-only so membership changes are deliberate;
+    // the Add folder button stages new paths and the shell applies them after
+    // the display update is accepted.
     folders_->setReadOnly(true);
     primary_->setEnabled(false);
     status_->setText(
-        QStringLiteral("Use the project menu to add, remove, or set the "
-                       "primary folder."));
+        QStringLiteral("Use Add folder… to attach a directory, or the project "
+                       "menu to remove or set the primary folder."));
   } else {
     RefreshPrimaryChoices();
   }
@@ -152,6 +170,29 @@ QString ProjectDialog::description() const {
 
 QStringList ProjectDialog::folders() const {
   return ParsedFolders(folders_->toPlainText());
+}
+
+void ProjectDialog::AddFolderPath(const QString& path) {
+  const QString raw = path.trimmed();
+  if (raw.isEmpty()) {
+    return;
+  }
+  const QString cleaned = QDir::cleanPath(raw);
+  const QFileInfo info(cleaned);
+  if (!info.exists() || !info.isDir()) {
+    status_->setText(
+        QStringLiteral("Not a folder: %1").arg(cleaned));
+    return;
+  }
+  QStringList current = folders();
+  if (current.contains(cleaned)) {
+    status_->setText(QStringLiteral("That folder is already attached."));
+    return;
+  }
+  current.push_back(cleaned);
+  folders_->setPlainText(current.join(QLatin1Char('\n')));
+  RefreshPrimaryChoices();
+  status_->setText(QStringLiteral("Folder added: %1").arg(cleaned));
 }
 
 QString ProjectDialog::primary_path() const {

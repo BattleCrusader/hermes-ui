@@ -283,7 +283,7 @@ MainWindow::MainWindow(ThemeMode mode, bool enable_streaming, QWidget* parent)
     if (right_rail_ != nullptr) {
       right_rail_->SetSnapshot(*snapshot);
     }
-    composer_->SetMentionRoot(snapshot->home);
+    composer_->SetMentionRoot(ComposerMentionRoot());
     UpdateComposerHistory(*snapshot);
     ApplyRunIndicators(*snapshot);
     last_voice_transcript_serial_ = snapshot->voice_transcript_serial;
@@ -3565,7 +3565,7 @@ void MainWindow::ActivateProfile(int index) {
     if (right_rail_ != nullptr) {
       right_rail_->SetSnapshot(*snapshot);
     }
-    composer_->SetMentionRoot(snapshot->home);
+    composer_->SetMentionRoot(ComposerMentionRoot());
     UpdateComposerHistory(*snapshot);
     ApplyRunIndicators(*snapshot);
     pinned_context_.clear();
@@ -3637,7 +3637,7 @@ void MainWindow::Refresh() {
     if (right_rail_ != nullptr) {
       right_rail_->SetSnapshot(*snapshot);
     }
-    composer_->SetMentionRoot(snapshot->home);
+    composer_->SetMentionRoot(ComposerMentionRoot());
     UpdateComposerHistory(*snapshot);
     ApplyRunIndicators(*snapshot);
     ApplyVoiceState(*snapshot);
@@ -3978,6 +3978,16 @@ QString MainWindow::ProjectPath(const QString& project_id) const {
   return ProjectWorkingDirectory(project_state_, project_id);
 }
 
+QString MainWindow::ComposerMentionRoot() const {
+  const QString project_path =
+      ProjectWorkingDirectory(project_state_, project_scope_);
+  if (!project_path.isEmpty()) {
+    return project_path;
+  }
+  const auto snapshot = supervisor_.ActiveSnapshot();
+  return snapshot != nullptr ? snapshot->home : QString();
+}
+
 void MainWindow::RefreshProjects(bool force) {
   const int index = supervisor_.active_index();
   if (index < 0 || index >= supervisor_.profile_count()) {
@@ -4114,6 +4124,9 @@ void MainWindow::ApplyProjectState() {
       FilterVisibleProjects(rows, dismissed_auto_project_ids_);
   sidebar_->SetProjects(visible, project_scope_, project_state_.active_id,
                         project_state_.available);
+  if (composer_ != nullptr) {
+    composer_->SetMentionRoot(ComposerMentionRoot());
+  }
   SyncArtifactsRoot();
   SyncRightRailProject();
   ScheduleProjectCacheSave();
@@ -4483,11 +4496,20 @@ void MainWindow::EditProject(const ProjectInfo& project) {
   QJsonObject params =
       BuildProjectUpdateParams(dialog.name(), dialog.description());
   params.insert(QStringLiteral("id"), project.id);
-  params.insert(QStringLiteral("profile"), supervisor_.ProfileName(index));
+  const QString profile = supervisor_.ProfileName(index);
+  params.insert(QStringLiteral("profile"), profile);
+  QStringList added_folders;
+  for (const QString& path : dialog.folders()) {
+    if (!dialog.original_folders().contains(path)) {
+      added_folders.push_back(path);
+    }
+  }
   supervisor_.RequestRpc(
       index, QStringLiteral("projects.update"), params,
-      [this, index](const QJsonObject&, const QString& error) {
-        if (supervisor_.active_index() != index) {
+      [this, index, profile, project, added_folders](const QJsonObject&,
+                                                     const QString& error) {
+        if (supervisor_.active_index() != index ||
+            supervisor_.ProfileName(index) != profile) {
           return;
         }
         if (!error.isEmpty()) {
@@ -4495,8 +4517,44 @@ void MainWindow::EditProject(const ProjectInfo& project) {
               QStringLiteral("Could not update project: %1").arg(error));
           return;
         }
-        status_bar_->ShowTransient(QStringLiteral("Project updated"));
-        RefreshProjects(true);
+        if (added_folders.isEmpty()) {
+          status_bar_->ShowTransient(QStringLiteral("Project updated"));
+          RefreshProjects(true);
+          return;
+        }
+        // Folder membership is a separate mutator. Apply each path the browse
+        // button staged, then refresh once when every receipt is back.
+        auto remaining =
+            std::make_shared<int>(static_cast<int>(added_folders.size()));
+        auto errors = std::make_shared<QStringList>();
+        bool primary = project.folders.empty();
+        for (const QString& path : added_folders) {
+          QJsonObject folder_params =
+              BuildProjectFolderParams(project.id, path, primary);
+          primary = false;
+          folder_params.insert(QStringLiteral("profile"), profile);
+          supervisor_.RequestRpc(
+              index, QStringLiteral("projects.add_folder"), folder_params,
+              [this, index, profile, remaining,
+               errors](const QJsonObject&, const QString& folder_error) {
+                if (!folder_error.isEmpty()) {
+                  errors->push_back(folder_error);
+                }
+                if (--(*remaining) > 0) {
+                  return;
+                }
+                if (supervisor_.active_index() != index ||
+                    supervisor_.ProfileName(index) != profile) {
+                  return;
+                }
+                status_bar_->ShowTransient(
+                    errors->isEmpty()
+                        ? QStringLiteral("Project updated")
+                        : QStringLiteral("Could not add folder: %1")
+                              .arg(errors->first()));
+                RefreshProjects(true);
+              });
+        }
       });
 }
 

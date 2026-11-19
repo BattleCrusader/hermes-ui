@@ -1,5 +1,6 @@
 // Copyright 2026 The Hermes Qt Spike Authors.
 
+#include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QComboBox>
@@ -22,6 +23,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMenu>
+#include <QPalette>
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QProcess>
@@ -793,6 +795,51 @@ void PreferencesTest::composerMentionsCompletePathsAndPromoteRefs() {
   QCOMPARE(hermes::ui::Composer::PromotePathRefs(
                QStringLiteral("@file:\"already/typed\" and @teknium1")),
            QStringLiteral("@file:\"already/typed\" and @teknium1"));
+
+  // A `/` token in the middle of prose is an absolute filesystem path. It
+  // reuses the mention menu but inserts an absolute path, not an `@` ref.
+  composer.SetText(QStringLiteral("see /work/src"));
+  QVERIFY(composer.MentionMenuVisible());
+  QCOMPARE(composer.MentionMenuEntries(),
+           QStringList({QStringLiteral("src/")}));
+  QTest::keyClick(editor, Qt::Key_Tab);
+  QCOMPARE(composer.Text(), QStringLiteral("see /work/src/"));
+  QVERIFY(composer.MentionMenuVisible());
+  QCOMPARE(composer.MentionMenuEntries(),
+           QStringList({QStringLiteral("main.cc")}));
+  QTest::keyClick(editor, Qt::Key_Tab);
+  QCOMPARE(composer.Text(), QStringLiteral("see /work/src/main.cc "));
+  QVERIFY(!composer.MentionMenuVisible());
+
+  // A trigger must start a token. Slashes inside words and URLs are prose.
+  composer.SetText(QStringLiteral("and/or /work/src"));
+  QVERIFY(composer.MentionMenuVisible());
+  QCOMPARE(composer.MentionMenuEntries(),
+           QStringList({QStringLiteral("src/")}));
+  composer.SetText(QStringLiteral("and/or"));
+  QVERIFY(!composer.MentionMenuVisible());
+  composer.SetText(QStringLiteral("http://example.test"));
+  QVERIFY(!composer.MentionMenuVisible());
+  composer.SetText(QStringLiteral("foo/@src"));
+  QVERIFY(!composer.MentionMenuVisible());
+  composer.SetText(QStringLiteral("@src/main"));
+  QVERIFY(composer.MentionMenuVisible());
+  QCOMPARE(composer.MentionMenuEntries(),
+           QStringList({QStringLiteral("main.cc")}));
+
+  // The tool window floats over the app; its palette must be opaque so the
+  // transcript underneath never bleeds through the popup background.
+  QListWidget* mention_menu = nullptr;
+  for (QWidget* widget : QApplication::topLevelWidgets()) {
+    if (widget->objectName() == QStringLiteral("mentionMenu")) {
+      mention_menu = qobject_cast<QListWidget*>(widget);
+      break;
+    }
+  }
+  QVERIFY(mention_menu != nullptr);
+  QVERIFY(mention_menu->autoFillBackground());
+  QVERIFY(mention_menu->viewport()->autoFillBackground());
+  QCOMPARE(mention_menu->palette().color(QPalette::Base).alpha(), 255);
 }
 
 void PreferencesTest::subagentEventsBuildALiveDelegationTree() {
@@ -3019,6 +3066,22 @@ void PreferencesTest::projectDialogEditsCreateAndDisplayFields() {
   QCOMPARE(create.primary_path(), QStringLiteral("/code/shared"));
   QVERIFY(create.use_after_create());
 
+  // The Browse button is the only way to attach a real directory in edit
+  // mode. `AddFolderPath` is the non-modal seam used by that button.
+  auto* browse =
+      create.findChild<QPushButton*>(QStringLiteral("projectBrowseFolder"));
+  QVERIFY(browse != nullptr);
+  QTemporaryDir browse_dir;
+  QVERIFY(browse_dir.isValid());
+  const QString extra_folder = browse_dir.filePath(QStringLiteral("extra"));
+  QVERIFY(QDir().mkpath(extra_folder));
+  create.AddFolderPath(extra_folder);
+  QCOMPARE(create.folders().size(), 3);
+  QVERIFY(create.folders().contains(extra_folder));
+  create.AddFolderPath(extra_folder);
+  QCOMPARE(create.folders().size(), 3);
+  QCOMPARE(create.primary_path(), QStringLiteral("/code/shared"));
+
   hermes::ui::ProjectDialog adopt(theme, nullptr);
   adopt.SetCreatePrefill(QStringLiteral("SSC"),
                          QStringList{QStringLiteral("/code/ssc")});
@@ -3050,6 +3113,13 @@ void PreferencesTest::projectDialogEditsCreateAndDisplayFields() {
       edit.findChild<QComboBox*>(QStringLiteral("projectPrimary"));
   QVERIFY(edit_folders->isReadOnly());
   QVERIFY(!edit_primary->isEnabled());
+  const QString edit_extra = browse_dir.filePath(QStringLiteral("edit-extra"));
+  QVERIFY(QDir().mkpath(edit_extra));
+  edit.AddFolderPath(edit_extra);
+  QCOMPARE(edit.folders().size(), 2);
+  QVERIFY(edit.folders().contains(edit_extra));
+  QCOMPARE(edit.original_folders(),
+           QStringList{QStringLiteral("/code/alpha")});
 }
 
 void PreferencesTest::

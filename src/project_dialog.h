@@ -29,6 +29,9 @@ class ProjectDialog : public QDialog {
   QString name() const;
   QString description() const;
   QStringList folders() const;
+  // Adds a directory chosen outside the text editor. The browse button uses
+  // this; tests can call it directly without opening a native folder picker.
+  void AddFolderPath(const QString& path);
   QString primary_path() const;
   QStringList original_folders() const { return original_folders_; }
   QString original_primary_path() const { return original_primary_path_; }

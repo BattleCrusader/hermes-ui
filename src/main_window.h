@@ -171,6 +171,9 @@ class MainWindow : public QWidget {
   void SetProjectPrimaryFolder(const ProjectInfo& project);
   const ProjectInfo* FindProject(const QString& project_id) const;
   QString ProjectPath(const QString& project_id) const;
+  // Relative `@`/`/` path completion follows the active project's working
+  // directory; an unscoped profile falls back to its home directory.
+  QString ComposerMentionRoot() const;
   void UpdateRequest(const ProfileSnapshot& snapshot);
   void UpdateFindBar();
   void UpdateComposerHistory(const ProfileSnapshot& snapshot);
