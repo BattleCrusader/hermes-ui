@@ -2141,6 +2141,10 @@ void ProfileWorker::AppendUserPromptLocked(const QString& text,
   message.role = MessageRole::kUser;
   message.author = QStringLiteral("You");
   message.timestamp = QDateTime::currentDateTime();
+  // Keep the authored prompt for the bubble and its copy/edit actions. Blocks
+  // drop list markers as presentation metadata, so without this a queued or
+  // steered list would render and resend without its numbers/bullets.
+  message.raw_text = trimmed;
   message.blocks = ParseMarkdown(trimmed);
   state_.messages.push_back(std::move(message));
   if (begin_turn) {

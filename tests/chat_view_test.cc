@@ -264,6 +264,7 @@ class ChatViewTest : public QObject {
   void hoverActionRowMatchesDesktop();
   void everyMessageItemUsesHoverActionRow();
   void transcriptTextSelectionCopiesToClipboard();
+  void userPromptKeepsListMarkers();
   void transcriptSelectionMatchesVisibleUrl();
   void transcriptTableSelectionHighlightsClickedCell();
   void transcriptPlainSelectionMatchesVisibleText();
@@ -1626,6 +1627,53 @@ void ChatViewTest::transcriptTextSelectionCopiesToClipboard() {
   QGuiApplication::clipboard()->clear();
   QTest::keySequence(transcript, QKeySequence::Copy);
   QCOMPARE(QGuiApplication::clipboard()->text(), dragged);
+}
+
+void ChatViewTest::userPromptKeepsListMarkers() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::ChatView view(theme);
+  view.resize(800, 600);
+  view.show();
+
+  const QString list = QStringLiteral("1. a\n2. b\n- c\n* d");
+  auto snapshot = std::make_shared<hermes::ui::ProfileSnapshot>();
+  snapshot->name = QStringLiteral("default");
+  snapshot->label = QStringLiteral("default");
+  snapshot->revision = 1;
+  hermes::ui::ChatMessage user;
+  user.role = hermes::ui::MessageRole::kUser;
+  user.author = QStringLiteral("You");
+  user.timestamp = QDateTime::currentDateTime();
+  user.raw_text = list;
+  user.blocks = hermes::ui::ParseMarkdown(list);
+  snapshot->messages.push_back(user);
+  view.SetSnapshot(snapshot);
+  QTest::qWait(30);
+
+  // The rendered bubble must show the authored markers, not just the parsed
+  // list bodies ("a", "b", ...).
+  view.SelectAllTextForTest();
+  const QString selected = view.SelectedTextForTest();
+  QVERIFY2(selected.contains(QStringLiteral("1. a")), qPrintable(selected));
+  QVERIFY2(selected.contains(QStringLiteral("2. b")), qPrintable(selected));
+  QVERIFY2(selected.contains(QStringLiteral("- c")), qPrintable(selected));
+  QVERIFY2(selected.contains(QStringLiteral("* d")), qPrintable(selected));
+
+  // Copy/Edit/Retry read MessageText, so the same source must survive there.
+  QString edited;
+  view.SetEditMessageHandler(
+      [&edited](const hermes::ui::ChatMessage&, const QString& text) {
+        edited = text;
+      });
+  view.TriggerMessageActionForTest(QStringLiteral("edit"), 0);
+  QCOMPARE(edited, list);
+
+  // The submit payload carries the prompt verbatim; only outer whitespace is
+  // trimmed before this point.
+  const QJsonObject params = hermes::ui::BuildPromptSubmitParams(
+      QStringLiteral("session"), list, QStringLiteral("default"),
+      QStringLiteral("submission"), 0, false, false, false);
+  QCOMPARE(params.value(QStringLiteral("text")).toString(), list);
 }
 
 void ChatViewTest::transcriptSelectionMatchesVisibleUrl() {

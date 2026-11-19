@@ -80,6 +80,35 @@ QString QuoteMarkdownText(const QString& text);
 QString CopyableBlockText(const MessageBlock& block);
 bool HasCopyableBlockText(const MessageBlock& block);
 
+// User prompts are shown and copied as the author wrote them. Blocks strip
+// list markers ("1. " and "- ") because they are presentation metadata, so
+// prefer the original source whenever the row kept it. The fallback rebuilds
+// markers from blocks for locally constructed snapshots.
+QString UserMessageText(const ChatMessage& message) {
+  if (!message.raw_text.isEmpty()) {
+    return message.raw_text;
+  }
+  QString text;
+  for (const MessageBlock& block : message.blocks) {
+    if (!text.isEmpty()) {
+      text += QLatin1Char('\n');
+    }
+    if (block.kind == BlockKind::kBullet) {
+      if (block.detail.startsWith(QStringLiteral("task:"))) {
+        text += block.detail == QStringLiteral("task:done")
+                    ? QStringLiteral("\u2611 ")
+                    : QStringLiteral("\u2610 ");
+      } else if (!block.detail.isEmpty()) {
+        text += block.detail + QLatin1Char(' ');
+      } else {
+        text += QStringLiteral("\u2022 ");
+      }
+    }
+    text += block.text;
+  }
+  return text;
+}
+
 QString FormatTurnDuration(double seconds) {
   const int total = qMax(0, qRound(seconds));
   if (total < 60) {
@@ -442,6 +471,11 @@ class TranscriptWidget : public QWidget {
     const QString body = MessageText(message);
     if (action == QStringLiteral("branch") && branch_handler_) {
       branch_handler_(message, body);
+    } else if (action == QStringLiteral("edit") && edit_handler_) {
+      edit_handler_(message, body);
+    } else if (action == QStringLiteral("regenerate") &&
+               regenerate_handler_) {
+      regenerate_handler_(message, body);
     } else if (action == QStringLiteral("pin") && pin_handler_) {
       pin_handler_(message, body);
     } else if (action == QStringLiteral("rewind") && rewind_handler_) {
@@ -2519,6 +2553,9 @@ void TranscriptWidget::BuildAssistantMessage(const ChatMessage& message,
 }
 
 QString TranscriptWidget::MessageText(const ChatMessage& message) {
+  if (message.role == MessageRole::kUser) {
+    return UserMessageText(message);
+  }
   QString text;
   for (const MessageBlock& block : message.blocks) {
     if (block.kind == BlockKind::kTool) {
@@ -2656,13 +2693,7 @@ void TranscriptWidget::BuildSystemMessage(const ChatMessage& message,
 void TranscriptWidget::BuildUserMessage(const ChatMessage& message, qreal width,
                                         qreal start_y, LaidMessage* laid_out) {
   const qreal max_bubble_width = std::min<qreal>(640, width * 0.68);
-  QString text;
-  for (const MessageBlock& block : message.blocks) {
-    if (!text.isEmpty()) {
-      text += QStringLiteral("\n");
-    }
-    text += block.text;
-  }
+  const QString text = UserMessageText(message);
   QFont font = theme_.UiFont(13, QFont::Normal);
   const auto document =
       MakeDocument(ParagraphHtml(text, theme_), font, max_bubble_width - 24,

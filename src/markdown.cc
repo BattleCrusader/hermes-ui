@@ -349,6 +349,16 @@ QString InlineHtml(const QString& text) {
       }
     }
     if (text.at(index) == '*') {
+      // A leading `* ` is a list marker, not emphasis. Without this, a prompt
+      // written as `* item` lost its star and rendered the item in italics.
+      const bool leading_bullet =
+          (index == 0 || text.at(index - 1) == QLatin1Char('\n')) &&
+          index + 1 < text.size() && text.at(index + 1).isSpace();
+      if (leading_bullet) {
+        html += QLatin1Char('*');
+        ++index;
+        continue;
+      }
       italic = !italic;
       html += italic ? QStringLiteral("<i>") : QStringLiteral("</i>");
       ++index;

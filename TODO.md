@@ -42,6 +42,23 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-19 (prompt lists keep their markers)
+
+**User prompts now render, copy and re-send the bullet/number markers the user
+wrote instead of only the parsed list bodies.**
+
+- [x] User bubbles and `MessageText` prefer `ChatMessage::raw_text` (the exact
+      submitted prompt) and only fall back to block text for locally built
+      snapshots without it. `AppendUserPromptLocked` now records `raw_text` for
+      queued prompts and steers too.
+- [x] The fallback rebuilds `1.` numbering, task boxes and unordered bullets
+      from block metadata, so fixture/demo rows stay readable.
+- [x] `InlineHtml` treats a line-leading `* ` as a literal list marker rather
+      than toggling italics, so `* item` survives rendering.
+- [x] Added `userPromptKeepsListMarkers`: the bubble selection, Edit text and
+      `prompt.submit` payload all retain `1. a` / `2. b` / `- c` / `* d`.
+- [x] Full native suite **10/10 passed, 0 failed**.
+
 ## Status update — 2026-11-19 (path completion and folder browsing)
 
 **The composer now completes filesystem paths with `/`, and project dialogs can
