@@ -23,6 +23,9 @@ struct PromptOperation {
   Kind kind = Kind::kPrompt;
   QString session_id;
   QString text;
+  // Model-facing text differs from what the transcript shows for generated
+  // slash prompts (skills, /plan, /goal): submit `text`, render `display_text`.
+  QString display_text;
   qint64 truncate_before_row_id = 0;
   bool confirm_empty_truncate = false;
   bool confirm_deep_truncate = false;

@@ -176,6 +176,11 @@ class ProfileWorker : public QObject {
                    const QString& error);
   void SteerFinished(quint64 token, bool ok, const QString& message);
   void PromptFinished(quint64 token, bool ok, const QString& message);
+  // `/undo` (and other prefill dispatches) return text for the composer, not a
+  // transcript row. The shell applies it only if the originating session is
+  // still selected.
+  void SlashPrefillReady(const QString& profile, const QString& session_id,
+                         const QString& text, const QString& notice);
 
  private:
   void FinishActionRequest(quint64 token, const QString& method,
@@ -186,12 +191,26 @@ class ProfileWorker : public QObject {
                           const QStringList& attachments = {},
                           bool queued = false, SteerCallback done = {},
                           bool after_active = false,
-                          bool user_row_already_appended = false);
+                          bool user_row_already_appended = false,
+                          const QString& display_text = {});
   void StartNextPromptOperation();
   void SendActivePromptAttachments();
   void SubmitActivePromptOperation();
   bool HandleActivePromptResponse(int id, const QJsonObject& result,
                                   const QString& error);
+  // Slash commands share one response contract: slash.exec for worker
+  // commands, command.dispatch for quick/plugin/bundle/skill built-ins.
+  // Returns true when `id` belonged to a slash request.
+  bool HandleSlashResponse(int id, const QJsonObject& result,
+                           const QString& error);
+  void ExecuteSlashDispatch(const QString& command, const QString& name,
+                            const QString& arg, const QString& session_id,
+                            int alias_depth);
+  void ApplySlashResult(const QString& command, const QString& name,
+                        const QString& arg, const QString& session_id,
+                        int alias_depth, const QJsonObject& result);
+  void DisplaySlashOutput(const QString& output, const QString& warning = {});
+  void RefreshHistoryAfterRewind(const QString& session_id);
   void FailActivePromptOperation(const QString& error, bool ends_turn);
   void FinishActivePromptOperation();
   void FlushDeferredPrompts();
@@ -289,7 +308,15 @@ class ProfileWorker : public QObject {
   // gateway fences session.steer / session.interrupt on it. Atomic because the
   // UI reads it when Stop must leave immediately.
   std::atomic<int> execution_generation_{-1};
-  std::map<int, QString> pending_commands_;
+  struct PendingSlashRequest {
+    QString command;
+    QString name;
+    QString arg;
+    QString session_id;
+    int alias_depth = 0;
+    bool dispatched = false;
+  };
+  std::map<int, PendingSlashRequest> pending_commands_;
   // session.interrupt answers are not user-facing: a turn that settled between
   // the click and the RPC is a normal race, not an error.
   std::set<int> pending_interrupts_;
@@ -307,6 +334,7 @@ class ProfileWorker : public QObject {
   PromptOperationQueue prompt_operations_;
   struct DeferredPrompt {
     QString text;
+    QString display_text;
     bool queued = false;
     QStringList attachments;
     SteerCallback done;

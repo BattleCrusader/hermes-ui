@@ -50,6 +50,7 @@
 #include <QVBoxLayout>
 #include <algorithm>
 #include <memory>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -193,6 +194,11 @@ MainWindow::MainWindow(ThemeMode mode, bool enable_streaming, QWidget* parent)
   BuildUi();
   ApplyAppearancePreferences();
   supervisor_.Start();
+  supervisor_.SetSlashPrefillHandler(
+      [this](const QString& profile, const QString& session_id,
+             const QString& text, const QString& notice) {
+        ApplySlashPrefill(profile, session_id, text, notice);
+      });
   // Resume the profile the user left. A deleted/renamed profile falls back to
   // the gateway's default (index 0); stale indexes never select a stranger.
   QStringList profile_names;
@@ -1997,7 +2003,8 @@ bool MainWindow::RunSlashCommand(const QString& text) {
 
   // Commands the shared gateway refuses as slash.exec run on the session's own
   // verbs instead (the desktop does the same): /steer -> session.steer,
-  // /queue -> the composer's next-turn queue, /retry and /undo -> re-prompt.
+  // /queue -> gateway FIFO, /bg -> background prompt. /retry and /undo stay on
+  // `command.dispatch` because their history truncation lives in the gateway.
   if (name == QStringLiteral("/steer") || name == QStringLiteral("/s")) {
     if (args.isEmpty()) {
       supervisor_.Note(active, QStringLiteral("usage: /steer <text>"));
@@ -2024,13 +2031,8 @@ bool MainWindow::RunSlashCommand(const QString& text) {
     return true;
   }
   if (name == QStringLiteral("/queue") || name == QStringLiteral("/q")) {
-    const int pending =
-        active_snapshot ? PendingQueueCount(*active_snapshot) : 0;
     if (args.isEmpty()) {
-      supervisor_.Note(active,
-                       QStringLiteral("%1 prompt(s) queued").arg(pending));
-      status_bar_->ShowTransient(
-          QStringLiteral("%1 prompt(s) queued").arg(pending));
+      ShowQueuedPromptsDialog();
       return true;
     }
     if (running) {
@@ -2065,57 +2067,11 @@ bool MainWindow::RunSlashCommand(const QString& text) {
     return true;
   }
   if (name == QStringLiteral("/retry")) {
-    QString last_user;
-    if (active_snapshot) {
-      for (const ChatMessage& message : active_snapshot->messages) {
-        if (message.role == MessageRole::kUser && !message.blocks.empty()) {
-          last_user = message.blocks.front().text;
-        }
-      }
-    }
-    if (last_user.isEmpty()) {
-      supervisor_.Note(active, QStringLiteral("Nothing to retry"));
-      status_bar_->ShowTransient(QStringLiteral("Nothing to retry"));
-    } else if (running) {
-      supervisor_.Note(
-          active,
-          QStringLiteral("The turn is still running — use /steer, /queue, or /bg"));
-      status_bar_->ShowTransient(
-          QStringLiteral("Turn is still running — use /steer, /queue, or /bg"));
-    } else {
-      supervisor_.SendPrompt(active, last_user);
-    }
+    supervisor_.ExecuteSlash(active, text);
     return true;
   }
   if (name == QStringLiteral("/undo")) {
-    QStringList prompts;
-    if (active_snapshot) {
-      for (const ChatMessage& message : active_snapshot->messages) {
-        if (message.role == MessageRole::kUser && !message.blocks.empty()) {
-          prompts.append(message.blocks.front().text);
-        }
-      }
-    }
-    const int turns = std::max(1, args.toInt());
-    const int target = prompts.size() - 1 - turns;
-    if (target < 0) {
-      supervisor_.Note(active, QStringLiteral("Not enough turns to undo"));
-      status_bar_->ShowTransient(QStringLiteral("Not enough turns to undo"));
-    } else if (running) {
-      supervisor_.Note(active, QStringLiteral("Stop the turn before undoing"));
-      status_bar_->ShowTransient(
-          QStringLiteral("Stop the turn before undoing"));
-    } else {
-      supervisor_.SendPrompt(active, prompts.at(target));
-      supervisor_.Note(active,
-                       QStringLiteral("Re-running the prompt %1 turn(s) back "
-                                      "(history is not truncated)")
-                           .arg(turns));
-      status_bar_->ShowTransient(
-          QStringLiteral("Re-running the prompt %1 turn(s) back (history is "
-                         "not truncated)")
-              .arg(turns));
-    }
+    supervisor_.ExecuteSlash(active, text);
     return true;
   }
 
@@ -2160,19 +2116,121 @@ bool MainWindow::RunSlashCommand(const QString& text) {
   } else if (canonical == QStringLiteral("/stop")) {
     supervisor_.Interrupt(index);
   } else if (canonical == QStringLiteral("/reasoning")) {
+    const QStringList levels = {QStringLiteral("none"),     QStringLiteral("minimal"),
+                                QStringLiteral("low"),      QStringLiteral("medium"),
+                                QStringLiteral("high"),     QStringLiteral("xhigh"),
+                                QStringLiteral("max"),      QStringLiteral("ultra")};
     if (args.isEmpty()) {
       const auto snapshot = supervisor_.ActiveSnapshot();
-      const QStringList levels = {QStringLiteral("low"),
-                                  QStringLiteral("medium"),
-                                  QStringLiteral("high")};
-      const int current =
-          snapshot ? levels.indexOf(snapshot->reasoning_effort) : -1;
-      supervisor_.SetReasoning(index, levels.at((current + 1) % levels.size()));
+      QString current = snapshot ? snapshot->reasoning_effort : QString();
+      if (current == QStringLiteral("off") || current.isEmpty()) {
+        current = QStringLiteral("none");
+      }
+      const int found = levels.indexOf(current);
+      supervisor_.SetReasoning(index, levels.at((found + 1) % levels.size()));
     } else {
-      supervisor_.SetReasoning(index, args);
+      QString effort = args.trimmed().toLower();
+      if (effort == QStringLiteral("off") || effort == QStringLiteral("false") ||
+          effort == QStringLiteral("disabled")) {
+        effort = QStringLiteral("none");
+      }
+      if (!levels.contains(effort)) {
+        supervisor_.Note(index,
+                         QStringLiteral("usage: /reasoning %1")
+                             .arg(levels.join(QLatin1Char('|'))));
+        status_bar_->ShowTransient(
+            QStringLiteral("unknown reasoning level: %1").arg(args));
+      } else {
+        supervisor_.SetReasoning(index, effort);
+      }
     }
   } else if (canonical == QStringLiteral("/model")) {
-    ShowSettingsPage(QStringLiteral("model"));
+    if (args.isEmpty()) {
+      ShowSettingsPage(QStringLiteral("model"));
+    } else if (args.compare(QStringLiteral("reset"), Qt::CaseInsensitive) == 0 ||
+               args.compare(QStringLiteral("default"),
+                            Qt::CaseInsensitive) == 0) {
+      supervisor_.UseDefaultModel(index);
+    } else {
+      const auto snapshot = supervisor_.ActiveSnapshot();
+      QString requested = args;
+      QString requested_provider;
+      const QRegularExpression provider_flag(
+          QStringLiteral("--provider[=\\s]+(\\S+)"));
+      const auto match = provider_flag.match(requested);
+      if (match.hasMatch()) {
+        requested_provider = match.captured(1);
+        requested.remove(match.capturedStart(), match.capturedLength());
+      }
+      requested = requested.trimmed();
+      if (requested.startsWith(QLatin1Char('\'')) ||
+          requested.startsWith(QLatin1Char('"'))) {
+        requested.remove(0, 1);
+      }
+      if (requested.endsWith(QLatin1Char('\'')) ||
+          requested.endsWith(QLatin1Char('"'))) {
+        requested.chop(1);
+      }
+      QString provider;
+      QString model;
+      bool found = false;
+      if (snapshot) {
+        // Exact model first, so provider/model ids keep their slashes.
+        for (const ModelProvider& candidate : snapshot->model_providers) {
+          if (!requested_provider.isEmpty() &&
+              candidate.name.compare(requested_provider,
+                                     Qt::CaseInsensitive) != 0 &&
+              candidate.slug.compare(requested_provider,
+                                     Qt::CaseInsensitive) != 0) {
+            continue;
+          }
+          if (candidate.models.contains(requested)) {
+            provider = candidate.slug;
+            model = requested;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          for (const ModelProvider& candidate : snapshot->model_providers) {
+            if (!requested_provider.isEmpty() &&
+                candidate.name.compare(requested_provider,
+                                       Qt::CaseInsensitive) != 0 &&
+                candidate.slug.compare(requested_provider,
+                                       Qt::CaseInsensitive) != 0) {
+              continue;
+            }
+            for (const QString& item : candidate.models) {
+              if (item.compare(requested, Qt::CaseInsensitive) == 0) {
+                provider = candidate.slug;
+                model = item;
+                found = true;
+                break;
+              }
+            }
+            if (found) {
+              break;
+            }
+          }
+        }
+        if (!found && !requested_provider.isEmpty()) {
+          found = true;
+          provider = requested_provider;
+          model = requested;
+        }
+      }
+      if (found) {
+        supervisor_.SetModel(index, provider, model);
+      } else if (!snapshot || snapshot->model_providers.empty()) {
+        supervisor_.RefreshModelOptions(index);
+        supervisor_.Note(index, QStringLiteral("Loading models; try again"));
+      } else {
+        supervisor_.Note(index,
+                         QStringLiteral("unknown model: %1").arg(args));
+        status_bar_->ShowTransient(
+            QStringLiteral("unknown model: %1").arg(args));
+      }
+    }
   } else if (canonical == QStringLiteral("/profile")) {
     if (args.isEmpty()) {
       ShowWorkspacePage(QStringLiteral("profiles"));
@@ -2198,8 +2256,34 @@ bool MainWindow::RunSlashCommand(const QString& text) {
   } else if (canonical == QStringLiteral("/settings")) {
     ShowSettings();
   } else if (canonical == QStringLiteral("/theme")) {
-    SetThemeMode(mode_ == ThemeMode::kLight ? ThemeMode::kDark
-                                            : ThemeMode::kLight);
+    const QString requested = args.trimmed();
+    if (requested.isEmpty()) {
+      SetThemeMode(mode_ == ThemeMode::kLight ? ThemeMode::kDark
+                                             : ThemeMode::kLight);
+    } else if (requested.compare(QStringLiteral("light"),
+                                 Qt::CaseInsensitive) == 0) {
+      SetThemeMode(ThemeMode::kLight);
+    } else if (requested.compare(QStringLiteral("dark"),
+                                 Qt::CaseInsensitive) == 0) {
+      SetThemeMode(ThemeMode::kDark);
+    } else {
+      QString preset_id;
+      for (const ThemePreset& preset : ThemePresets()) {
+        if (preset.id.compare(requested, Qt::CaseInsensitive) == 0 ||
+            preset.name.compare(requested, Qt::CaseInsensitive) == 0) {
+          preset_id = preset.id;
+          break;
+        }
+      }
+      if (preset_id.isEmpty()) {
+        supervisor_.Note(index,
+                         QStringLiteral("unknown theme: %1").arg(requested));
+        status_bar_->ShowTransient(
+            QStringLiteral("unknown theme: %1").arg(requested));
+      } else {
+        SetThemePreset(preset_id);
+      }
+    }
   } else if (canonical == QStringLiteral("/search")) {
     ShowFindBar();
   } else if (canonical == QStringLiteral("/help")) {
@@ -2211,6 +2295,26 @@ bool MainWindow::RunSlashCommand(const QString& text) {
     supervisor_.ExecuteSlash(index, text);
   }
   return true;
+}
+
+void MainWindow::ApplySlashPrefill(const QString& profile,
+                                   const QString& session_id,
+                                   const QString& text,
+                                   const QString& notice) {
+  const int active = supervisor_.active_index();
+  if (active < 0 || supervisor_.ProfileName(active) != profile) {
+    return;
+  }
+  const auto snapshot = supervisor_.ActiveSnapshot();
+  if (!snapshot || snapshot->selected_session_id != session_id) {
+    return;
+  }
+  composer_->SetText(text);
+  composer_->FocusEditor();
+  status_bar_->ShowTransient(
+      notice.trimmed().isEmpty()
+          ? QStringLiteral("Loaded prompt into the composer")
+          : notice.trimmed());
 }
 
 void MainWindow::CycleSession(int delta) {
@@ -2241,16 +2345,37 @@ void MainWindow::CycleSession(int delta) {
 
 void MainWindow::ShowSlashHelp() {
   std::vector<PaletteCommand> commands;
-  for (const SlashCommand& command : SlashCommandCatalog()) {
-    const QString name = command.name;
+  std::set<QString> seen;
+  const auto add = [&](const QString& key, const QString& label,
+                       const QString& description) {
+    const QString normalized = key.toLower();
+    if (normalized.isEmpty() || !seen.insert(normalized).second) {
+      return;
+    }
     commands.push_back(
-        {name + (command.argument_hint.isEmpty()
-                     ? QString()
-                     : QStringLiteral(" ") + command.argument_hint),
-         command.description, QStringLiteral("Slash commands"), [this, name]() {
+        {label, description, QStringLiteral("Slash commands"),
+         [this, name = normalized]() {
            composer_->SetText(name + QLatin1Char(' '));
            composer_->FocusEditor();
          }});
+  };
+  // Native descriptions win; the gateway catalog adds every quick/plugin/
+  // bundle/skill command the session can actually dispatch.
+  for (const SlashCommand& command : SlashCommandCatalog()) {
+    add(command.name,
+        command.name + (command.argument_hint.isEmpty()
+                            ? QString()
+                            : QStringLiteral(" ") + command.argument_hint),
+        command.description);
+  }
+  const auto snapshot = supervisor_.ActiveSnapshot();
+  if (snapshot) {
+    for (const SlashEntry& command : snapshot->slash_commands) {
+      add(command.name, command.name,
+          command.description.isEmpty()
+              ? QStringLiteral("Gateway command")
+              : command.description);
+    }
   }
   command_palette_->SetCommands(std::move(commands));
   command_palette_->Open();

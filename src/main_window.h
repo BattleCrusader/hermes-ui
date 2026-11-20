@@ -69,6 +69,8 @@ class MainWindow : public QWidget {
   // Composer slash commands. Returns true when the command was handled
   // locally; unknown commands fall through to the agent as plain prompts.
   bool RunSlashCommand(const QString& text);
+  void ApplySlashPrefill(const QString& profile, const QString& session_id,
+                         const QString& text, const QString& notice);
   void ShowSlashHelp();
   void CycleSession(int delta);
   void RegisterShortcut(const QString& action, const QKeySequence& sequence,

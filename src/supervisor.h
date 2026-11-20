@@ -88,6 +88,12 @@ class Supervisor {
   void DeleteSession(int index, const QString& session_id);
   void AttachFile(int index, const QString& local_path);
   void ExecuteSlash(int index, const QString& command);
+  // A `/undo`/prefill dispatch targets the composer, not the transcript. The
+  // shell installs this and applies it only when the source is still active.
+  using SlashPrefillHandler = std::function<void(
+      const QString& profile, const QString& session_id, const QString& text,
+      const QString& notice)>;
+  void SetSlashPrefillHandler(SlashPrefillHandler handler);
   // `done` reports whether session.steer was accepted (or safely sent as a
   // new prompt when no turn was running). It runs on the UI thread.
   void Steer(int index, const QString& text, SteerCallback done = {});
@@ -266,6 +272,7 @@ class Supervisor {
   std::map<quint64, RpcCallback> rpc_callbacks_;
   std::map<quint64, SteerCallback> steer_callbacks_;
   std::map<quint64, SteerCallback> prompt_callbacks_;
+  SlashPrefillHandler slash_prefill_handler_;
   quint64 next_skill_hub_token_ = 1;
   quint64 next_computer_use_token_ = 1;
   quint64 next_speech_token_ = 1;

@@ -462,6 +462,7 @@ add_executable(hermes_protocol_tests
   src/gateway_replay.cc
   src/gateway_events.cc
   src/gateway_protocol.cc
+  src/slash_commands.cc
 )
 
 target_include_directories(hermes_protocol_tests PRIVATE

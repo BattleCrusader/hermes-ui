@@ -2,6 +2,8 @@
 
 #include "src/slash_commands.h"
 
+#include <QJsonValue>
+#include <QRegularExpression>
 #include <vector>
 
 namespace hermes::ui {
@@ -37,13 +39,13 @@ const std::vector<SlashCommand>& Catalog() {
       {QStringLiteral("/reasoning"),
        {},
        QStringLiteral("Set reasoning effort"),
-       QStringLiteral("low|medium|high|off"),
+       QStringLiteral("none|minimal|low|medium|high|xhigh|max|ultra"),
        true},
       {QStringLiteral("/model"),
        {},
-       QStringLiteral("Open model settings"),
-       QString(),
-       false},
+       QStringLiteral("Switch model"),
+       QStringLiteral("[model] [--provider name]|reset"),
+       true},
       {QStringLiteral("/profile"),
        {},
        QStringLiteral("Switch profile"),
@@ -66,9 +68,9 @@ const std::vector<SlashCommand>& Catalog() {
        false},
       {QStringLiteral("/theme"),
        {QStringLiteral("/skin")},
-       QStringLiteral("Toggle light/dark"),
-       QString(),
-       false},
+       QStringLiteral("Switch light/dark or a theme preset"),
+       QStringLiteral("[light|dark|preset]"),
+       true},
       {QStringLiteral("/search"),
        {QStringLiteral("/find")},
        QStringLiteral("Focus session search"),
@@ -125,6 +127,67 @@ const SlashCommand* FindSlashCommand(const QString& name) {
     }
   }
   return nullptr;
+}
+
+SlashDispatch ParseSlashDispatch(const QJsonObject& result) {
+  SlashDispatch dispatch;
+  dispatch.output = result.value(QStringLiteral("output")).toString();
+  if (dispatch.output.trimmed().isEmpty()) {
+    dispatch.output = result.value(QStringLiteral("text")).toString();
+  }
+  dispatch.warning = result.value(QStringLiteral("warning")).toString();
+
+  const QString type = result.value(QStringLiteral("type")).toString();
+  if (type.isEmpty()) {
+    if (!dispatch.output.trimmed().isEmpty() ||
+        !dispatch.warning.trimmed().isEmpty()) {
+      dispatch.kind = SlashDispatch::Kind::kOutput;
+    }
+    return dispatch;
+  }
+
+  dispatch.notice = result.value(QStringLiteral("notice")).toString();
+  dispatch.message = result.value(QStringLiteral("message")).toString();
+  dispatch.display = result.value(QStringLiteral("display")).toString();
+  dispatch.target = result.value(QStringLiteral("target")).toString();
+  dispatch.name = result.value(QStringLiteral("name")).toString();
+
+  if (type == QStringLiteral("exec")) {
+    dispatch.kind = SlashDispatch::Kind::kExec;
+  } else if (type == QStringLiteral("plugin")) {
+    dispatch.kind = SlashDispatch::Kind::kPlugin;
+  } else if (type == QStringLiteral("alias") &&
+             !dispatch.target.trimmed().isEmpty()) {
+    dispatch.kind = SlashDispatch::Kind::kAlias;
+  } else if (type == QStringLiteral("send")) {
+    dispatch.kind = dispatch.message.trimmed().isEmpty()
+                        ? SlashDispatch::Kind::kNone
+                        : SlashDispatch::Kind::kSend;
+  } else if (type == QStringLiteral("skill")) {
+    dispatch.kind = SlashDispatch::Kind::kSkill;
+  } else if (type == QStringLiteral("prefill")) {
+    dispatch.kind = dispatch.message.trimmed().isEmpty()
+                        ? SlashDispatch::Kind::kNone
+                        : SlashDispatch::Kind::kPrefill;
+  }
+  return dispatch;
+}
+
+bool ShouldFallbackToSlashDispatch(const QString& error) {
+  // These are the only refusals that mean "slash.exec does not own this
+  // command". Every other 4018 came from a handler slash.exec already
+  // forwarded to (retry/undo/compress/queue/bundles); retrying would run a
+  // mutating command twice. A helper failure must surface as itself.
+  static const QRegularExpression kNotMine(
+      QStringLiteral("^skill command: use command\\.dispatch for /|use "
+                     "command\\.dispatch for /snapshot restore"));
+  if (!kNotMine.match(error).hasMatch()) {
+    return false;
+  }
+  return !error.contains(QStringLiteral("slash worker")) &&
+         !error.contains(QStringLiteral("timed out")) &&
+         !error.contains(QStringLiteral("not connected")) &&
+         !error.contains(QStringLiteral("not running"));
 }
 
 }  // namespace hermes::ui

@@ -29,6 +29,7 @@
 #include "src/message_history.h"
 #include "src/prompt_submit.h"
 #include "src/session_usage.h"
+#include "src/slash_commands.h"
 #include "src/turn_outcome.h"
 
 namespace hermes::ui {
@@ -540,7 +541,8 @@ void ProfileWorker::SendPromptInternal(const QString& text,
                                        const QStringList& attachments,
                                        bool queued, SteerCallback done,
                                        bool after_active,
-                                       bool user_row_already_appended) {
+                                       bool user_row_already_appended,
+                                       const QString& display_text) {
   const QString trimmed = text.trimmed();
   if (trimmed.isEmpty()) {
     if (done) {
@@ -548,6 +550,10 @@ void ProfileWorker::SendPromptInternal(const QString& text,
     }
     return;
   }
+  // A generated slash prompt is model-facing scaffolding. Keep it on the wire
+  // but show the projection the gateway sent (e.g. `/skill fix the leak`).
+  const QString visible =
+      display_text.trimmed().isEmpty() ? trimmed : display_text.trimmed();
 
   QString session_id;
   bool missing_session = false;
@@ -595,12 +601,12 @@ void ProfileWorker::SendPromptInternal(const QString& text,
           message.role = MessageRole::kUser;
           message.author = QStringLiteral("You");
           message.timestamp = QDateTime::currentDateTime();
-          message.raw_text = trimmed;
-          message.blocks = ParseMarkdown(trimmed);
+          message.raw_text = visible;
+          message.blocks = ParseMarkdown(visible);
           state_.messages.push_back(std::move(message));
         }
-        BeginTurn(&state_, trimmed);
-        NoteTurnStartedLocked(session_id, trimmed);
+        BeginTurn(&state_, visible);
+        NoteTurnStartedLocked(session_id, visible);
         foreground_ = true;
         state_.unread = 0;
       }
@@ -618,8 +624,8 @@ void ProfileWorker::SendPromptInternal(const QString& text,
   if (defer) {
     // Keep every prompt submitted before session.create succeeds, in order.
     // The old single pending slot silently dropped all but the last one.
-    deferred_prompts_.push_back(
-        DeferredPrompt{trimmed, queued, attachments, std::move(done)});
+    deferred_prompts_.push_back(DeferredPrompt{trimmed, visible, queued,
+                                                attachments, std::move(done)});
     if (need_new_session) {
       NewSession();
     }
@@ -630,6 +636,7 @@ void ProfileWorker::SendPromptInternal(const QString& text,
   operation.kind = PromptOperation::Kind::kPrompt;
   operation.session_id = session_id;
   operation.text = trimmed;
+  operation.display_text = visible;
   operation.truncate_before_row_id = truncate_before_row_id;
   operation.confirm_empty_truncate = confirm_empty_truncate;
   operation.confirm_deep_truncate = confirm_deep_truncate;
@@ -1014,7 +1021,8 @@ void ProfileWorker::FlushDeferredPrompts() {
       continue;
     }
     SendPromptInternal(prompt.text, 0, false, false, prompt.attachments,
-                       prompt.queued, std::move(prompt.done));
+                       prompt.queued, std::move(prompt.done), false, false,
+                       prompt.display_text);
   }
 }
 
@@ -2161,19 +2169,203 @@ void ProfileWorker::ExecuteSlash(const QString& command) {
   if (shutting_down_ || socket_ == nullptr || command.trimmed().isEmpty()) {
     return;
   }
+  const QString trimmed = command.trimmed();
   QString session_id;
   {
     std::lock_guard<std::mutex> lock(mutex_);
     session_id = state_.selected_session_id;
   }
-  const int id = socket_->ExecuteSlashCommand(session_id, command.trimmed());
+  // The gateway dispatch verbs take the bare name and the rest of the line.
+  QString name = trimmed;
+  QString arg;
+  const int space = trimmed.indexOf(QLatin1Char(' '));
+  if (space >= 0) {
+    name = trimmed.left(space);
+    arg = trimmed.mid(space + 1).trimmed();
+  }
+  name = name.trimmed().toLower();
+  const int id = socket_->ExecuteSlashCommand(session_id, trimmed);
   if (id < 0) {
     PublishError(QStringLiteral("gateway is not connected"));
     return;
   }
-  pending_commands_[id] = command.trimmed();
+  pending_commands_[id] = PendingSlashRequest{trimmed, name, arg, session_id,
+                                              0, false};
   qInfo("slash profile=%s command=%s", qUtf8Printable(name_),
-        qUtf8Printable(command.trimmed()));
+        qUtf8Printable(trimmed));
+}
+
+void ProfileWorker::ExecuteSlashDispatch(const QString& command,
+                                         const QString& name,
+                                         const QString& arg,
+                                         const QString& session_id,
+                                         int alias_depth) {
+  if (socket_ == nullptr || !socket_->IsConnected()) {
+    PublishError(QStringLiteral("gateway is not connected"));
+    return;
+  }
+  QString bare_name = name.trimmed();
+  if (bare_name.startsWith(QLatin1Char('/'))) {
+    bare_name.remove(0, 1);
+  }
+  const int id = socket_->RequestRpc(
+      QStringLiteral("command.dispatch"),
+      QJsonObject{{QStringLiteral("name"), bare_name},
+                  {QStringLiteral("arg"), arg},
+                  {QStringLiteral("session_id"), session_id}});
+  if (id < 0) {
+    PublishError(QStringLiteral("gateway is not connected"));
+    return;
+  }
+  pending_commands_[id] = PendingSlashRequest{command, name, arg, session_id,
+                                              alias_depth, true};
+}
+
+void ProfileWorker::DisplaySlashOutput(const QString& output,
+                                       const QString& warning) {
+  QString body = output.trimmed();
+  if (body.isEmpty()) {
+    body = QStringLiteral("(no output)");
+  }
+  if (!warning.trimmed().isEmpty()) {
+    body = QStringLiteral("warning: %1\n%2")
+               .arg(warning.trimmed(), body);
+  }
+  Note(body);
+}
+
+void ProfileWorker::RefreshHistoryAfterRewind(const QString& session_id) {
+  if (session_id.isEmpty()) {
+    return;
+  }
+  // Rewind is applied to the gateway's warm/durable history before the ACK,
+  // but it publishes no transcript event. Re-read once the send has landed so
+  // the removed exchange cannot linger in the UI.
+  QTimer::singleShot(250, this, [this, session_id]() {
+    if (shutting_down_) {
+      return;
+    }
+    bool selected = false;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      selected = state_.selected_session_id == session_id;
+    }
+    if (selected) {
+      FetchMessages(session_id);
+    }
+  });
+}
+
+bool ProfileWorker::HandleSlashResponse(int id, const QJsonObject& result,
+                                        const QString& error) {
+  const auto command_it = pending_commands_.find(id);
+  if (command_it == pending_commands_.end()) {
+    return false;
+  }
+  const PendingSlashRequest request = command_it->second;
+  pending_commands_.erase(command_it);
+
+  if (!error.isEmpty()) {
+    // Only slash.exec's exact "use command.dispatch" refusals fall through.
+    // A helper crash/timeout is shown as itself; a mutating command already
+    // forwarded by slash.exec must never run twice.
+    if (!request.dispatched && ShouldFallbackToSlashDispatch(error)) {
+      ExecuteSlashDispatch(request.command, request.name, request.arg,
+                           request.session_id, request.alias_depth);
+      return true;
+    }
+    const QString friendly =
+        error.contains(QStringLiteral("unsupported_command"))
+            ? QStringLiteral("%1 is not available for this session")
+                  .arg(request.name)
+            : QStringLiteral("%1 failed: %2")
+                  .arg(request.name, error);
+    Note(friendly);
+    PublishError(friendly);
+    return true;
+  }
+
+  ApplySlashResult(request.command, request.name, request.arg,
+                   request.session_id, request.alias_depth, result);
+  return true;
+}
+
+void ProfileWorker::ApplySlashResult(const QString& command,
+                                     const QString& name, const QString& arg,
+                                     const QString& session_id,
+                                     int alias_depth,
+                                     const QJsonObject& result) {
+  // A result that arrives after the user switched chats belongs to the old
+  // transcript. Sending it now would put another chat's prompt/question in
+  // this one.
+  QString selected;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    selected = state_.selected_session_id;
+  }
+  if (!session_id.isEmpty() && selected != session_id) {
+    Note(QStringLiteral("%1: the chat changed before the result arrived")
+             .arg(name));
+    return;
+  }
+
+  const SlashDispatch dispatch = ParseSlashDispatch(result);
+  switch (dispatch.kind) {
+    case SlashDispatch::Kind::kNone:
+      Note(QStringLiteral("%1: invalid response").arg(name));
+      return;
+    case SlashDispatch::Kind::kOutput:
+    case SlashDispatch::Kind::kExec:
+    case SlashDispatch::Kind::kPlugin:
+      DisplaySlashOutput(dispatch.output, dispatch.warning);
+      return;
+    case SlashDispatch::Kind::kAlias: {
+      if (alias_depth >= 4) {
+        Note(QStringLiteral("%1: alias loop").arg(name));
+        return;
+      }
+      QString target = dispatch.target.trimmed();
+      if (!target.startsWith(QLatin1Char('/'))) {
+        target.prepend(QLatin1Char('/'));
+      }
+      const QString next_command =
+          arg.isEmpty() ? target : target + QLatin1Char(' ') + arg;
+      // Re-enter through slash.exec so a locally owned alias still resolves.
+      ExecuteSlash(next_command);
+      qInfo("slash alias profile=%s %s -> %s", qUtf8Printable(name_),
+            qUtf8Printable(command), qUtf8Printable(next_command));
+      return;
+    }
+    case SlashDispatch::Kind::kPrefill:
+      if (!dispatch.notice.trimmed().isEmpty()) {
+        Note(dispatch.notice);
+      }
+      emit SlashPrefillReady(name_, session_id, dispatch.message,
+                             dispatch.notice);
+      RefreshHistoryAfterRewind(session_id);
+      return;
+    case SlashDispatch::Kind::kSend:
+    case SlashDispatch::Kind::kSkill: {
+      if (!dispatch.notice.trimmed().isEmpty()) {
+        Note(dispatch.notice);
+      }
+      if (dispatch.message.trimmed().isEmpty()) {
+        Note(QStringLiteral("%1: %2 payload missing message")
+                 .arg(name, dispatch.kind == SlashDispatch::Kind::kSkill
+                                ? QStringLiteral("skill")
+                                : QStringLiteral("send")));
+        return;
+      }
+      SendPromptInternal(dispatch.message, 0, false, false, {}, false, {},
+                         false, false, dispatch.display);
+      // /retry and /undo mutate durable history before returning their send.
+      if (name == QStringLiteral("/retry") ||
+          name == QStringLiteral("/undo")) {
+        RefreshHistoryAfterRewind(session_id);
+      }
+      return;
+    }
+  }
 }
 
 void ProfileWorker::Note(const QString& text) {
@@ -3016,6 +3208,7 @@ void ProfileWorker::OnSocketDisconnected() {
     }
   }
   pending_interrupts_.clear();
+  pending_commands_.clear();
   for (DeferredPrompt& prompt : deferred_prompts_) {
     if (prompt.done) {
       prompt_callbacks.push_back(std::move(prompt.done));
@@ -4183,42 +4376,7 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
           command_count);
     return;
   }
-  const auto command_it = pending_commands_.find(id);
-  if (command_it != pending_commands_.end()) {
-    const QString command = command_it->second;
-    pending_commands_.erase(command_it);
-    if (!error.isEmpty()) {
-      const QString friendly =
-          error.contains(QStringLiteral("unsupported_command"))
-              ? QStringLiteral("%1 is not available for this session")
-                    .arg(command)
-              : QStringLiteral("%1 failed: %2").arg(command, error);
-      Note(friendly);
-      PublishError(friendly);
-      return;
-    }
-    QString output = result.value(QStringLiteral("output")).toString();
-    if (output.trimmed().isEmpty()) {
-      output = result.value(QStringLiteral("text")).toString();
-    }
-    if (output.trimmed().isEmpty()) {
-      output = QStringLiteral("%1: no output").arg(command);
-    }
-    std::lock_guard<std::mutex> lock(mutex_);
-    ChatMessage message;
-    message.role = MessageRole::kAssistant;
-    message.author = QStringLiteral("command");
-    message.timestamp = QDateTime::currentDateTime();
-    MessageBlock block;
-    block.kind = BlockKind::kCode;
-    block.language = QStringLiteral("text");
-    block.text = output.trimmed();
-    message.blocks.push_back(std::move(block));
-    state_.messages.push_back(std::move(message));
-    NoteActivityLocked();
-    PublishLocked();
-    qInfo("slash output profile=%s command=%s bytes=%d", qUtf8Printable(name_),
-          qUtf8Printable(command), static_cast<int>(output.size()));
+  if (HandleSlashResponse(id, result, error)) {
     return;
   }
   if (id == pending_create_id_) {

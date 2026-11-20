@@ -11,6 +11,7 @@
 #include "src/gateway_replay.h"
 #include "src/pending_prompt_tracker.h"
 #include "src/prompt_operation_queue.h"
+#include "src/slash_commands.h"
 
 namespace hermes::ui {
 namespace {
@@ -56,6 +57,7 @@ class GatewayProtocolTest : public QObject {
   void backgroundPromptUpsertSurvivesCompletionOrdering();
   void connectionOperationParsesTargetsAndBuildsAnswer();
   void handoffPlatformAndStatusText();
+  void slashDispatchParsesSharedContract();
 };
 
 void GatewayProtocolTest::replayCursorDropsDuplicatesAndIsolatesSessions() {
@@ -751,6 +753,68 @@ void GatewayProtocolTest::handoffPlatformAndStatusText() {
   QCOMPARE(HandoffStatusText(QString(), QStringLiteral("telegram"), QString()),
            QStringLiteral("No handoff pending"));
 }
+void GatewayProtocolTest::slashDispatchParsesSharedContract() {
+  SlashDispatch send = ParseSlashDispatch(QJsonObject{
+      {QStringLiteral("type"), QStringLiteral("send")},
+      {QStringLiteral("message"), QStringLiteral("machine prompt")},
+      {QStringLiteral("display"), QStringLiteral("/plan ship it")},
+      {QStringLiteral("notice"), QStringLiteral("Planning")}});
+  QCOMPARE(send.kind, SlashDispatch::Kind::kSend);
+  QCOMPARE(send.message, QStringLiteral("machine prompt"));
+  QCOMPARE(send.display, QStringLiteral("/plan ship it"));
+  QCOMPARE(send.notice, QStringLiteral("Planning"));
+
+  const SlashDispatch prefill = ParseSlashDispatch(QJsonObject{
+      {QStringLiteral("type"), QStringLiteral("prefill")},
+      {QStringLiteral("message"), QStringLiteral("undo me")},
+      {QStringLiteral("notice"), QStringLiteral("Undid 1 turn")}});
+  QCOMPARE(prefill.kind, SlashDispatch::Kind::kPrefill);
+  QCOMPARE(prefill.message, QStringLiteral("undo me"));
+
+  const SlashDispatch skill = ParseSlashDispatch(QJsonObject{
+      {QStringLiteral("type"), QStringLiteral("skill")},
+      {QStringLiteral("name"), QStringLiteral("fix")}});
+  QCOMPARE(skill.kind, SlashDispatch::Kind::kSkill);
+  QCOMPARE(skill.name, QStringLiteral("fix"));
+  QVERIFY(skill.message.isEmpty());
+
+  const SlashDispatch alias = ParseSlashDispatch(QJsonObject{
+      {QStringLiteral("type"), QStringLiteral("alias")},
+      {QStringLiteral("target"), QStringLiteral("/status")}});
+  QCOMPARE(alias.kind, SlashDispatch::Kind::kAlias);
+  QCOMPARE(alias.target, QStringLiteral("/status"));
+
+  const SlashDispatch exec = ParseSlashDispatch(QJsonObject{
+      {QStringLiteral("type"), QStringLiteral("exec")},
+      {QStringLiteral("output"), QStringLiteral("all good")}});
+  QCOMPARE(exec.kind, SlashDispatch::Kind::kExec);
+  QCOMPARE(exec.output, QStringLiteral("all good"));
+
+  const SlashDispatch plugin = ParseSlashDispatch(QJsonObject{
+      {QStringLiteral("type"), QStringLiteral("plugin")},
+      {QStringLiteral("output"), QStringLiteral("plugin output")}});
+  QCOMPARE(plugin.kind, SlashDispatch::Kind::kPlugin);
+
+  const SlashDispatch legacy = ParseSlashDispatch(
+      QJsonObject{{QStringLiteral("text"), QStringLiteral("legacy")}});
+  QCOMPARE(legacy.kind, SlashDispatch::Kind::kOutput);
+  QCOMPARE(legacy.output, QStringLiteral("legacy"));
+
+  QCOMPARE(ParseSlashDispatch(QJsonObject{}).kind, SlashDispatch::Kind::kNone);
+  QCOMPARE(ParseSlashDispatch(QJsonObject{
+               {QStringLiteral("type"), QStringLiteral("send")}})
+               .kind,
+           SlashDispatch::Kind::kNone);
+
+  QVERIFY(ShouldFallbackToSlashDispatch(
+      QStringLiteral("skill command: use command.dispatch for /fix")));
+  QVERIFY(!ShouldFallbackToSlashDispatch(
+      QStringLiteral("not a quick/plugin/bundle/skill command: nope")));
+  QVERIFY(!ShouldFallbackToSlashDispatch(
+      QStringLiteral("skill command: use command.dispatch for /fix (timed "
+                     "out)")));
+}
+
 }  // namespace hermes::ui
 
 QTEST_MAIN(hermes::ui::GatewayProtocolTest)

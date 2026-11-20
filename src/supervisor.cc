@@ -171,6 +171,17 @@ void Supervisor::StartWorker(Entry* entry) {
                      prompt_callbacks_.erase(found);
                      done(ok, message);
                    });
+  const QString profile_name = entry->name;
+  QObject::connect(
+      entry->worker, &ProfileWorker::SlashPrefillReady,
+      QCoreApplication::instance(),
+      [this, profile_name](const QString& profile, const QString& session_id,
+                           const QString& text, const QString& notice) {
+        if (slash_prefill_handler_) {
+          slash_prefill_handler_(profile.isEmpty() ? profile_name : profile,
+                                 session_id, text, notice);
+        }
+      });
   QObject::connect(
       entry->worker, &ProfileWorker::SpeechFinished,
       QCoreApplication::instance(),
@@ -934,6 +945,10 @@ void Supervisor::ExecuteSlash(int index, const QString& command) {
         worker, [worker, command]() { worker->ExecuteSlash(command); },
         Qt::QueuedConnection);
   }
+}
+
+void Supervisor::SetSlashPrefillHandler(SlashPrefillHandler handler) {
+  slash_prefill_handler_ = std::move(handler);
 }
 
 void Supervisor::Steer(int index, const QString& text, SteerCallback done) {

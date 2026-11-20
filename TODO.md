@@ -42,6 +42,40 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-21 (slash dispatch honors the shared contract)
+
+**Slash commands now consume the gateway's structured `command.dispatch`
+contract instead of printing generated prompts as code cards.** `/plan`,
+`/goal`, `/learn`, `/init`, `/moa`, skills, bundles, aliases and the
+`/retry`/`/undo` history paths work through the same wire types as the desktop.
+
+- [x] Added `SlashDispatch` / `ParseSlashDispatch` in `src/slash_commands.*`
+      for `send`, `prefill`, `skill`, `alias`, `exec`, `plugin` and plain
+      `output`/`text`, with `notice`, `display`, `warning`, `target` and
+      required-field validation.
+- [x] `ProfileWorker` now tracks slash requests as structured
+      `PendingSlashRequest` rows, renders command output as a system `Note`,
+      applies `prefill` to the composer through
+      `SlashPrefillReady` (fenced by profile + session), re-dispatches aliases
+      with a depth cap, and falls back to `command.dispatch` only for the
+      gateway's exact “use command.dispatch” refusal. Timeouts and helper
+      crashes are shown as themselves, so a mutating command cannot run twice.
+- [x] Generated prompts are sent machine-facing while the transcript shows
+      the gateway's `display` projection via `PromptOperation::display_text`,
+      `DeferredPrompt::display_text` and `SendPromptInternal`. `/retry` and
+      `/undo` are no longer locally approximated; they use gateway history
+      truncation, and the shell re-reads the transcript after a rewind.
+- [x] `/reasoning` accepts the full gateway level set
+      (`none|minimal|low|medium|high|xhigh|max|ultra`), `/model <name>` resolves
+      provider/model exactly or case-insensitively and honors `--provider`,
+      `reset`/`default` restore the profile model, and `/theme` accepts
+      `light`, `dark` or a named/id preset. `/queue` with no arguments opens the
+      pending-prompt manager. `/help` merges the full gateway catalog with the
+      native commands, deduplicated and preferring native descriptions.
+- [x] Added `slashDispatchParsesSharedContract` and linked
+      `src/slash_commands.cc` into `hermes_protocol_tests`. Full native suite
+      **10/10 passed, 0 failed** (≈39 s).
+
 ## Status update — 2026-11-20 (busy Send is immediate; settled queue rows leave)
 
 **Plain Send now always submits immediately, even while another prompt task is
