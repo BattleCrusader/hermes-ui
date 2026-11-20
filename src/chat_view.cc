@@ -636,6 +636,7 @@ class TranscriptWidget : public QWidget {
   void SetCodeFontScale(double scale);
   bool IsCaretAnimatingForTest() const;
   int LastReusedMessageCountForTest() const;
+  int LastSelectableRunsRebuiltMessagesForTest() const;
 
  protected:
   void paintEvent(QPaintEvent* event) override;
@@ -811,6 +812,13 @@ class TranscriptWidget : public QWidget {
   // which made dragging lag behind the pointer. Runs only change when layout or
   // the transient "Copied" labels do, so cache them.
   mutable std::vector<TextRun> selectable_runs_cache_;
+  // Streaming reuses the laid-out prefix, so its selectable runs can be kept
+  // too. Rebuilding every run on each token made long transcripts burn a core
+  // while the answer streamed. `message_offsets` records the run count after
+  // each message already present in the cache.
+  mutable std::vector<std::size_t> selectable_runs_message_offsets_;
+  mutable std::size_t selectable_runs_message_count_ = 0;
+  mutable int last_selectable_runs_rebuilt_messages_ = 0;
   mutable bool selectable_runs_valid_ = false;
   TextPosition selection_anchor_;
   TextPosition selection_cursor_;
@@ -956,6 +964,10 @@ int TranscriptWidget::LastReusedMessageCountForTest() const {
   return last_reused_messages_;
 }
 
+int TranscriptWidget::LastSelectableRunsRebuiltMessagesForTest() const {
+  return last_selectable_runs_rebuilt_messages_;
+}
+
 QRectF TranscriptWidget::MessageBodyRectForTest(int message_index) const {
   if (message_index < 0 ||
       message_index >= static_cast<int>(messages_.size())) {
@@ -1043,7 +1055,12 @@ TranscriptWidget::SelectableRuns() const {
     return selectable_runs_cache_;
   }
   std::vector<TextRun>& runs = selectable_runs_cache_;
-  runs.clear();
+  last_selectable_runs_rebuilt_messages_ =
+      static_cast<int>(messages_.size() - selectable_runs_message_count_);
+  if (selectable_runs_message_count_ == 0) {
+    runs.clear();
+    selectable_runs_message_offsets_.clear();
+  }
   const auto add_plain = [&runs](const QRectF& rect, const QString& text,
                                  const QFont& font, Qt::Alignment alignment,
                                  bool elide = false) {
@@ -1071,7 +1088,9 @@ TranscriptWidget::SelectableRuns() const {
     runs.push_back(std::move(run));
   };
 
-  for (const LaidMessage& message : messages_) {
+  for (std::size_t message_index = selectable_runs_message_count_;
+       message_index < messages_.size(); ++message_index) {
+    const LaidMessage& message = messages_[message_index];
     if (message.source.role == MessageRole::kSystem || message.is_user) {
       if (message.bubble_document) {
         const QPointF origin =
@@ -1226,12 +1245,17 @@ TranscriptWidget::SelectableRuns() const {
     add_plain(message.reaction_footer, message.reaction_text,
               theme_.UiFont(10, QFont::Normal),
               Qt::AlignRight | Qt::AlignVCenter);
+    selectable_runs_message_offsets_.push_back(runs.size());
   }
+  selectable_runs_message_count_ = messages_.size();
   selectable_runs_valid_ = true;
   return selectable_runs_cache_;
 }
 
 void TranscriptWidget::InvalidateSelectableRuns() const {
+  selectable_runs_cache_.clear();
+  selectable_runs_message_offsets_.clear();
+  selectable_runs_message_count_ = 0;
   selectable_runs_valid_ = false;
 }
 
@@ -2251,8 +2275,8 @@ void TranscriptWidget::Rebuild(int reuse_messages, bool preserve_selection) {
   if (!preserve_selection) {
     ClearSelection();
   }
-  InvalidateSelectableRuns();
   if (!snapshot_) {
+    InvalidateSelectableRuns();
     messages_.clear();
     laid_out_width_ = 0;
     last_reused_messages_ = 0;
@@ -2265,6 +2289,24 @@ void TranscriptWidget::Rebuild(int reuse_messages, bool preserve_selection) {
   const int limit = static_cast<int>(std::min(
       messages_.size(), snapshot_->messages.size()));
   const int reuse = std::clamp(reuse_messages, 0, limit);
+  // Keep the selectable runs for messages that were laid out unchanged. This
+  // is the streaming fast path: the transcript can be large while only the
+  // tail grows, and rebuilding every run was dominating the paint thread.
+  const std::size_t runs_reuse =
+      preserve_selection
+          ? std::min({static_cast<std::size_t>(reuse),
+                      selectable_runs_message_count_,
+                      selectable_runs_message_offsets_.size()})
+          : 0;
+  if (runs_reuse > 0) {
+    selectable_runs_cache_.resize(
+        selectable_runs_message_offsets_[runs_reuse - 1]);
+    selectable_runs_message_offsets_.resize(runs_reuse);
+    selectable_runs_message_count_ = runs_reuse;
+    selectable_runs_valid_ = false;
+  } else {
+    InvalidateSelectableRuns();
+  }
   if (reuse == 0) {
     messages_.clear();
   } else {
@@ -3673,6 +3715,12 @@ bool ChatView::IsCaretAnimatingForTest() const {
 int ChatView::LastReusedMessageCountForTest() const {
   return transcript_ == nullptr ? 0
                                 : transcript_->LastReusedMessageCountForTest();
+}
+
+int ChatView::LastSelectableRunsRebuiltMessagesForTest() const {
+  return transcript_ == nullptr
+             ? 0
+             : transcript_->LastSelectableRunsRebuiltMessagesForTest();
 }
 
 void ChatView::SetSnapshot(std::shared_ptr<const ProfileSnapshot> snapshot) {

@@ -1906,6 +1906,9 @@ void ChatViewTest::streamingUpdateReusesLayoutAndKeepsSelection() {
   // tail changes on each publish.
   QCOMPARE(view.LastReusedMessageCountForTest(), 2);
   QCOMPARE(view.SelectedTextForTest(), selected);
+  // Their selectable runs are kept as well: rebuilding every run on each
+  // token was the reason a long transcript used a full core while streaming.
+  QCOMPARE(view.LastSelectableRunsRebuiltMessagesForTest(), 1);
 }
 
 void ChatViewTest::promptSubmitTruncationIsExplicit() {

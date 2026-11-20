@@ -42,6 +42,23 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-21 (streaming reuses selectable runs)
+
+- User reported the app felt sluggish again. A `sample` of the running app showed
+  the main thread saturated in `TranscriptWidget::SelectableRuns()` and text
+  layout; the process averaged ~114% CPU over its lifetime.
+- Streaming already reused the laid-out message prefix, but every snapshot
+  invalidated *all* selectable text runs. The next paint (selection, hover, or
+  redraw) then re-built and re-elided every message, so the cost grew with the
+  whole transcript on every token.
+- `TranscriptWidget` now keeps a per-message run offset and preserves the runs
+  belonging to the reused prefix. A streaming publish only rebuilds runs for the
+  changed tail. Copy-label changes, tool expansion, reasoning toggles and width
+  changes still invalidate the whole cache.
+- Test: `ChatViewTest::streamingUpdateReusesLayoutAndKeepsSelection` now also
+  asserts that only one message's runs are rebuilt on a streaming update. Full
+  native suite: 10/10 passed (38.91 s).
+
 ## Status update — 2026-11-21 (background completion waits for its turn)
 - User reported a “turn finished” notification after switching away from a chat
   that was still producing. Two profile-level transitions were lying:

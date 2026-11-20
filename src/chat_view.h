@@ -64,6 +64,9 @@ class ChatView : public QScrollArea {
   // publish. Streaming updates should reuse the whole transcript except the
   // changed tail.
   int LastReusedMessageCountForTest() const;
+  // Number of messages whose selectable runs had to be rebuilt by the last
+  // cache fill. Streaming should only rebuild the changed tail.
+  int LastSelectableRunsRebuiltMessagesForTest() const;
   void ScrollToTop();
   void ScrollToBottom();
   // PageUp / PageDown and any other fractional scroll action.
