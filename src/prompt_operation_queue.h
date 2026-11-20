@@ -9,7 +9,7 @@
 #include <deque>
 #include <functional>
 #include <iterator>
-#include <set>
+#include <map>
 #include <utility>
 
 namespace hermes::ui {
@@ -29,8 +29,18 @@ struct PromptOperation {
   bool queued = false;
   int execution_generation = -1;
   QStringList attachments;
-  // Attachment RPC ids still outstanding before the prompt frame may be sent.
-  std::set<int> attachment_request_ids;
+  // Attachment RPCs outstanding before the prompt frame may be sent. The
+  // attachment index keeps returned refs in composer order even when the
+  // gateway answers them out of order.
+  struct AttachmentRequest {
+    int index = -1;
+    QString method;
+    QString path;
+  };
+  std::map<int, AttachmentRequest> attachment_requests;
+  std::map<int, QString> attachment_refs;
+  QStringList attachment_errors;
+  bool attachment_refs_applied = false;
   // The prompt.submit or session.steer RPC currently awaiting a response.
   int request_id = -1;
   // A steer appends its user row at submit time so later prompts cannot jump

@@ -712,21 +712,30 @@ void ProfileWorker::SendActivePromptAttachments() {
         QStringLiteral("Gateway socket is not connected"), false);
     return;
   }
-  for (const QString& path : operation->attachments) {
+  operation->attachment_requests.clear();
+  operation->attachment_refs.clear();
+  operation->attachment_errors.clear();
+  for (int index = 0; index < operation->attachments.size(); ++index) {
+    const QString& path = operation->attachments[index];
     if (path.trimmed().isEmpty()) {
       continue;
     }
-    const int id =
-        socket_->RequestRpc(AttachmentAttachMethod(path),
-                            BuildAttachmentAttachParams(path,
-                                                        operation->session_id));
+    const QString method = AttachmentAttachMethod(path);
+    const int id = socket_->RequestRpc(
+        method,
+        BuildAttachmentAttachParams(path, operation->session_id));
     if (id >= 0) {
-      operation->attachment_request_ids.insert(id);
+      operation->attachment_requests[id] =
+          PromptOperation::AttachmentRequest{index, method, path};
+    } else {
+      operation->attachment_errors.append(
+          QStringLiteral("%1: could not queue the attachment")
+              .arg(QFileInfo(path).fileName()));
     }
   }
   // No attachment verb could be sent: keep the text and submit it without
   // inline tickets rather than dropping the prompt.
-  if (operation->attachment_request_ids.empty()) {
+  if (operation->attachment_requests.empty()) {
     SubmitActivePromptOperation();
   }
 }
@@ -735,6 +744,21 @@ void ProfileWorker::SubmitActivePromptOperation() {
   PromptOperation* operation = prompt_operations_.Active();
   if (operation == nullptr) {
     return;
+  }
+  if (!operation->attachment_errors.isEmpty()) {
+    Note(QStringLiteral("Attachment warning: %1")
+             .arg(operation->attachment_errors.join(QStringLiteral("; "))));
+  }
+  if (!operation->attachment_refs_applied) {
+    QStringList refs;
+    for (int index = 0; index < operation->attachments.size(); ++index) {
+      const auto it = operation->attachment_refs.find(index);
+      if (it != operation->attachment_refs.end()) {
+        refs.append(it->second);
+      }
+    }
+    operation->text = ComposePromptWithAttachmentRefs(operation->text, refs);
+    operation->attachment_refs_applied = true;
   }
   if (socket_ == nullptr || !socket_->IsConnected()) {
     FailActivePromptOperation(
@@ -890,15 +914,49 @@ bool ProfileWorker::HandleActivePromptResponse(int id,
     return true;
   }
 
-  if (operation->attachment_request_ids.erase(id) > 0) {
-    if (!error.isEmpty()) {
-      // The prompt text already carries the staged paths, and the gateway can
-      // still read them, so a failed inline attach is a downgrade rather than
-      // a failed send. Do not surface it as an attachment error.
-      qWarning("profile %s: inline attachment downgraded: %s",
-               qUtf8Printable(name_), qUtf8Printable(error));
+  const auto attachment_request = operation->attachment_requests.find(id);
+  if (attachment_request != operation->attachment_requests.end()) {
+    const PromptOperation::AttachmentRequest request =
+        attachment_request->second;
+    operation->attachment_requests.erase(attachment_request);
+    if (!AttachmentResultSucceeded(result, error)) {
+      const QString failure =
+          error.trimmed().isEmpty()
+              ? result.value(QStringLiteral("message"))
+                    .toString(QStringLiteral("attachment was refused"))
+              : error.trimmed();
+      const QString retry_method = AttachmentRetryMethod(request.method);
+      if (!retry_method.isEmpty() && socket_ != nullptr &&
+          socket_->IsConnected()) {
+        const int retry = socket_->RequestRpc(
+            retry_method,
+            BuildAttachmentAttachParams(request.path, operation->session_id));
+        if (retry >= 0) {
+          operation->attachment_requests[retry] =
+              PromptOperation::AttachmentRequest{request.index, retry_method,
+                                                 request.path};
+          qInfo("profile %s: %s fell back to %s: %s", qUtf8Printable(name_),
+                qUtf8Printable(request.method), qUtf8Printable(retry_method),
+                qUtf8Printable(failure));
+          return true;
+        }
+      }
+      const QString label = QFileInfo(request.path).fileName();
+      operation->attachment_errors.append(
+          QStringLiteral("%1: %2").arg(label, failure));
+      qWarning("profile %s: attachment %s failed: %s", qUtf8Printable(name_),
+               qUtf8Printable(request.method), qUtf8Printable(failure));
+    } else if (request.method == QStringLiteral("file.attach")) {
+      const QString ref = AttachmentRefFromResult(result);
+      if (ref.isEmpty()) {
+        operation->attachment_errors.append(
+            QStringLiteral("%1: gateway returned no file reference")
+                .arg(QFileInfo(request.path).fileName()));
+      } else {
+        operation->attachment_refs[request.index] = ref;
+      }
     }
-    if (operation->attachment_request_ids.empty()) {
+    if (operation->attachment_requests.empty()) {
       SubmitActivePromptOperation();
     }
     return true;
@@ -2138,7 +2196,7 @@ void ProfileWorker::Note(const QString& text) {
 void ProfileWorker::AppendUserPromptLocked(const QString& text,
                                            const QString& local_bubble_id,
                                            bool begin_turn) {
-  const QString trimmed = text.trimmed();
+  const QString trimmed = VisibleUserPromptText(text).trimmed();
   if (trimmed.isEmpty()) {
     return;
   }
@@ -2710,13 +2768,14 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
         ParseChatReactions(DisplayReactions(row));
 
     if (role == QStringLiteral("user")) {
+      const QString visible = VisibleUserPromptText(content);
       ChatMessage message;
       message.row_id = row_id;
       message.role = MessageRole::kUser;
       message.author = QStringLiteral("You");
       message.timestamp = timestamp;
-      message.raw_text = content;
-      message.blocks = ParseMarkdown(content);
+      message.raw_text = visible;
+      message.blocks = ParseMarkdown(visible);
       message.reactions = reactions;
       messages.push_back(std::move(message));
       continue;

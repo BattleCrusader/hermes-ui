@@ -23,6 +23,13 @@ QString ReasoningTextFromRow(const QJsonObject& row);
 // and encrypted replay fields are never exposed.
 QString ReasoningTextFromDetails(const QJsonValue& details);
 
+// Stored user rows carry attachment transport after a send: leading
+// `@file:`/`@image:` lines that the client prepended, and the gateway's
+// `--- Attached Context ---` expansion. The bubble shows what the user typed,
+// not the wire payload. Only the leading ref block and the expansion tail are
+// removed; a ref typed mid-prose stays where the user put it.
+QString VisibleUserPromptText(const QString& text);
+
 // True when the hydrated transcript already carries the live assistant row.
 // Matching uses the durable row id, then the answer text, then the trailing
 // assistant timestamp. Used to avoid hydrating over a live reasoning-only turn

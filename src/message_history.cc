@@ -75,6 +75,45 @@ bool SameAssistant(const ChatMessage& hydrated, const ChatMessage& live) {
   return std::abs(hydrated.timestamp.secsTo(live.timestamp)) <= 15 * 60;
 }
 
+int LineStartAt(const QString& text, const QString& marker) {
+  int start = 0;
+  while (start <= text.size()) {
+    int end = text.indexOf(QLatin1Char('\n'), start);
+    if (end < 0) {
+      end = text.size();
+    }
+    if (text.mid(start, end - start).trimmed() == marker) {
+      return start;
+    }
+    if (end == text.size()) {
+      break;
+    }
+    start = end + 1;
+  }
+  return -1;
+}
+
+bool IsLeadingAttachmentRef(const QString& line) {
+  if (!line.startsWith(QLatin1Char('@'))) {
+    return false;
+  }
+  const int colon = line.indexOf(QLatin1Char(':'));
+  if (colon <= 1) {
+    return false;
+  }
+  const QString kind = line.mid(1, colon - 1).toLower();
+  if (kind != QStringLiteral("file") && kind != QStringLiteral("folder") &&
+      kind != QStringLiteral("image")) {
+    return false;
+  }
+  for (const QChar ch : kind) {
+    if (!ch.isLetterOrNumber() && ch != QLatin1Char('-')) {
+      return false;
+    }
+  }
+  return true;
+}
+
 QString UserText(const ChatMessage& message) {
   if (!message.raw_text.trimmed().isEmpty()) {
     return message.raw_text.trimmed();
@@ -90,6 +129,32 @@ QString UserText(const ChatMessage& message) {
 }
 
 }  // namespace
+
+QString VisibleUserPromptText(const QString& text) {
+  int end = text.size();
+  bool cut = false;
+  for (const char* marker : {"--- Attached Context ---",
+                             "--- Context Warnings ---"}) {
+    const int index = LineStartAt(text, QLatin1String(marker));
+    if (index >= 0 && index < end) {
+      end = index;
+      cut = true;
+    }
+  }
+  QString visible = text.left(end);
+  QStringList lines = visible.split(QLatin1Char('\n'));
+  bool stripped_refs = false;
+  while (!lines.isEmpty() && IsLeadingAttachmentRef(lines.front())) {
+    lines.removeFirst();
+    stripped_refs = true;
+  }
+  if (stripped_refs) {
+    visible = lines.join(QLatin1Char('\n')).trimmed();
+  } else if (cut) {
+    visible = visible.trimmed();
+  }
+  return visible;
+}
 
 QString ReasoningTextFromDetails(const QJsonValue& details) {
   QJsonValue blocks = details;

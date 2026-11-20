@@ -31,6 +31,28 @@ QString AttachmentAttachMethod(const QString& path);
 QJsonObject BuildAttachmentAttachParams(const QString& path,
                                         const QString& session_id);
 
+// `file.attach` stages a copy in the session workspace and returns the
+// `@file:` ref the gateway expands on the next submit. Images and PDFs queue
+// their own tickets, so only file.attach contributes a prompt ref.
+QString AttachmentRefFromResult(const QJsonObject& result);
+
+// A PDF renderer can be unavailable on the gateway (pdftoppm is an optional
+// system dependency). Retry that one media verb through file.attach so the
+// document still reaches the model as an attached text ref. Every other
+// attachment failure is reported, never silently retried as a different kind.
+QString AttachmentRetryMethod(const QString& method);
+
+// `attached:false` is a failure even when the gateway did not also raise an
+// RPC error. Images/PDFs return attached=true once queued.
+bool AttachmentResultSucceeded(const QJsonObject& result,
+                               const QString& error);
+
+// Composer order wins over gateway response order. The refs are transport
+// metadata: each line is prepended ahead of the authored prompt, as the
+// desktop does, so every attached file expands in the session workspace.
+QString ComposePromptWithAttachmentRefs(const QString& text,
+                                        const QStringList& refs);
+
 struct PromptTruncation {
   bool confirm_empty_truncate = false;
   bool confirm_deep_truncate = false;

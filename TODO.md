@@ -42,6 +42,33 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-20 (file attachments reach the model)
+
+**Attaching a non-image file now carries the gateway's `@file:` reference into
+`prompt.submit`; the model sees the file instead of a staged path the UI only
+printed.**
+
+- [x] `file.attach` is a staging RPC. Its `ref_text` is now captured by the
+      active `PromptOperation`, kept by attachment index, and prepended as
+      `refs.join("\n") + "\n\n" + authored text` before submit, matching the
+      desktop's `buildContextText`. Gateway response order cannot reorder refs.
+- [x] When `pdf.attach` fails because the gateway has no `pdftoppm`, the same
+      attachment retries through `file.attach`. Other failures are surfaced as
+      an `Attachment warning:` instead of silently pretending the file was
+      delivered. Missing/empty `ref_text` is a failure.
+- [x] Hydrated and queued user rows strip transport-only leading
+      `@file:`/`@folder:`/`@image:` lines and the gateway's
+      `--- Attached Context ---` / `--- Context Warnings ---` tail. A ref typed
+      mid-prose and the user's authored text remain intact; local and hydrated
+      pending rows still match.
+- [x] Verified the live gateway contract with a disposable trader-profile
+      session: `file.attach` returned
+      `@file:.hermes/profiles/trader/attachments/...`; the probe session,
+      attachment, and scripts were deleted afterward.
+- [x] Added helper coverage for ref composition order, empty refs, missing
+      `attached`, PDF fallback, and history cleaning. Full native suite
+      **10/10 passed, 0 failed**.
+
 ## Status update — 2026-11-20 (double-click drag selects words)
 
 **Double-clicking a word in the transcript and then dragging now extends the

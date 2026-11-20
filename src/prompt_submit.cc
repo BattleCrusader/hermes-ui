@@ -79,6 +79,41 @@ QJsonObject BuildAttachmentAttachParams(const QString& path,
   return params;
 }
 
+QString AttachmentRefFromResult(const QJsonObject& result) {
+  return result.value(QStringLiteral("ref_text")).toString().trimmed();
+}
+
+QString AttachmentRetryMethod(const QString& method) {
+  return method == QStringLiteral("pdf.attach")
+             ? QStringLiteral("file.attach")
+             : QString();
+}
+
+bool AttachmentResultSucceeded(const QJsonObject& result,
+                               const QString& error) {
+  return error.isEmpty() &&
+         result.value(QStringLiteral("attached")).toBool(true);
+}
+
+QString ComposePromptWithAttachmentRefs(const QString& text,
+                                        const QStringList& refs) {
+  QStringList clean;
+  for (const QString& ref : refs) {
+    const QString trimmed = ref.trimmed();
+    if (!trimmed.isEmpty() && !clean.contains(trimmed)) {
+      clean.append(trimmed);
+    }
+  }
+  if (clean.isEmpty()) {
+    return text;
+  }
+  const QString body = text.trimmed();
+  if (body.isEmpty()) {
+    return clean.join(QLatin1Char('\n'));
+  }
+  return clean.join(QLatin1Char('\n')) + QStringLiteral("\n\n") + body;
+}
+
 QString ComposePinnedPrompt(const QStringList& pinned, const QString& text) {
   QStringList bodies;
   for (const QString& body : pinned) {

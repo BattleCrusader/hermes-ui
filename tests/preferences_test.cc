@@ -139,6 +139,7 @@ class PreferencesTest : public QObject {
   void subagentEventsBuildALiveDelegationTree();
   void audioDataUrlDecodesSpeechAndRejectsJunk();
   void attachmentAttachRpcMatchesMediaType();
+  void visibleUserPromptStripsAttachmentTransport();
   void rightRailShowsContextAgentsAndArtifacts();
   void rightRailSteersAndStopsLiveAgents();
   void rightRailPreviewsArtifactText();
@@ -175,7 +176,11 @@ class PreferencesTest : public QObject {
 
 void PreferencesTest::attachmentAttachRpcMatchesMediaType() {
   using hermes::ui::AttachmentAttachMethod;
+  using hermes::ui::AttachmentRefFromResult;
+  using hermes::ui::AttachmentResultSucceeded;
+  using hermes::ui::AttachmentRetryMethod;
   using hermes::ui::BuildAttachmentAttachParams;
+  using hermes::ui::ComposePromptWithAttachmentRefs;
   QCOMPARE(AttachmentAttachMethod(QStringLiteral("/tmp/shot.PNG")),
            QStringLiteral("image.attach"));
   QCOMPARE(AttachmentAttachMethod(QStringLiteral("/tmp/doc.pdf")),
@@ -193,6 +198,53 @@ void PreferencesTest::attachmentAttachRpcMatchesMediaType() {
   QVERIFY(!BuildAttachmentAttachParams(QStringLiteral("/tmp/shot.png"),
                                        QStringLiteral("session-a"))
                .contains(QStringLiteral("name")));
+
+  const QJsonObject file_result{
+      {QStringLiteral("attached"), true},
+      {QStringLiteral("ref_text"), QStringLiteral(" @file:data/report.txt ")}};
+  QCOMPARE(AttachmentRefFromResult(file_result),
+           QStringLiteral("@file:data/report.txt"));
+  QVERIFY(AttachmentResultSucceeded(file_result, QString()));
+  QVERIFY(!AttachmentResultSucceeded(
+      QJsonObject{{QStringLiteral("attached"), false}}, QString()));
+  QVERIFY(!AttachmentResultSucceeded(file_result, QStringLiteral("boom")));
+  QCOMPARE(AttachmentRetryMethod(QStringLiteral("pdf.attach")),
+           QStringLiteral("file.attach"));
+  QVERIFY(AttachmentRetryMethod(QStringLiteral("image.attach")).isEmpty());
+  QCOMPARE(ComposePromptWithAttachmentRefs(
+               QStringLiteral("summarize"),
+               QStringList{QStringLiteral("@file:a"), QString(),
+                           QStringLiteral("@file:b"), QStringLiteral("@file:a")}),
+           QStringLiteral("@file:a\n@file:b\n\nsummarize"));
+  QCOMPARE(ComposePromptWithAttachmentRefs(
+               QString(), QStringList{QStringLiteral("@file:a")}),
+           QStringLiteral("@file:a"));
+  QCOMPARE(ComposePromptWithAttachmentRefs(QStringLiteral("hi"), QStringList{}),
+           QStringLiteral("hi"));
+}
+
+void PreferencesTest::visibleUserPromptStripsAttachmentTransport() {
+  QCOMPARE(hermes::ui::VisibleUserPromptText(QStringLiteral("plain prompt")),
+           QStringLiteral("plain prompt"));
+  QCOMPARE(hermes::ui::VisibleUserPromptText(
+               QStringLiteral("@file:`/tmp/a b.txt`\n"
+                              "@image:/tmp/shot.png\n\n"
+                              "summarize this\n\n"
+                              "--- Attached Context ---\n\n"
+                              "file @file:`/tmp/a b.txt`")),
+           QStringLiteral("summarize this"));
+  QCOMPARE(hermes::ui::VisibleUserPromptText(
+               QStringLiteral("keep this\n"
+                              "--- Context Warnings ---\n"
+                              "warning tail")),
+           QStringLiteral("keep this"));
+  // A ref in prose is user-authored and stays; so does indented text.
+  QCOMPARE(hermes::ui::VisibleUserPromptText(
+               QStringLiteral("look at @file:foo.ts")),
+           QStringLiteral("look at @file:foo.ts"));
+  QCOMPARE(hermes::ui::VisibleUserPromptText(
+               QStringLiteral("  @file:foo.ts")),
+           QStringLiteral("  @file:foo.ts"));
 }
 
 void PreferencesTest::audioDataUrlDecodesSpeechAndRejectsJunk() {
