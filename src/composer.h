@@ -126,10 +126,6 @@ class Composer : public QWidget {
   // The "N queued" status line is clickable: the shell opens the editable
   // queue/steer list.
   void QueuedReviewRequested();
-  // Plain Enter while a turn is running. The shell explains that steering,
-  // queueing and background execution are explicit choices; the composer keeps
-  // the draft (and attachments) until the user invokes /steer, /queue or /bg.
-  void BusySendRequested(const QString& text);
 
  protected:
   void paintEvent(QPaintEvent* event) override;

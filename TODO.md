@@ -42,6 +42,34 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-20 (busy Send is immediate; settled queue rows leave)
+
+**Plain Send now always submits immediately, even while another prompt task is
+active.** `/steer`, `/queue` and `/bg` are explicit alternatives rather than a
+gate the user must clear before ordinary typing. The gateway's
+`display.busy_input_mode` decides whether that plain submission interrupts,
+redirects or queues; the client no longer imposes a local draft-holding block.
+The send button remains an explicit Stop while a turn runs.
+
+- [x] Removed `Composer::BusySendRequested` and the shell's busy guards. Enter,
+      Ctrl+Enter and the send path send a normal `prompt.submit`; slash
+      commands still route through `/steer`, `/queue` and `/bg`.
+- [x] `message.complete.admission_id` now prunes the matching pending
+      admission locally, before the settlement snapshot can arrive. Terminal
+      rows and a completed turn's steering rows are removed too, and
+      `PendingPromptTracker` forgets them so a delayed snapshot cannot
+      resurrect the row or announce its bubble twice.
+- [x] The queue badge and prompt-history dialog ignore `started` and
+      `terminal` admissions. A delivered steer is shown only while its turn is
+      running; local steered/legacy queued rows clear when the selected turn
+      goes idle.
+- [x] The open prompt-history dialog also watches the local queued/steered
+      signature, so a row disappears as soon as its turn completes instead of
+      waiting for an unrelated server refresh.
+- [x] Added `pendingAdmissionsClearWhenTheirTurnCompletes`, updated the busy
+      composer test and dialog terminal-row coverage. Full native suite
+      **10/10 passed, 0 failed** (≈40 s).
+
 ## Status update — 2026-11-20 (file attachments reach the model)
 
 **Attaching a non-image file now carries the gateway's `@file:` reference into
@@ -89,21 +117,19 @@ selection by whole words instead of dropping back to a character caret.**
 - [x] Added `doubleClickDragSelectsWholeWords` covering forward and reverse
       word drags. Full native suite **10/10 passed, 0 failed**.
 
-## Status update — 2026-11-19 (plain Send never mutates a live turn)
+## Status update — 2026-11-19 (superseded: plain Send now submits immediately)
 
-**While a turn is running, Enter and Ctrl+Enter keep the draft instead of
-implicitly steering, queueing or interrupting it.** Busy semantics are now
-explicit: only `/steer`, `/queue` and `/bg` choose those actions. `/bg` starts a
-gateway side agent; its receipt and completion are tracked separately and
-remain reviewable after the parent turn ends.
+**Superseded on 2026-11-20.** The draft-holding busy gate below was removed:
+plain Send now submits immediately and the gateway owns busy-input policy.
+`/steer`, `/queue` and `/bg` remain the explicit alternatives.
 
-- [x] `Composer` replaced the old `SteerRequested` / `QueueRequested` busy
-      signals with `BusySendRequested`. Plain/Ctrl+Enter keeps the draft and
-      attachments and asks the user to choose `/steer`, `/queue` or `/bg`;
-      only an attachment-free `/`-prefixed prompt still calls `Submit()`.
-- [x] `MainWindow::SubmitText` repeats the busy gate before and after slash
-      dispatch, and restores the draft if a caller already cleared it. Plain
-      text can never become a live correction by bypassing the composer.
+- [x] The earlier implementation replaced `SteerRequested` / `QueueRequested`
+      with `BusySendRequested` and kept plain Enter as a draft. That gate has
+      since been removed; plain Send now submits immediately and those signals
+      no longer exist.
+- [x] `MainWindow::SubmitText` likewise no longer holds or restores a draft
+      for a running turn. Only `/steer`, `/queue` and `/bg` select explicit
+      busy actions, while a plain submission follows gateway policy.
 - [x] `/steer` now waits for the `session.steer` receipt before recording
       history; a rejected steer restores the prompt. `/bg` failures restore the
       prompt too. `/queue` keeps `queued=true` semantics.

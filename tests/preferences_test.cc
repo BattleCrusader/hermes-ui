@@ -61,6 +61,7 @@
 #include "src/model.h"
 #include "src/model_visibility.h"
 #include "src/native_prefs.h"
+#include "src/pending_prompt_tracker.h"
 #include "src/notification_prefs.h"
 #include "src/notification_text.h"
 #include "src/preferences_dialog.h"
@@ -162,6 +163,7 @@ class PreferencesTest : public QObject {
   void promptHistorySendsLocalAndServerQueuesAsNewPrompts();
   void promptHistoryShowsAndRerunsBackgroundTasks();
   void promptHistoryEditsAndCancelsServerQueue();
+  void pendingAdmissionsClearWhenTheirTurnCompletes();
   void projectDialogEditsCreateAndDisplayFields();
   void projectAppearanceParsesColorsIconsAndFiltersDismissedAutos();
   void uiCacheRoundTripsSessionsAndProjects();
@@ -663,46 +665,40 @@ void PreferencesTest::composerSteersQueuesAndPastesImages() {
   hermes::ui::Composer composer(theme);
   auto* editor = composer.findChild<QTextEdit*>();
   QVERIFY(editor != nullptr);
-  QStringList busy;
   QStringList submitted;
-  QObject::connect(&composer, &hermes::ui::Composer::BusySendRequested,
-                   [&](const QString& text) { busy.append(text); });
   QObject::connect(&composer, &hermes::ui::Composer::Submitted,
                    [&](const QString& text) { submitted.append(text); });
   composer.SetRunning(true);
   composer.SetQueuedPrompts(2);
   composer.SetText(QStringLiteral("keep going"));
   editor->setFocus();
-  // Plain Enter while busy never mutates the live turn and never clears the
-  // draft; the user has to choose /steer, /queue, or /bg explicitly.
+  // Plain Enter while another turn runs still submits immediately. The
+  // gateway owns busy-input policy; /steer, /queue, and /bg are explicit
+  // alternatives, not a prerequisite for ordinary text.
   QTest::keyClick(editor, Qt::Key_Return);
-  QCOMPARE(busy, QStringList{QStringLiteral("keep going")});
-  QVERIFY(submitted.isEmpty());
-  QCOMPARE(composer.Text(), QStringLiteral("keep going"));
+  QCOMPARE(submitted, QStringList{QStringLiteral("keep going")});
+  composer.Clear();
+  composer.SetText(QStringLiteral("keep going"));
   QTest::keyClick(editor, Qt::Key_Return, Qt::ControlModifier);
-  QCOMPARE(busy.size(), 2);
-  QCOMPARE(busy.at(1), QStringLiteral("keep going"));
-  QVERIFY(submitted.isEmpty());
+  QCOMPARE(submitted.size(), 2);
+  QCOMPARE(submitted.at(1), QStringLiteral("keep going"));
 
-  // Explicit slash commands are the only busy path through Submit().
+  // Explicit slash commands still route through the shell.
   composer.SetText(QStringLiteral("/queue next turn"));
   QTest::keyClick(editor, Qt::Key_Return);
-  QCOMPARE(submitted, QStringList{QStringLiteral("/queue next turn")});
-  QCOMPARE(busy.size(), 2);
+  QCOMPARE(submitted.size(), 3);
+  QCOMPARE(submitted.at(2), QStringLiteral("/queue next turn"));
 
-  // An attachment-bearing slash-looking prompt is still a normal draft: block
-  // it before Submit() can clear attachments or thumbnails.
+  // An attachment-bearing prompt is submitted too; the shell forwards the
+  // attachment paths to the gateway instead of holding the draft.
   composer.SetText(QStringLiteral("/queue with a file"));
   composer.AddAttachment(QStringLiteral("note.txt"),
                          QStringLiteral("/tmp/hermes-note.txt"));
   QTest::keyClick(editor, Qt::Key_Return);
-  QCOMPARE(busy.size(), 3);
-  QVERIFY(busy.at(2).startsWith(QStringLiteral("/queue with a file")));
-  QVERIFY(busy.at(2).contains(QStringLiteral("note.txt")));
-  QCOMPARE(composer.Text(), QStringLiteral("/queue with a file"));
-  QCOMPARE(composer.AttachmentPaths(),
-           QStringList{QStringLiteral("/tmp/hermes-note.txt")});
-  QCOMPARE(submitted.size(), 1);
+  QCOMPARE(submitted.size(), 4);
+  QVERIFY(submitted.at(3).startsWith(QStringLiteral("/queue with a file")));
+  QVERIFY(submitted.at(3).contains(QStringLiteral("note.txt")));
+  QCOMPARE(composer.AttachmentPaths(), QStringList());
   composer.Clear();
 
   QSignalSpy dropped(&composer, &hermes::ui::Composer::FilesDropped);
@@ -3109,6 +3105,36 @@ void PreferencesTest::promptHistoryShowsAndRerunsBackgroundTasks() {
   QCOMPARE(editor->toPlainText(), QStringLiteral("try the flaky test"));
 }
 
+void PreferencesTest::pendingAdmissionsClearWhenTheirTurnCompletes() {
+  hermes::ui::PendingAdmission queued;
+  queued.admission_id = QStringLiteral("queued-a");
+  queued.status = QStringLiteral("queued");
+  hermes::ui::PendingAdmission started;
+  started.admission_id = QStringLiteral("started-a");
+  started.status = QStringLiteral("started");
+  hermes::ui::PendingAdmission steering;
+  steering.admission_id = QStringLiteral("steer-a");
+  steering.status = QStringLiteral("started");
+  steering.steering = true;
+  hermes::ui::PendingAdmission terminal;
+  terminal.admission_id = QStringLiteral("done-a");
+  terminal.status = QStringLiteral("terminal");
+  std::vector<hermes::ui::PendingAdmission> rows{queued, started, steering,
+                                                 terminal};
+
+  // The completed turn's admission and already-terminal rows leave at once.
+  hermes::ui::PrunePendingAdmissionsForCompletion(
+      &rows, QStringLiteral("started-a"), false);
+  QCOMPARE(static_cast<int>(rows.size()), 2);
+  QCOMPARE(rows[0].admission_id, QStringLiteral("queued-a"));
+  QCOMPARE(rows[1].admission_id, QStringLiteral("steer-a"));
+
+  // A completed turn also finishes any steer handed to it.
+  hermes::ui::PrunePendingAdmissionsForCompletion(&rows, QString(), true);
+  QCOMPARE(static_cast<int>(rows.size()), 1);
+  QCOMPARE(rows[0].admission_id, QStringLiteral("queued-a"));
+}
+
 void PreferencesTest::promptHistoryEditsAndCancelsServerQueue() {
   hermes::ui::Theme theme = hermes::ui::Theme::Light();
   QStringList queued;
@@ -3127,7 +3153,13 @@ void PreferencesTest::promptHistoryEditsAndCancelsServerQueue() {
   unknown.text = QStringLiteral("lost across restart");
   unknown.status = QStringLiteral("unknown");
   unknown.execution_generation = 12;
-  dialog.SetServerPrompts({first, unknown});
+  hermes::ui::PromptHistoryDialog::ServerPrompt terminal = first;
+  terminal.admission_id = QStringLiteral("done");
+  terminal.status = QStringLiteral("terminal");
+  hermes::ui::PromptHistoryDialog::ServerPrompt started = first;
+  started.admission_id = QStringLiteral("running");
+  started.status = QStringLiteral("started");
+  dialog.SetServerPrompts({first, unknown, terminal, started});
   dialog.show();
   QTest::qWait(10);
 

@@ -428,6 +428,8 @@ void GatewayProtocolTest::
                      QStringLiteral("queued"))});
   tracker.Observe({}, 3000);
   tracker.Forget(QStringLiteral("d"));
+  QVERIFY(tracker.IsForgotten(QStringLiteral("d")));
+  QVERIFY(!tracker.IsForgotten(QStringLiteral("c")));
   QVERIFY(!tracker.TakeNextAwaiting(3100).has_value());
   QVERIFY(tracker
               .Observe({row(QStringLiteral("d"), QStringLiteral("replaced"),

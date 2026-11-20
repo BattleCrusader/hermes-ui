@@ -15,6 +15,31 @@
 
 namespace hermes::ui {
 
+// Drops rows that can no longer represent queued work after a turn completes.
+// The gateway normally publishes a fresh pending snapshot first; this local
+// prune closes the window where a completion frame arrives before that
+// snapshot, so a finished admission never lingers in the pending UI.
+inline void PrunePendingAdmissionsForCompletion(
+    std::vector<PendingAdmission>* rows,
+    const QString& completed_admission_id, bool clear_steering) {
+  if (rows == nullptr) {
+    return;
+  }
+  rows->erase(
+      std::remove_if(rows->begin(), rows->end(),
+                     [&](const PendingAdmission& admission) {
+                       if (!completed_admission_id.isEmpty() &&
+                           admission.admission_id == completed_admission_id) {
+                         return true;
+                       }
+                       if (admission.status == QStringLiteral("terminal")) {
+                         return true;
+                       }
+                       return clear_steering && admission.steering;
+                     }),
+      rows->end());
+}
+
 // Follows gateway-owned pending admissions and decides when a queued prompt
 // has actually entered a turn. A queued row becoming `started`/`steering` is
 // the authoritative "processed" signal; a row that simply disappears is kept
@@ -31,6 +56,7 @@ class PendingPromptTracker {
     }
     awaiting_.clear();
     announced_.clear();
+    forgotten_.clear();
   }
 
   // Returns rows that left `queued` for `started`/`steering` since the last
@@ -115,12 +141,19 @@ class PendingPromptTracker {
       return;
     }
     announced_.insert(admission_id);
+    forgotten_.insert(admission_id);
     awaiting_.erase(admission_id);
     current_.erase(admission_id);
   }
 
   bool IsAnnounced(const QString& admission_id) const {
     return announced_.contains(admission_id);
+  }
+
+  // A settled/cancelled admission must be dropped even if a delayed pending
+  // snapshot still carries it.
+  bool IsForgotten(const QString& admission_id) const {
+    return forgotten_.contains(admission_id);
   }
 
  private:
@@ -132,6 +165,7 @@ class PendingPromptTracker {
   std::map<QString, PendingAdmission> current_;
   std::map<QString, Awaiting> awaiting_;
   std::set<QString> announced_;
+  std::set<QString> forgotten_;
 };
 
 }  // namespace hermes::ui

@@ -67,6 +67,9 @@ class PromptHistoryDialog : public QDialog {
   // open: selection follows the admission id when it survives.
   void SetServerPrompts(std::vector<ServerPrompt> prompts);
   void SetBackgroundPrompts(std::vector<BackgroundPrompt> prompts);
+  // The caller's local queued/steered lists can change while the modal is open
+  // (a delivered steer's turn ends). Rebuild from the same pointers.
+  void RefreshLocalPrompts();
   void RemoveServerPrompt(const QString& admission_id);
   void SetStatus(const QString& text);
 

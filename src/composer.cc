@@ -1713,25 +1713,10 @@ bool Composer::eventFilter(QObject* watched, QEvent* event) {
       if ((key_event->key() == Qt::Key_Return ||
            key_event->key() == Qt::Key_Enter) &&
           (key_event->modifiers() & Qt::ShiftModifier) == 0) {
-        if (running_) {
-          const QString text = SubmissionText();
-          if (text.isEmpty()) {
-            return true;
-          }
-          // Slash commands remain the explicit escape hatch while busy:
-          // /steer, /queue and /bg own those choices. Plain text must not
-          // silently mutate the live turn, so it stays in the composer.
-          const bool explicit_command =
-              attachments_.empty() &&
-              text.trimmed().startsWith(QLatin1Char('/'));
-          if (explicit_command) {
-            Submit();
-          } else {
-            emit BusySendRequested(text);
-            update();
-          }
-          return true;
-        }
+        // Plain Enter always submits. While a turn is running the gateway
+        // applies its busy-input policy (interrupt/redirect/queue); the client
+        // must not invent a local block that makes the user choose /steer,
+        // /queue or /bg first. Those commands remain explicit alternatives.
         Submit();
         return true;
       }

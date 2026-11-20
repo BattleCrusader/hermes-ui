@@ -3836,7 +3836,8 @@ void ProfileWorker::OnSocketEvent(const QString& type,
             ? (error.isEmpty() ? QStringLiteral("The turn failed") : error)
             : QString();
     const QString body = failed && text.trimmed().isEmpty() ? failure : text;
-    CompleteAssistant(body, failure);
+    CompleteAssistant(body, failure,
+                      payload.value(QStringLiteral("admission_id")).toString());
     return;
   }
 
@@ -4423,6 +4424,13 @@ void ProfileWorker::ApplyPendingSnapshotLocked(const QJsonObject& source) {
   }
   std::vector<PendingAdmission> pending =
       ParsePendingAdmissions(source.value(QStringLiteral("pending")).toArray());
+  pending.erase(
+      std::remove_if(pending.begin(), pending.end(),
+                     [this](const PendingAdmission& admission) {
+                       return pending_prompts_.IsForgotten(
+                           admission.admission_id);
+                     }),
+      pending.end());
   if (!pending_prompts_baseline_ready_) {
     // Reconnect/resume snapshots describe history the UI already has. Seed the
     // baseline without emitting any user rows for admissions already started.
@@ -4560,11 +4568,31 @@ void ProfileWorker::AppendMoaReasoning(const QString& text, bool replace) {
 }
 
 void ProfileWorker::CompleteAssistant(const QString& text,
-                                      const QString& failure) {
+                                      const QString& failure,
+                                      const QString& admission_id) {
   const bool error = !failure.isEmpty();
   bool superseded = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
+    // Completion can beat the settlement's `session.info` snapshot. Drop the
+    // finished admission (and any steer handed to this turn) now, otherwise a
+    // queued/steering row remains visible until the next unrelated refresh.
+    // Forget each id too, so a delayed snapshot cannot resurrect the row or
+    // announce its user bubble a second time.
+    const auto prune_pending = [&](bool clear_steering) {
+      for (const PendingAdmission& admission : state_.pending_admissions) {
+        const bool completed =
+            !admission_id.isEmpty() &&
+            admission.admission_id == admission_id;
+        const bool terminal = admission.status == QStringLiteral("terminal");
+        if (completed || terminal || (clear_steering && admission.steering)) {
+          pending_prompts_.Forget(admission.admission_id);
+        }
+      }
+      PrunePendingAdmissionsForCompletion(&state_.pending_admissions,
+                                          admission_id, clear_steering);
+    };
+    prune_pending(false);
     const bool was_running = state_.running;
     qint64 elapsed_ms = 0;
     ChatMessage* target = nullptr;
@@ -4649,6 +4677,7 @@ void ProfileWorker::CompleteAssistant(const QString& text,
       RecordTurnCompletion(&state_, completed_session, completed_prompt, failure,
                            elapsed_ms);
     }
+    prune_pending(true);
     NoteActivityLocked();
     state_.requests.clear();
     admission_id_.clear();

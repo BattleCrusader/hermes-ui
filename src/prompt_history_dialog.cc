@@ -149,6 +149,13 @@ PromptHistoryDialog::PromptHistoryDialog(const Theme& theme,
 
 void PromptHistoryDialog::SetServerPrompts(std::vector<ServerPrompt> prompts) {
   const QString preserve = selected_admission_;
+  prompts.erase(
+      std::remove_if(prompts.begin(), prompts.end(),
+                     [](const ServerPrompt& prompt) {
+                       return prompt.status == QStringLiteral("started") ||
+                              prompt.status == QStringLiteral("terminal");
+                     }),
+      prompts.end());
   server_ = std::move(prompts);
   // Indexes move when the owner reorders its FIFO; keep the selected admission
   // by identity, and drop the selection if that admission settled or went
@@ -164,6 +171,8 @@ void PromptHistoryDialog::SetServerPrompts(std::vector<ServerPrompt> prompts) {
   }
   RebuildList();
 }
+
+void PromptHistoryDialog::RefreshLocalPrompts() { RebuildList(); }
 
 void PromptHistoryDialog::SetBackgroundPrompts(
     std::vector<BackgroundPrompt> prompts) {

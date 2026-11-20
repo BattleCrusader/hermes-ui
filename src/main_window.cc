@@ -1467,12 +1467,6 @@ void MainWindow::BuildUi() {
           [this](const QString& text) { SubmitText(text); });
   connect(composer_, &Composer::VoiceToggleRequested, this,
           [this]() { ToggleLiveVoice(); });
-  connect(composer_, &Composer::BusySendRequested, this,
-          [this](const QString&) {
-            status_bar_->ShowTransient(
-                QStringLiteral("Turn is running — use /steer, /queue, or /bg"));
-            composer_->FocusEditor();
-          });
   connect(composer_, &Composer::QueuedReviewRequested, this,
           [this]() { ShowQueuedPromptsDialog(); });
   connect(composer_, &Composer::AttachRequested, this, [this]() {
@@ -1954,20 +1948,6 @@ void MainWindow::SubmitText(const QString& text) {
   const QStringList attachments = composer_->AttachmentPaths();
   const bool slash_command =
       attachments.isEmpty() && trimmed.startsWith(QLatin1Char('/'));
-  // Plain text is never allowed to steer or interrupt a live turn. Only an
-  // explicit /steer, /queue or /bg may choose one of those actions; keeping
-  // this gate in the shell also protects callers that bypass the composer.
-  if (!slash_command) {
-    const auto snapshot = supervisor_.ActiveSnapshot();
-    if (snapshot != nullptr && SelectedTurnRunning(*snapshot)) {
-      if (composer_->Text().trimmed().isEmpty()) {
-        composer_->SetText(trimmed);
-      }
-      status_bar_->ShowTransient(
-          QStringLiteral("Turn is running — use /steer, /queue, or /bg"));
-      return;
-    }
-  }
   RememberComposerInput(trimmed);
   // A connector directory card owns plain typed text. Attachments and slash
   // commands cannot be an answer (desktop parity), so they settle the card
@@ -1984,17 +1964,9 @@ void MainWindow::SubmitText(const QString& text) {
     composer_->Clear();
     return;
   }
-  if (const auto snapshot = supervisor_.ActiveSnapshot();
-      snapshot != nullptr && SelectedTurnRunning(*snapshot)) {
-    // Submit() may already have cleared the editor (an unrecognized slash
-    // prompt, or a caller that bypassed the composer); keep the draft.
-    if (composer_->Text().trimmed().isEmpty()) {
-      composer_->SetText(trimmed);
-    }
-    status_bar_->ShowTransient(
-        QStringLiteral("Turn is running — use /steer, /queue, or /bg"));
-    return;
-  }
+  // A plain send is always submitted immediately, even while another turn is
+  // running. The gateway owns busy-input policy; /steer, /queue and /bg are
+  // explicit alternatives, not prerequisites for ordinary typing.
   QStringList pinned;
   pinned.reserve(static_cast<int>(pinned_context_.size()));
   for (const QString& body : pinned_context_) {
@@ -2742,16 +2714,6 @@ void MainWindow::ShowDetachedChat() {
                                                     prompt, attachments);
             }
             composer->Clear();
-          });
-  connect(composer, &Composer::BusySendRequested, this,
-          [this, composer](const QString&) {
-            const QString hint =
-                QStringLiteral("Turn is running — use /steer, /queue, or /bg");
-            if (detached_chat_ != nullptr) {
-              detached_chat_->SetStatus(hint);
-            }
-            status_bar_->ShowTransient(hint);
-            composer->FocusEditor();
           });
   connect(composer, &Composer::QueuedReviewRequested, this,
           [this]() { ShowQueuedPromptsDialog(); });
@@ -3771,9 +3733,10 @@ void MainWindow::RecordSteeredPrompt(const QString& text) {
 int MainWindow::PendingQueueCount(const ProfileSnapshot& snapshot) const {
   int count = queued_prompts_.size();
   for (const PendingAdmission& admission : snapshot.pending_admissions) {
-    // A started admission belongs to the live turn; the desktop queue panel
-    // deliberately hides it even though it can still be interrupted.
-    if (admission.status != QStringLiteral("started")) {
+    // A started admission belongs to the live turn and a terminal one is
+    // already finished history; the desktop queue panel hides both.
+    if (admission.status != QStringLiteral("started") &&
+        admission.status != QStringLiteral("terminal")) {
       ++count;
     }
   }
@@ -3913,7 +3876,8 @@ void MainWindow::ShowQueuedPromptsDialog() {
       return prompts;
     }
     for (const PendingAdmission& admission : current->pending_admissions) {
-      if (admission.status == QStringLiteral("started")) {
+      if (admission.status == QStringLiteral("started") ||
+          admission.status == QStringLiteral("terminal")) {
         continue;
       }
       PromptHistoryDialog::ServerPrompt prompt;
@@ -3983,10 +3947,16 @@ void MainWindow::ShowQueuedPromptsDialog() {
         }
         return parts.join(QLatin1Char('\n'));
       };
+  const auto local_signature = [this]() {
+    return QStringLiteral("%1\x1e%2")
+        .arg(queued_prompts_.join(QLatin1Char('\n')),
+             steered_prompts_.join(QLatin1Char('\n')));
+  };
   std::vector<PromptHistoryDialog::ServerPrompt> server_prompts =
       collect_prompts();
   auto signature = std::make_shared<QString>(prompt_signature(server_prompts));
   dialog.SetServerPrompts(std::move(server_prompts));
+  auto local_sig = std::make_shared<QString>(local_signature());
   std::vector<PromptHistoryDialog::BackgroundPrompt> background_prompts =
       collect_background();
   auto background_sig =
@@ -4130,7 +4100,13 @@ void MainWindow::ShowQueuedPromptsDialog() {
   QObject::connect(
       sync_timer, &QTimer::timeout, &dialog,
       [&dialog, collect_prompts, collect_background, prompt_signature,
-       background_signature, signature, background_sig]() {
+       background_signature, local_signature, signature, background_sig,
+       local_sig]() {
+        const QString next_local = local_signature();
+        if (next_local != *local_sig) {
+          *local_sig = next_local;
+          dialog.RefreshLocalPrompts();
+        }
         std::vector<PromptHistoryDialog::ServerPrompt> prompts =
             collect_prompts();
         const QString next = prompt_signature(prompts);
@@ -5479,6 +5455,12 @@ void MainWindow::ApplyRunIndicators(const ProfileSnapshot& snapshot) {
                              ? run_started_by_profile_[snapshot.name]
                              : 0;
   composer_->SetRunning(selected_running, started);
+  if (!selected_running) {
+    // A delivered steer is pending work only while its turn runs. Once the
+    // turn completes it belongs to transcript/history, not the queue panel.
+    steered_prompts_.clear();
+    queued_prompts_.clear();
+  }
   SyncComposerQueueBadge();
   const bool running = snapshot.running || selected_streaming;
   QString running_session_id;
