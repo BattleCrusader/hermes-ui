@@ -295,6 +295,11 @@ class MainWindow : public QWidget {
   // Session id captured when each profile's turn started; the worker clears it
   // on completion, so the notification name must be saved here.
   std::map<QString, QString> running_session_by_profile_;
+  // A raw running -> idle transition is only a guess until the gateway has had
+  // a moment to emit a settlement. Keep the fallback notice here and cancel it
+  // if a followup turn starts, so a between-phase snapshot cannot announce a
+  // still-live turn as finished.
+  QHash<QString, TurnCompletionNotice> deferred_completion_notices_;
   QSoundEffect* completion_sound_ = nullptr;
 #ifdef HERMES_HAS_MULTIMEDIA
   QMediaPlayer* read_aloud_player_ = nullptr;

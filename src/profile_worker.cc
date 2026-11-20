@@ -3156,7 +3156,13 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
       state_.composer_history = std::move(composer_history);
     }
     state_.error_text.clear();
-    state_.status_text = QStringLiteral("ready");
+    if (state_.running || HasStartedPendingAdmission(state_)) {
+      if (state_.status_text != QStringLiteral("stopping")) {
+        state_.status_text = QStringLiteral("working");
+      }
+    } else {
+      state_.status_text = QStringLiteral("ready");
+    }
     history_loaded_ = true;
     PublishLocked();
   }
@@ -3171,7 +3177,13 @@ void ProfileWorker::OnSocketConnected(const QString& subprotocol) {
     std::lock_guard<std::mutex> lock(mutex_);
     state_.connected = true;
     state_.gateway_ready = false;
-    state_.status_text = QStringLiteral("ready");
+    if (state_.running || HasStartedPendingAdmission(state_)) {
+      if (state_.status_text != QStringLiteral("stopping")) {
+        state_.status_text = QStringLiteral("working");
+      }
+    } else {
+      state_.status_text = QStringLiteral("ready");
+    }
     PublishLocked();
   }
   if (pending_new_session_) {
@@ -3738,7 +3750,13 @@ void ProfileWorker::OnSocketEvent(const QString& type,
       std::lock_guard<std::mutex> lock(mutex_);
       state_.gateway_ready = true;
       state_.connected = true;
-      state_.status_text = QStringLiteral("ready");
+      if (state_.running || HasStartedPendingAdmission(state_)) {
+        if (state_.status_text != QStringLiteral("stopping")) {
+          state_.status_text = QStringLiteral("working");
+        }
+      } else {
+        state_.status_text = QStringLiteral("ready");
+      }
       PublishLocked();
     }
     if (pending_new_session_) {
@@ -3966,6 +3984,16 @@ void ProfileWorker::OnSocketEvent(const QString& type,
                 QDateTime::currentMSecsSinceEpoch())) {
       AppendUserPromptLocked(processed->text);
     }
+    // A followup phase starts after a between-turn `session.info running:false`.
+    // Restore the live claim here so the status pill cannot stay "ready" while
+    // the new phase is visibly streaming.
+    state_.running = true;
+    state_.running_session_id = state_.selected_session_id;
+    if (state_.status_text != QStringLiteral("stopping")) {
+      state_.status_text = QStringLiteral("working");
+    }
+    state_.turn_failed = false;
+    state_.turn_error_text.clear();
     if (!state_.messages.empty()) {
       state_.messages.back().streaming = false;
       state_.messages.back().reasoning_streaming = false;
@@ -4109,21 +4137,6 @@ void ProfileWorker::OnSocketEvent(const QString& type,
 
   if (type == QStringLiteral("session.info")) {
     std::lock_guard<std::mutex> lock(mutex_);
-    const bool streaming = !state_.messages.empty() &&
-                           (state_.messages.back().streaming ||
-                            state_.messages.back().reasoning_streaming);
-    const bool running = payload.value(QStringLiteral("running")).toBool();
-    // A late `running:false` from the previous turn must not hide the spinner
-    // while this turn is still streaming text/reasoning.
-    if (running || !streaming) {
-      state_.running = running;
-      state_.running_session_id =
-          state_.running ? state_.selected_session_id : QString();
-      if (running) {
-        state_.turn_failed = false;
-        state_.turn_error_text.clear();
-      }
-    }
     const QString model = payload.value(QStringLiteral("model")).toString();
     if (!model.isEmpty()) {
       state_.model = model;
@@ -4172,7 +4185,13 @@ void ProfileWorker::OnSocketEvent(const QString& type,
     if (state_.selected_session_id.isEmpty() && !stored.isEmpty()) {
       state_.selected_session_id = stored;
     }
+    // Apply the pending snapshot before folding `running`. The admission ledger
+    // is the authority here: a settled between-phase `running:false` must not
+    // hide a turn whose admission is still `started`, and `running:true` must
+    // restore "working" after such a snapshot left "ready" behind.
     ApplyPendingSnapshotLocked(payload);
+    const bool running = payload.value(QStringLiteral("running")).toBool();
+    ApplyRunningSnapshot(&state_, running);
     const QString title = payload.value(QStringLiteral("title")).toString();
     if (!title.isEmpty()) {
       for (SessionSummary& session : state_.sessions) {
@@ -4539,17 +4558,11 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
           result.value(QStringLiteral("execution_generation")).toInt(-1);
     }
     if (result.contains(QStringLiteral("running"))) {
-      state_.running = result.value(QStringLiteral("running")).toBool();
-      state_.running_session_id =
-          state_.running ? state_.selected_session_id : QString();
+      ApplyRunningSnapshot(&state_,
+                           result.value(QStringLiteral("running")).toBool());
     } else if (!info.isEmpty() && info.contains(QStringLiteral("running"))) {
-      state_.running = info.value(QStringLiteral("running")).toBool();
-      state_.running_session_id =
-          state_.running ? state_.selected_session_id : QString();
-    }
-    if (state_.running) {
-      state_.turn_failed = false;
-      state_.turn_error_text.clear();
+      ApplyRunningSnapshot(&state_,
+                           info.value(QStringLiteral("running")).toBool());
     }
     if (!info.isEmpty() || result.contains(QStringLiteral("running")) ||
         result.contains(QStringLiteral("execution_generation"))) {
@@ -4732,11 +4745,6 @@ void ProfileWorker::CompleteAssistant(const QString& text,
   bool superseded = false;
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    // Completion can beat the settlement's `session.info` snapshot. Drop the
-    // finished admission (and any steer handed to this turn) now, otherwise a
-    // queued/steering row remains visible until the next unrelated refresh.
-    // Forget each id too, so a delayed snapshot cannot resurrect the row or
-    // announce its user bubble a second time.
     const auto prune_pending = [&](bool clear_steering) {
       for (const PendingAdmission& admission : state_.pending_admissions) {
         const bool completed =
@@ -4750,8 +4758,13 @@ void ProfileWorker::CompleteAssistant(const QString& text,
       PrunePendingAdmissionsForCompletion(&state_.pending_admissions,
                                           admission_id, clear_steering);
     };
-    prune_pending(false);
     const bool was_running = state_.running;
+    // A `message.complete` can close one phase of a turn whose durable
+    // admission is still `started`: gateway goal/auto-continue followups emit
+    // completion frames between nested turns. Keep the running claim and the
+    // completion notice for the real settlement; the pending snapshot that
+    // retires the admission arrives with the final `session.info`.
+    const bool live_admission = HasStartedPendingAdmission(state_);
     qint64 elapsed_ms = 0;
     ChatMessage* target = nullptr;
     // Walk backwards: a user row newer than the streaming answer means this
@@ -4818,33 +4831,42 @@ void ProfileWorker::CompleteAssistant(const QString& text,
             static_cast<qint64>(text.size()), error ? 1 : 0);
       return;
     }
-    const QString completed_session = state_.selected_session_id;
-    const qint64 started = turn_started_by_session_.take(completed_session);
-    if (started > 0) {
-      elapsed_ms = QDateTime::currentMSecsSinceEpoch() - started;
+    if (live_admission) {
+      NoteActivityLocked();
+      PublishLocked();
+      qInfo("turn phase complete with live admission session=%.12s "
+            "chars=%lld error=%d",
+            qUtf8Printable(state_.selected_session_id),
+            static_cast<qint64>(text.size()), error ? 1 : 0);
+    } else {
+      const QString completed_session = state_.selected_session_id;
+      const qint64 started = turn_started_by_session_.take(completed_session);
+      if (started > 0) {
+        elapsed_ms = QDateTime::currentMSecsSinceEpoch() - started;
+      }
+      const QString completed_prompt =
+          turn_prompt_by_session_.take(completed_session);
+      state_.running = false;
+      state_.running_session_id.clear();
+      CompleteTurn(&state_, failure);
+      // A completion for a turn that began before this UI attached has no start
+      // stamp and no prompt. It is still worth folding into the transcript, but
+      // a banner for it would arrive as a phantom "finished in 0.0s".
+      if (started > 0 || was_running) {
+        RecordTurnCompletion(&state_, completed_session, completed_prompt,
+                             failure, elapsed_ms);
+      }
+      prune_pending(true);
+      NoteActivityLocked();
+      state_.requests.clear();
+      admission_id_.clear();
+      admission_status_.clear();
+      pending_receipt_id_ = -1;
+      qInfo("turn complete session=%.12s chars=%lld error=%d",
+            qUtf8Printable(state_.selected_session_id),
+            static_cast<qint64>(text.size()), error ? 1 : 0);
+      PublishLocked();
     }
-    const QString completed_prompt =
-        turn_prompt_by_session_.take(completed_session);
-    state_.running = false;
-    state_.running_session_id.clear();
-    CompleteTurn(&state_, failure);
-    // A completion for a turn that began before this UI attached has no start
-    // stamp and no prompt. It is still worth folding into the transcript, but
-    // a banner for it would arrive as a phantom "finished in 0.0s".
-    if (started > 0 || was_running) {
-      RecordTurnCompletion(&state_, completed_session, completed_prompt, failure,
-                           elapsed_ms);
-    }
-    prune_pending(true);
-    NoteActivityLocked();
-    state_.requests.clear();
-    admission_id_.clear();
-    admission_status_.clear();
-    pending_receipt_id_ = -1;
-    qInfo("turn complete session=%.12s chars=%lld error=%d",
-          qUtf8Printable(state_.selected_session_id),
-          static_cast<qint64>(text.size()), error ? 1 : 0);
-    PublishLocked();
   }
   if (message_refresh_timer_ != nullptr) {
     message_refresh_timer_->start(700);

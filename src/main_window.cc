@@ -5524,12 +5524,18 @@ void MainWindow::CheckProfileCompletions() {
       }
       OnGenerationFinished(*snapshot, completion, index);
     }
+    if (consumed_completion) {
+      // A real notice for this profile already names the finish; a fallback
+      // queued from an earlier between-phase snapshot must not repeat it.
+      deferred_completion_notices_.remove(snapshot->name);
+    }
     const bool was_running = last_running_[static_cast<std::size_t>(index)];
     const bool streaming = !snapshot->messages.empty() &&
                            (snapshot->messages.back().streaming ||
                             snapshot->messages.back().reasoning_streaming);
     const bool running = snapshot->running || streaming;
     if (running && !was_running) {
+      deferred_completion_notices_.remove(snapshot->name);
       const qint64 now = QDateTime::currentMSecsSinceEpoch();
       run_started_by_profile_[snapshot->name] = now;
       running_session_by_profile_[snapshot->name] =
@@ -5555,7 +5561,41 @@ void MainWindow::CheckProfileCompletions() {
         completion.failed = snapshot->turn_failed;
         completion.error = snapshot->turn_error_text;
         completion.elapsed_ms = elapsed;
-        OnGenerationFinished(*snapshot, completion, index);
+        // A between-phase `session.info running:false` can precede a chained
+        // followup turn. Defer the notice and drop it if work resumes, instead
+        // of announcing completion for a turn that is still running.
+        deferred_completion_notices_.insert(profile, completion);
+        QTimer::singleShot(1500, this, [this, profile]() {
+          const auto deferred = deferred_completion_notices_.find(profile);
+          if (deferred == deferred_completion_notices_.end()) {
+            return;
+          }
+          const TurnCompletionNotice completion = deferred.value();
+          deferred_completion_notices_.erase(deferred);
+          int current_index = -1;
+          for (int i = 0; i < supervisor_.profile_count(); ++i) {
+            if (supervisor_.ProfileName(i) == profile) {
+              current_index = i;
+              break;
+            }
+          }
+          if (current_index < 0) {
+            return;
+          }
+          const auto current = supervisor_.SnapshotAt(current_index);
+          if (!current || current->name != profile) {
+            return;
+          }
+          const bool still_running = current->running ||
+                                     (!current->messages.empty() &&
+                                      (current->messages.back().streaming ||
+                                       current->messages.back()
+                                           .reasoning_streaming));
+          if (still_running) {
+            return;
+          }
+          OnGenerationFinished(*current, completion, current_index);
+        });
       }
       run_started_by_profile_.erase(profile);
       running_session_by_profile_.erase(profile);

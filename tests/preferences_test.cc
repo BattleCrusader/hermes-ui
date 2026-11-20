@@ -136,6 +136,7 @@ class PreferencesTest : public QObject {
   void notificationPolicyMatchesDesktopAttentionRules();
   void notificationPromptSummaryKeepsTheOpeningPrompt();
   void turnOutcomeSeparatesSyncErrorsFromTurnFailures();
+  void startedAdmissionOwnsRunStatus();
   void backgroundTurnCompletionQueuesOneNoticePerTurn();
   void subagentEventsBuildALiveDelegationTree();
   void audioDataUrlDecodesSpeechAndRejectsJunk();
@@ -4532,6 +4533,47 @@ void PreferencesTest::turnOutcomeSeparatesSyncErrorsFromTurnFailures() {
   QVERIFY(!streaming.messages.back().streaming);
   QVERIFY(streaming.turn_failed);
   QCOMPARE(streaming.turn_error_text, QStringLiteral("stream lost"));
+}
+
+void PreferencesTest::startedAdmissionOwnsRunStatus() {
+  using hermes::ui::ApplyRunningSnapshot;
+  using hermes::ui::BeginTurn;
+  using hermes::ui::HasStartedPendingAdmission;
+  using hermes::ui::PendingAdmission;
+  using hermes::ui::ProfileSnapshot;
+
+  ProfileSnapshot snapshot;
+  snapshot.selected_session_id = QStringLiteral("session-a");
+  BeginTurn(&snapshot, QStringLiteral("learn a skill"));
+
+  PendingAdmission started;
+  started.admission_id = QStringLiteral("admission-a");
+  started.status = QStringLiteral("started");
+  snapshot.pending_admissions.push_back(started);
+
+  // A between-phase `session.info running:false` is a projection, not a
+  // settlement. The started admission keeps the turn (and "working") alive.
+  ApplyRunningSnapshot(&snapshot, false);
+  QVERIFY(snapshot.running);
+  QCOMPARE(snapshot.running_session_id, snapshot.selected_session_id);
+  QCOMPARE(snapshot.status_text, QStringLiteral("working"));
+  QVERIFY(HasStartedPendingAdmission(snapshot));
+  QVERIFY(HasStartedPendingAdmission(snapshot, QStringLiteral("admission-a")));
+  QVERIFY(!HasStartedPendingAdmission(snapshot, QStringLiteral("admission-b")));
+
+  // The followup phase restores "working" even after a prior "ready".
+  snapshot.status_text = QStringLiteral("ready");
+  ApplyRunningSnapshot(&snapshot, true);
+  QVERIFY(snapshot.running);
+  QCOMPARE(snapshot.status_text, QStringLiteral("working"));
+
+  // Once the admission is settled (removed from pending), the same false
+  // projection is allowed to finish the turn.
+  snapshot.pending_admissions.clear();
+  ApplyRunningSnapshot(&snapshot, false);
+  QVERIFY(!snapshot.running);
+  QVERIFY(snapshot.running_session_id.isEmpty());
+  QCOMPARE(snapshot.status_text, QStringLiteral("ready"));
 }
 
 void PreferencesTest::backgroundTurnCompletionQueuesOneNoticePerTurn() {

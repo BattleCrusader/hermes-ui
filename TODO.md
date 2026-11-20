@@ -42,6 +42,29 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-21 (started admissions own run status)
+- User submitted `/learn`, the model was still calling tools, but the status pill
+  said `ready` and a completion notification fired. The durable admission for
+  that turn was still `started`; only a transient `message.complete` /
+  between-phase `session.info running:false` had arrived.
+- Root cause: the UI treated `message.complete` and `session.info.running` as
+  turn authority. Gateway goal/auto-continue followups can emit completion
+  frames and settled session snapshots while the original admission remains
+  `started`. `FetchMessages` also forced `ready`, and the completion fallback
+  announced any raw running→idle transition.
+- Added `HasStartedPendingAdmission` / `ApplyRunningSnapshot` in
+  `src/turn_outcome.h`. A `started` (or steering) pending admission outranks a
+  transient `running:false`; `running:true` restores `working`. `session.info`
+  now applies pending before folding running, `message.start` restores the
+  live claim, and `FetchMessages`/`gateway.ready`/`OnSocketConnected`/resume
+  no longer clobber `working`.
+- `CompleteAssistant` still closes the streaming row for a phase completion,
+  but keeps running state, admission claims, pending pruning, and completion
+  notices for the real settlement. The fallback running→idle notice is
+  deferred 1.5 s and canceled by a real notice or a followup `message.start`.
+- Added `PreferencesTest::startedAdmissionOwnsRunStatus`; full native suite
+  **10/10 passed** (38.20 s).
+
 ## Status update — 2026-11-21 (slash dispatch honors the shared contract)
 
 **Slash commands now consume the gateway's structured `command.dispatch`

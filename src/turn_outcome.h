@@ -11,6 +11,59 @@
 
 namespace hermes::ui {
 
+// A started admission is the gateway's durable claim that a turn still owns
+// work. It outranks a transient `session.info.running:false` (which can be a
+// between-phase projection while a goal/auto-continue followup is being
+// prepared) and a `message.complete` that only closed one nested phase.
+inline bool HasStartedPendingAdmission(
+    const ProfileSnapshot& snapshot, const QString& admission_id = {}) {
+  for (const PendingAdmission& admission : snapshot.pending_admissions) {
+    if (admission.status != QStringLiteral("started") &&
+        !admission.steering) {
+      continue;
+    }
+    if (admission_id.isEmpty() ||
+        admission.admission_id == admission_id) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Folds a running-state projection into the snapshot without letting a stale
+// between-turn snapshot cancel a started admission. `running:true` always
+// restores the working status, otherwise a prior "ready" can survive into the
+// followup phase.
+inline void ApplyRunningSnapshot(ProfileSnapshot* snapshot, bool running,
+                                 const QString& admission_id = {}) {
+  if (snapshot == nullptr) {
+    return;
+  }
+  if (running) {
+    snapshot->running = true;
+    snapshot->running_session_id = snapshot->selected_session_id;
+    if (snapshot->status_text != QStringLiteral("stopping")) {
+      snapshot->status_text = QStringLiteral("working");
+    }
+    snapshot->turn_failed = false;
+    snapshot->turn_error_text.clear();
+    return;
+  }
+  if (HasStartedPendingAdmission(*snapshot, admission_id)) {
+    snapshot->running = true;
+    snapshot->running_session_id = snapshot->selected_session_id;
+    if (snapshot->status_text != QStringLiteral("stopping")) {
+      snapshot->status_text = QStringLiteral("working");
+    }
+    return;
+  }
+  snapshot->running = false;
+  snapshot->running_session_id.clear();
+  snapshot->status_text = snapshot->turn_failed
+                              ? QStringLiteral("error")
+                              : QStringLiteral("ready");
+}
+
 // A completion notification is only useful while it is still news. A notice
 // that has sat behind a modal, an event-loop stall, or a reconnect replay must
 // not fire just because the user happened to submit a new prompt.
