@@ -96,6 +96,11 @@ namespace {
 
 constexpr int kComposerHistoryLimit = 500;
 
+QString DeferredCompletionKey(const QString& profile,
+                             const QString& session_id) {
+  return profile + QLatin1Char('\n') + session_id;
+}
+
 // The desktop derives its composer history from the live session messages
 // instead of keeping a parallel ring; do the same so edited/resumed sessions
 // cannot drift.
@@ -5514,6 +5519,10 @@ void MainWindow::CheckProfileCompletions() {
       }
       announced_serial = completion.serial;
       consumed_completion = true;
+      // A real notice for this profile already names the finish; a fallback
+      // queued for the same session must not repeat it.
+      deferred_completion_notices_.remove(
+          DeferredCompletionKey(snapshot->name, completion.session_id));
       if (!CompletionNoticeIsCurrent(*snapshot, completion, now_ms)) {
         qInfo("skipping stale completion notification profile=%s "
               "session=%.12s age_ms=%lld",
@@ -5524,33 +5533,50 @@ void MainWindow::CheckProfileCompletions() {
       }
       OnGenerationFinished(*snapshot, completion, index);
     }
-    if (consumed_completion) {
-      // A real notice for this profile already names the finish; a fallback
-      // queued from an earlier between-phase snapshot must not repeat it.
-      deferred_completion_notices_.remove(snapshot->name);
-    }
     const bool was_running = last_running_[static_cast<std::size_t>(index)];
     const bool streaming = !snapshot->messages.empty() &&
                            (snapshot->messages.back().streaming ||
                             snapshot->messages.back().reasoning_streaming);
     const bool running = snapshot->running || streaming;
-    if (running && !was_running) {
-      deferred_completion_notices_.remove(snapshot->name);
-      const qint64 now = QDateTime::currentMSecsSinceEpoch();
-      run_started_by_profile_[snapshot->name] = now;
-      running_session_by_profile_[snapshot->name] =
-          snapshot->running_session_id;
-    } else if (!running && was_running) {
-      const QString profile = snapshot->name;
+    const QString profile = snapshot->name;
+    const QString running_session =
+        running_session_by_profile_.count(profile) > 0
+            ? running_session_by_profile_[profile]
+            : QString();
+    // A profile-level run flag is about the selected chat. When the user
+    // switches chats, an idle `session.info` for the new chat can turn it off
+    // while the old chat is still producing. Do not reinterpret that as the
+    // old turn finishing; the worker owns background completion notices.
+    const bool same_turn_session = RunningClaimMatchesSelectedSession(
+        running_session, snapshot->selected_session_id);
+    const QString current_session =
+        snapshot->running_session_id.isEmpty()
+            ? snapshot->selected_session_id
+            : snapshot->running_session_id;
+    const bool claim_changed =
+        !current_session.isEmpty() &&
+        (running_session_by_profile_.count(profile) == 0 ||
+         running_session_by_profile_[profile] != current_session);
+    if (running && (!was_running || claim_changed)) {
+      deferred_completion_notices_.remove(
+          DeferredCompletionKey(profile, current_session));
+      const bool same_claim =
+          running_session_by_profile_.count(profile) > 0 &&
+          running_session_by_profile_[profile] == current_session;
+      if (!same_claim) {
+        run_started_by_profile_[profile] =
+            QDateTime::currentMSecsSinceEpoch();
+        running_session_by_profile_[profile] = current_session;
+      }
+    } else if (!running && was_running && same_turn_session) {
       const qint64 started = run_started_by_profile_.count(profile) > 0
                                  ? run_started_by_profile_[profile]
                                  : 0;
       const qint64 elapsed =
           started > 0 ? QDateTime::currentMSecsSinceEpoch() - started : 0;
       const QString finished_session =
-          running_session_by_profile_.count(profile) > 0
-              ? running_session_by_profile_[profile]
-              : snapshot->selected_session_id;
+          running_session.isEmpty() ? snapshot->selected_session_id
+                                    : running_session;
       // The worker queues a notice for every normal message.complete. This
       // transition is only a fallback for a turn that ended without one (for
       // example a resume after the socket dropped). Do not announce twice.
@@ -5561,17 +5587,19 @@ void MainWindow::CheckProfileCompletions() {
         completion.failed = snapshot->turn_failed;
         completion.error = snapshot->turn_error_text;
         completion.elapsed_ms = elapsed;
+        completion.created_ms = now_ms;
         // A between-phase `session.info running:false` can precede a chained
         // followup turn. Defer the notice and drop it if work resumes, instead
         // of announcing completion for a turn that is still running.
-        deferred_completion_notices_.insert(profile, completion);
-        QTimer::singleShot(1500, this, [this, profile]() {
-          const auto deferred = deferred_completion_notices_.find(profile);
-          if (deferred == deferred_completion_notices_.end()) {
+        const QString key = DeferredCompletionKey(profile, finished_session);
+        deferred_completion_notices_.insert(key, completion);
+        QTimer::singleShot(1500, this, [this, profile, key, completion]() {
+          const auto deferred = deferred_completion_notices_.constFind(key);
+          if (deferred == deferred_completion_notices_.constEnd() ||
+              deferred->created_ms != completion.created_ms) {
             return;
           }
-          const TurnCompletionNotice completion = deferred.value();
-          deferred_completion_notices_.erase(deferred);
+          deferred_completion_notices_.remove(key);
           int current_index = -1;
           for (int i = 0; i < supervisor_.profile_count(); ++i) {
             if (supervisor_.ProfileName(i) == profile) {
@@ -5586,12 +5614,22 @@ void MainWindow::CheckProfileCompletions() {
           if (!current || current->name != profile) {
             return;
           }
+          // The fallback only describes the selected stream. If the user has
+          // moved on, the worker's background notice is authoritative and this
+          // profile-level guess must not fire for a chat that may still run.
+          if (current->selected_session_id != completion.session_id) {
+            return;
+          }
           const bool still_running = current->running ||
                                      (!current->messages.empty() &&
                                       (current->messages.back().streaming ||
                                        current->messages.back()
                                            .reasoning_streaming));
           if (still_running) {
+            return;
+          }
+          if (!CompletionNoticeIsCurrent(*current, completion,
+                                         QDateTime::currentMSecsSinceEpoch())) {
             return;
           }
           OnGenerationFinished(*current, completion, current_index);

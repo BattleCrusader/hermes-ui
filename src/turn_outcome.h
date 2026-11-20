@@ -64,6 +64,16 @@ inline void ApplyRunningSnapshot(ProfileSnapshot* snapshot, bool running,
                               : QStringLiteral("ready");
 }
 
+// A profile-level run flag describes the selected chat. A switch to an idle
+// chat can clear it while the previous chat is still producing, so a raw
+// running -> idle transition is only a completion for the session that owned
+// the claim.
+inline bool RunningClaimMatchesSelectedSession(
+    const QString& running_session_id, const QString& selected_session_id) {
+  return running_session_id.isEmpty() || selected_session_id.isEmpty() ||
+         running_session_id == selected_session_id;
+}
+
 // A completion notification is only useful while it is still news. A notice
 // that has sat behind a modal, an event-loop stall, or a reconnect replay must
 // not fire just because the user happened to submit a new prompt.

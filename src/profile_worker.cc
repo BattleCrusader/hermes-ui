@@ -431,6 +431,15 @@ void ProfileWorker::SelectSession(const QString& session_id) {
       return;
     }
     if (state_.selected_session_id != session_id) {
+      // Seed the background run state from the claim we are leaving. Without
+      // this a stale phase completion could arrive before the gateway sends
+      // another `session.info` for the old chat.
+      if (!state_.selected_session_id.isEmpty()) {
+        background_running_by_session_[state_.selected_session_id] =
+            state_.running &&
+            (state_.running_session_id.isEmpty() ||
+             state_.running_session_id == state_.selected_session_id);
+      }
       pinned_session_id_.clear();
       pinned_provider_.clear();
       pinned_model_.clear();
@@ -2436,15 +2445,57 @@ void ProfileWorker::NoteTurnStartedLocked(const QString& session_id,
 
 void ProfileWorker::NoteBackgroundTurnCompleteLocked(
     const QString& session_id, const QString& failure) {
-  const QString prompt = turn_prompt_by_session_.take(session_id);
-  const qint64 started = turn_started_by_session_.take(session_id);
+  if (session_id.isEmpty()) {
+    return;
+  }
+  const QString prompt = turn_prompt_by_session_.value(session_id);
+  const qint64 started = turn_started_by_session_.value(session_id);
   const qint64 elapsed_ms =
       started > 0 ? QDateTime::currentMSecsSinceEpoch() - started : 0;
   // Only a turn this UI watched begin is news. A replayed or late completion
   // for a turn that started before the app attached has no prompt/start stamp
   // and must not turn into a phantom "finished in 0.0s" banner.
-  CompleteBackgroundTurn(&state_, session_id, prompt, failure, elapsed_ms,
-                         started > 0);
+  DeferredBackgroundCompletion deferred;
+  deferred.generation = ++background_completion_serial_;
+  deferred.prompt = prompt;
+  deferred.failure = failure;
+  deferred.elapsed_ms = elapsed_ms;
+  deferred.notify = started > 0;
+  background_completions_.insert(session_id, deferred);
+  const quint64 generation = deferred.generation;
+  // `message.complete` can end a phase while a goal/auto-continue followup is
+  // about to start. Give the gateway a moment to send that followup's
+  // `message.start`/delta, or the settlement `session.info running:false`,
+  // before treating this as the end of the durable turn.
+  QTimer::singleShot(1500, this, [this, session_id, generation]() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    const auto deferred = background_completions_.constFind(session_id);
+    if (deferred == background_completions_.constEnd() ||
+        deferred->generation != generation) {
+      return;
+    }
+    const DeferredBackgroundCompletion completion = deferred.value();
+    background_completions_.remove(session_id);
+    // The user is looking at this chat again; the selected-session stream is
+    // responsible for its own completion notice. Also never announce a turn
+    // while the background status says it is still producing.
+    if (state_.selected_session_id == session_id ||
+        background_running_by_session_.value(session_id, false)) {
+      return;
+    }
+    turn_prompt_by_session_.remove(session_id);
+    turn_started_by_session_.remove(session_id);
+    background_running_by_session_[session_id] = false;
+    CompleteBackgroundTurn(&state_, session_id, completion.prompt,
+                           completion.failure, completion.elapsed_ms,
+                           completion.notify);
+    NoteActivityLocked();
+    PublishLocked();
+    qInfo("background turn complete session=%.12s chars=%lld notify=%d",
+          qUtf8Printable(session_id),
+          static_cast<long long>(completion.prompt.size()),
+          completion.notify ? 1 : 0);
+  });
 }
 
 QString ProfileWorker::StoredSessionKeyLocked(
@@ -3827,6 +3878,16 @@ void ProfileWorker::OnSocketEvent(const QString& type,
   {
     std::lock_guard<std::mutex> lock(mutex_);
     selected = state_.selected_session_id;
+    // `session.info` may be the first event that reveals the durable id for a
+    // background runtime session. Learn it before deciding whether the event
+    // belongs to the selected chat.
+    if (!session_id.isEmpty()) {
+      const QString durable =
+          payload.value(QStringLiteral("stored_session_id")).toString();
+      if (!durable.isEmpty()) {
+        stored_session_by_runtime_[session_id] = durable;
+      }
+    }
     stored_session = StoredSessionKeyLocked(session_id);
   }
   const bool background_session =
@@ -3834,9 +3895,28 @@ void ProfileWorker::OnSocketEvent(const QString& type,
       stored_session != selected;
   if (background_session) {
     // A turn can finish while the user is reading another chat. Keep its
-    // transcript out of the visible page, but close its running claim and
-    // queue a completion notice so the shell can notify immediately.
-    if (type == QStringLiteral("message.complete")) {
+    // transcript out of the visible page, but only close its running claim and
+    // queue a completion notice once no followup activity arrives. A bare
+    // `message.complete` can be a between-phase boundary.
+    const bool live_activity =
+        type == QStringLiteral("message.start") ||
+        type == QStringLiteral("message.delta") ||
+        type == QStringLiteral("message.interim") ||
+        type == QStringLiteral("reasoning.delta") ||
+        type == QStringLiteral("reasoning.available") ||
+        type.startsWith(QStringLiteral("tool."));
+    if (live_activity) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      background_running_by_session_[stored_session] = true;
+      background_completions_.remove(stored_session);
+    } else if (type == QStringLiteral("session.info")) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      const bool running = payload.value(QStringLiteral("running")).toBool();
+      background_running_by_session_[stored_session] = running;
+      if (running) {
+        background_completions_.remove(stored_session);
+      }
+    } else if (type == QStringLiteral("message.complete")) {
       const QString text = payload.value(QStringLiteral("text")).toString();
       const QString error = payload.value(QStringLiteral("error")).toString();
       const bool failed = payload.value(QStringLiteral("status")).toString() ==
@@ -3848,10 +3928,9 @@ void ProfileWorker::OnSocketEvent(const QString& type,
       {
         std::lock_guard<std::mutex> lock(mutex_);
         NoteBackgroundTurnCompleteLocked(stored_session, failure);
-        PublishLocked();
       }
-      qInfo("background turn complete session=%.12s stored=%.12s chars=%lld "
-            "error=%d",
+      qInfo("background turn completion deferred session=%.12s "
+            "stored=%.12s chars=%lld error=%d",
             qUtf8Printable(session_id), qUtf8Printable(stored_session),
             static_cast<qint64>(text.size()), failed ? 1 : 0);
       // The visible transcript is another chat, but the sidebar still wants

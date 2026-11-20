@@ -346,6 +346,20 @@ class ProfileWorker : public QObject {
   // by the completion that closes the turn.
   QHash<QString, QString> turn_prompt_by_session_;
   QHash<QString, qint64> turn_started_by_session_;
+  // `message.complete` can be a between-phase boundary, not the end of the
+  // durable turn. Background sessions must therefore wait for settlement
+  // before announcing a completion; a followup `message.start`/delta cancels
+  // the pending announcement. Keyed by stored session id.
+  struct DeferredBackgroundCompletion {
+    quint64 generation = 0;
+    QString prompt;
+    QString failure;
+    qint64 elapsed_ms = 0;
+    bool notify = false;
+  };
+  QHash<QString, DeferredBackgroundCompletion> background_completions_;
+  QHash<QString, bool> background_running_by_session_;
+  quint64 background_completion_serial_ = 0;
   PendingPromptTracker pending_prompts_;
   bool pending_prompts_baseline_ready_ = false;
   int pending_receipt_id_ = -1;

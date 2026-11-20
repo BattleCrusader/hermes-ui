@@ -298,7 +298,8 @@ class MainWindow : public QWidget {
   // A raw running -> idle transition is only a guess until the gateway has had
   // a moment to emit a settlement. Keep the fallback notice here and cancel it
   // if a followup turn starts, so a between-phase snapshot cannot announce a
-  // still-live turn as finished.
+  // still-live turn as finished. Keyed by profile + session so switching chats
+  // cannot overwrite another turn's pending notice.
   QHash<QString, TurnCompletionNotice> deferred_completion_notices_;
   QSoundEffect* completion_sound_ = nullptr;
 #ifdef HERMES_HAS_MULTIMEDIA

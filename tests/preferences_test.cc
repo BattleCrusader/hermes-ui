@@ -137,6 +137,7 @@ class PreferencesTest : public QObject {
   void notificationPromptSummaryKeepsTheOpeningPrompt();
   void turnOutcomeSeparatesSyncErrorsFromTurnFailures();
   void startedAdmissionOwnsRunStatus();
+  void completionTransitionFollowsItsSession();
   void backgroundTurnCompletionQueuesOneNoticePerTurn();
   void subagentEventsBuildALiveDelegationTree();
   void audioDataUrlDecodesSpeechAndRejectsJunk();
@@ -4574,6 +4575,20 @@ void PreferencesTest::startedAdmissionOwnsRunStatus() {
   QVERIFY(!snapshot.running);
   QVERIFY(snapshot.running_session_id.isEmpty());
   QCOMPARE(snapshot.status_text, QStringLiteral("ready"));
+}
+
+void PreferencesTest::completionTransitionFollowsItsSession() {
+  using hermes::ui::RunningClaimMatchesSelectedSession;
+
+  // Switching from a running chat to an idle one clears the profile-level
+  // running projection, but that is navigation, not completion.
+  QVERIFY(!RunningClaimMatchesSelectedSession(QStringLiteral("session-a"),
+                                              QStringLiteral("session-b")));
+  QVERIFY(RunningClaimMatchesSelectedSession(QStringLiteral("session-a"),
+                                             QStringLiteral("session-a")));
+  // Missing ids are handled by the selected-session stream itself.
+  QVERIFY(RunningClaimMatchesSelectedSession(QString(), QStringLiteral("a")));
+  QVERIFY(RunningClaimMatchesSelectedSession(QStringLiteral("a"), QString()));
 }
 
 void PreferencesTest::backgroundTurnCompletionQueuesOneNoticePerTurn() {

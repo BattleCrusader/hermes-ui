@@ -42,6 +42,27 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-21 (background completion waits for its turn)
+- User reported a “turn finished” notification after switching away from a chat
+  that was still producing. Two profile-level transitions were lying:
+  an idle `session.info` for the newly selected chat cleared the profile running
+  flag, and a background `message.complete` was treated as final even when a
+  goal/auto-continue followup was about to start.
+- `CheckProfileCompletions` now only treats running→idle as a completion when
+  the running claim belongs to the selected session. Switching chats no longer
+  fires the previous chat's fallback. Fallback notices are keyed by
+  profile+session and a timer drops the guess if the user moved on; the worker's
+  background notice is authoritative.
+- Background `message.complete` no longer records a notice immediately. It is
+  deferred 1.5 s and canceled by `message.start`, deltas, reasoning, tool
+  activity, or `session.info running:true`. The notice is recorded only after
+  the background status settles idle, and prompt/start stamps survive the
+  phase boundary.
+- Runtime→stored session ids are learned before the selected-session filter, so
+  background `session.info` events can fence the right completion.
+- Test: `PreferencesTest::completionTransitionFollowsItsSession`; full suite
+  10/10 passed (37.02 s).
+
 ## Status update — 2026-11-21 (started admissions own run status)
 - User submitted `/learn`, the model was still calling tools, but the status pill
   said `ready` and a completion notification fired. The durable admission for
