@@ -5323,15 +5323,17 @@ void MainWindow::UpdateComposerHistory(const ProfileSnapshot& snapshot) {
 
 QString MainWindow::ComposerHistoryKey(
     const ProfileSnapshot& snapshot) const {
-  return snapshot.name + QLatin1Char('\x1f') + snapshot.selected_session_id;
+  return ComposerHistoryScopeKey(snapshot.name,
+                                 snapshot.selected_session_id);
 }
 
-void MainWindow::LoadComposerProfileHistory() {
-  if (composer_profile_history_loaded_) {
+void MainWindow::LoadComposerSessionHistory() {
+  if (composer_session_history_loaded_) {
     return;
   }
-  composer_profile_history_loaded_ = true;
-  const QString raw = NativePref(QStringLiteral("native.composer_history"));
+  composer_session_history_loaded_ = true;
+  const QString raw =
+      NativePref(QStringLiteral("native.composer_session_history"));
   if (raw.isEmpty()) {
     return;
   }
@@ -5341,6 +5343,12 @@ void MainWindow::LoadComposerProfileHistory() {
   }
   const QJsonObject root = document.object();
   for (auto it = root.constBegin(); it != root.constEnd(); ++it) {
+    // Keys are profile + US + session. Ignore anything unscoped that may have
+    // been written by the old profile-wide ring; those prompts cannot be
+    // assigned to a chat safely.
+    if (!it.key().contains(QLatin1Char('\x1f'))) {
+      continue;
+    }
     QStringList entries;
     for (const QJsonValue& value : it.value().toArray()) {
       const QString entry = ComposerHistoryEntryFor(value.toString());
@@ -5349,29 +5357,29 @@ void MainWindow::LoadComposerProfileHistory() {
       }
     }
     if (!entries.isEmpty()) {
-      composer_profile_history_.insert(it.key(), entries);
+      composer_session_history_.insert(it.key(), entries);
     }
   }
 }
 
-void MainWindow::SaveComposerProfileHistory() {
+void MainWindow::SaveComposerSessionHistory() {
   QJsonObject root;
-  for (auto it = composer_profile_history_.constBegin();
-       it != composer_profile_history_.constEnd(); ++it) {
+  for (auto it = composer_session_history_.constBegin();
+       it != composer_session_history_.constEnd(); ++it) {
     QJsonArray entries;
     for (const QString& entry : it.value()) {
       entries.append(entry);
     }
     root.insert(it.key(), entries);
   }
-  SetNativePref(QStringLiteral("native.composer_history"),
+  SetNativePref(QStringLiteral("native.composer_session_history"),
                 QString::fromUtf8(
                     QJsonDocument(root).toJson(QJsonDocument::Compact)));
 }
 
-void MainWindow::BackfillComposerProfileHistory(
-    const QString& profile, const QStringList& entries) {
-  QStringList& ring = composer_profile_history_[profile];
+void MainWindow::BackfillComposerSessionHistory(
+    const QString& session_key, const QStringList& entries) {
+  QStringList& ring = composer_session_history_[session_key];
   // A session page starts with the newest prompts. Later pages add older rows,
   // so append what is missing instead of reordering prompts the user just
   // submitted. The session list itself is rebuilt from the transcript each
@@ -5388,28 +5396,28 @@ void MainWindow::BackfillComposerProfileHistory(
     changed = true;
   }
   if (changed) {
-    SaveComposerProfileHistory();
+    SaveComposerSessionHistory();
   }
 }
 
 QStringList MainWindow::SessionComposerHistory(
     const ProfileSnapshot& snapshot) {
-  LoadComposerProfileHistory();
+  LoadComposerSessionHistory();
   const QString key = ComposerHistoryKey(snapshot);
   const QStringList transcript = ComposerHistory(snapshot);
   if (!transcript.isEmpty()) {
     // Persist every transcript page, not just the first one. The REST fetch
     // can finish after the first snapshot, so seeding only once left history
     // stuck at the handful of rows that happened to be loaded first.
-    BackfillComposerProfileHistory(snapshot.name, transcript);
+    BackfillComposerSessionHistory(key, transcript);
   }
   QStringList local;
   const auto found = composer_input_history_.constFind(key);
   if (found != composer_input_history_.cend()) {
     local = found.value();
   }
-  return BuildComposerHistory(
-      transcript, local, composer_profile_history_.value(snapshot.name));
+  return BuildComposerHistory(transcript, local, composer_session_history_,
+                              key);
 }
 
 void MainWindow::RememberComposerInput(const QString& text) {
@@ -5421,18 +5429,18 @@ void MainWindow::RememberComposerInput(const QString& text) {
   if (!snapshot || snapshot->name.isEmpty()) {
     return;
   }
-  LoadComposerProfileHistory();
-  QStringList& profile = composer_profile_history_[snapshot->name];
-  // The profile ring is shell-style: recalling a repeated prompt moves it to
-  // the front instead of stacking duplicates.
-  profile.removeAll(trimmed);
-  profile.prepend(trimmed);
-  while (profile.size() > kComposerHistoryLimit) {
-    profile.removeLast();
-  }
-  SaveComposerProfileHistory();
-
+  LoadComposerSessionHistory();
   const QString key = ComposerHistoryKey(*snapshot);
+  QStringList& session = composer_session_history_[key];
+  // The session ring is shell-style: recalling a repeated prompt moves it to
+  // the front instead of stacking duplicates.
+  session.removeAll(trimmed);
+  session.prepend(trimmed);
+  while (session.size() > kComposerHistoryLimit) {
+    session.removeLast();
+  }
+  SaveComposerSessionHistory();
+
   auto found = composer_input_history_.find(key);
   if (found == composer_input_history_.end()) {
     found = composer_input_history_.insert(key, QStringList());

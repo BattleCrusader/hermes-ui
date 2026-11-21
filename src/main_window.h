@@ -188,9 +188,9 @@ class MainWindow : public QWidget {
   QString ComposerHistoryKey(const ProfileSnapshot& snapshot) const;
   QStringList SessionComposerHistory(const ProfileSnapshot& snapshot);
   void RememberComposerInput(const QString& text);
-  void LoadComposerProfileHistory();
-  void SaveComposerProfileHistory();
-  void BackfillComposerProfileHistory(const QString& profile,
+  void LoadComposerSessionHistory();
+  void SaveComposerSessionHistory();
+  void BackfillComposerSessionHistory(const QString& session_key,
                                       const QStringList& entries);
   void ApplyRunIndicators(const ProfileSnapshot& snapshot);
   void ApplyVoiceState(const ProfileSnapshot& snapshot);
@@ -223,15 +223,15 @@ class MainWindow : public QWidget {
   qint64 composer_history_last_row_ = -1;
   QString composer_history_tail_;
   QHash<QString, QStringList> composer_input_history_;
-  // Profile-wide history is the fallback when the active session has no
-  // prompts yet (a fresh chat) and is persisted across restarts.
-  QHash<QString, QStringList> composer_profile_history_;
+  // Persisted history is keyed by profile + session, never by profile alone.
+  // Up-arrow recall must stay inside the chat the composer belongs to.
+  QHash<QString, QStringList> composer_session_history_;
   // Local history edits/dismissals for gateway side tasks. The gateway owns
   // the running agent, so these never mutate it; they only shape the review
   // list until the task is re-run.
   QHash<QString, QString> background_prompt_edits_;
   QSet<QString> dismissed_background_prompts_;
-  bool composer_profile_history_loaded_ = false;
+  bool composer_session_history_loaded_ = false;
   SessionSearchBar* session_search_ = nullptr;
   RightRail* right_rail_ = nullptr;
   QSplitter* body_splitter_ = nullptr;

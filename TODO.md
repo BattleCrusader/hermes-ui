@@ -42,6 +42,21 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-21 (composer recall stays inside its chat)
+
+- Up-arrow history could walk into prompts from other chats because the
+  profile-wide ring was appended as a fallback. Local inputs were already
+  keyed by profile + session, but the fallback erased that boundary.
+- Persistent composer recall is now keyed by profile + session and the
+  profile-wide merge is gone. A new chat has no recall entries until that chat
+  has its own transcript or local submissions. Compaction-archived prompts
+  still participate through the session-scoped REST lineage.
+- `BuildComposerHistory` now takes the session-keyed map plus the active key, so
+  another session cannot leak in by accident. Test:
+  `PreferencesTest::composerHistorySkipsControlFramesAndUnwrapsSteers` asserts a
+  fresh chat is empty and a second session's persisted prompt is excluded. Full
+  native suite: 10/10 passed (39.89 s).
+
 ## Status update — 2026-11-21 (streaming reuses selectable runs)
 
 - User reported the app felt sluggish again. A `sample` of the running app showed

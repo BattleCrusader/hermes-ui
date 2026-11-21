@@ -3,6 +3,7 @@
 #ifndef HERMES_UI_SRC_COMPOSER_HISTORY_H_
 #define HERMES_UI_SRC_COMPOSER_HISTORY_H_
 
+#include <QHash>
 #include <QString>
 #include <QStringList>
 
@@ -78,27 +79,24 @@ inline QString ComposerHistoryEntryFor(const QString& text) {
   return trimmed;
 }
 
-// Old prompts from earlier sessions are appended after the current session's
-// history. Shell-style recall should still work when a chat is brand new and
-// the transcript has nothing to seed from.
-inline QStringList MergeComposerHistories(const QStringList& session,
-                                          const QStringList& profile) {
-  QStringList merged = session;
-  for (const QString& entry : profile) {
-    if (!entry.isEmpty() && !merged.contains(entry)) {
-      merged.append(entry);
-    }
-  }
-  return merged;
+// Persistent recall is scoped to one chat. The unit separator keeps profile
+// and session ids from colliding even when either contains punctuation.
+inline QString ComposerHistoryScopeKey(const QString& profile,
+                                       const QString& session_id) {
+  return profile + QLatin1Char('\x1f') + session_id;
 }
 
-// Builds the full browse list from three sources. The transcript is
-// authoritative for gateway prompts; local submissions that never became rows
-// (for example `/new`) are kept in front because they were the most recent
-// things the user typed. Profile entries only fill in older sessions.
-inline QStringList BuildComposerHistory(const QStringList& transcript,
-                                        const QStringList& local,
-                                        const QStringList& profile) {
+// Builds the browse list for one chat. The transcript is authoritative for
+// gateway prompts; local submissions that never became rows (for example
+// `/new`) stay in front because they were the most recent things typed.
+// Persisted entries are looked up by `session_key`, so recall never walks into
+// prompts from another chat. A brand-new chat therefore starts with no
+// Up-arrow history, which is the desktop behavior.
+inline QStringList BuildComposerHistory(
+    const QStringList& transcript,
+    const QStringList& local,
+    const QHash<QString, QStringList>& persisted,
+    const QString& session_key) {
   QStringList history;
   for (const QString& entry : local) {
     if (!entry.isEmpty() && !transcript.contains(entry) &&
@@ -111,7 +109,7 @@ inline QStringList BuildComposerHistory(const QStringList& transcript,
       history.append(entry);
     }
   }
-  for (const QString& entry : profile) {
+  for (const QString& entry : persisted.value(session_key)) {
     if (!entry.isEmpty() && !history.contains(entry)) {
       history.append(entry);
     }

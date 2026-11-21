@@ -502,30 +502,40 @@ void PreferencesTest::composerHistorySkipsControlFramesAndUnwrapsSteers() {
                QStringLiteral("[TODO] tighten the edit")),
            QStringLiteral("[TODO] tighten the edit"));
 
-  // A fresh session has no transcript rows; the profile-wide ring supplies the
-  // older prompts, with duplicates already in the session history removed.
-  const QStringList merged = hermes::ui::MergeComposerHistories(
-      {QStringLiteral("newest prompt"), QStringLiteral("older prompt")},
-      {QStringLiteral("newest prompt"),
-       QStringLiteral("from another session")});
-  QCOMPARE(merged,
-           QStringList({QStringLiteral("newest prompt"),
-                        QStringLiteral("older prompt"),
-                        QStringLiteral("from another session")}));
+  // Persistent recall is fenced by profile + session. A prompt from another
+  // chat must never appear just because it was typed under the same profile.
+  QHash<QString, QStringList> persisted;
+  persisted.insert(
+      hermes::ui::ComposerHistoryScopeKey(QStringLiteral("ceo"),
+                                          QStringLiteral("session-a")),
+      {QStringLiteral("older prompt from this chat")});
+  persisted.insert(
+      hermes::ui::ComposerHistoryScopeKey(QStringLiteral("ceo"),
+                                          QStringLiteral("session-b")),
+      {QStringLiteral("from another session")});
 
-  // A late transcript page must add the older prompts even when a partial page
-  // already seeded the history. Local-only commands stay in front.
+  // A fresh chat has nothing to recall until it has its own prompts.
+  QVERIFY(hermes::ui::BuildComposerHistory(
+              {}, {}, persisted,
+              hermes::ui::ComposerHistoryScopeKey(QStringLiteral("ceo"),
+                                                  QStringLiteral("session-c")))
+              .isEmpty());
+
+  // A late transcript page must add older prompts even when a partial page
+  // already seeded the history. Local-only commands stay in front, and only
+  // this session's persisted entries participate.
   const QStringList built = hermes::ui::BuildComposerHistory(
       {QStringLiteral("newest prompt"), QStringLiteral("older prompt"),
        QStringLiteral("oldest prompt")},
-      {QStringLiteral("/new"), QStringLiteral("newest prompt")},
-      {QStringLiteral("older prompt"), QStringLiteral("other session")});
+      {QStringLiteral("/new"), QStringLiteral("newest prompt")}, persisted,
+      hermes::ui::ComposerHistoryScopeKey(QStringLiteral("ceo"),
+                                          QStringLiteral("session-a")));
   QCOMPARE(built,
            QStringList({QStringLiteral("/new"),
                         QStringLiteral("newest prompt"),
                         QStringLiteral("older prompt"),
                         QStringLiteral("oldest prompt"),
-                        QStringLiteral("other session")}));
+                        QStringLiteral("older prompt from this chat")}));
 }
 
 void PreferencesTest::composerTokenMeterFormatsContextUsage() {
