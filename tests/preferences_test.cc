@@ -2645,7 +2645,9 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
   using hermes::ui::ProjectGitRepositories;
   using hermes::ui::ProjectListNodes;
   using hermes::ui::ProjectsState;
+  using hermes::ui::ProjectOwnerForPath;
   using hermes::ui::ProjectWorkingDirectory;
+  using hermes::ui::ReconcileProjectSessionOwnership;
   using hermes::ui::ResolveProjectEntry;
 
   const QJsonObject list{
@@ -2828,6 +2830,60 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
       QStringLiteral("p1"), QStringLiteral("/code/alpha"), true);
   QCOMPARE(folder.value(QStringLiteral("id")).toString(), QStringLiteral("p1"));
   QVERIFY(folder.value(QStringLiteral("is_primary")).toBool());
+
+  // Two projects can declare the same folder: the parent lists its child as a
+  // secondary folder and the child owns it as primary. The gateway keeps the
+  // first project in scan order, so the sidebar re-homes by the deepest folder
+  // before rendering.
+  hermes::ui::ProjectsState nested;
+  hermes::ui::ProjectInfo parent;
+  parent.id = QStringLiteral("parent");
+  parent.name = QStringLiteral("Parent");
+  parent.primary_path = QStringLiteral("/work");
+  parent.created_at = 100;
+  parent.folders = {{QStringLiteral("/work"), QStringLiteral("Parent"), true},
+                    {QStringLiteral("/work/app"), QStringLiteral("App"),
+                     false}};
+  hermes::ui::ProjectInfo child;
+  child.id = QStringLiteral("child");
+  child.name = QStringLiteral("App");
+  child.primary_path = QStringLiteral("/work/app");
+  child.created_at = 200;
+  child.folders = {
+      {QStringLiteral("/work/app"), QStringLiteral("App"), true}};
+  nested.projects = {parent, child};
+  hermes::ui::ProjectNode parent_node;
+  parent_node.id = parent.id;
+  parent_node.label = parent.name;
+  parent_node.path = parent.primary_path;
+  parent_node.session_ids = {QStringLiteral("s1"), QStringLiteral("s2")};
+  parent_node.session_count = 2;
+  hermes::ui::ProjectNode child_node;
+  child_node.id = child.id;
+  child_node.label = child.name;
+  child_node.path = child.primary_path;
+  nested.tree = {parent_node, child_node};
+
+  hermes::ui::SessionSummary nested_session;
+  nested_session.id = QStringLiteral("s1");
+  nested_session.cwd = QStringLiteral("/work/app");
+  nested_session.message_count = 3;
+  nested_session.project_id = parent.id;
+  hermes::ui::SessionSummary parent_session;
+  parent_session.id = QStringLiteral("s2");
+  parent_session.cwd = QStringLiteral("/work");
+  parent_session.message_count = 1;
+  const std::vector<hermes::ui::SessionSummary> nested_sessions = {
+      nested_session, parent_session};
+  QCOMPARE(ProjectOwnerForPath(nested, QStringLiteral("/work/app/deep")),
+           QStringLiteral("child"));
+  QCOMPARE(ProjectOwnerForPath(nested, QStringLiteral("/work")),
+           QStringLiteral("parent"));
+  ReconcileProjectSessionOwnership(&nested, nested_sessions);
+  QCOMPARE(nested.tree[0].session_ids, (QStringList{QStringLiteral("s2")}));
+  QCOMPARE(nested.tree[0].session_count, 1);
+  QCOMPARE(nested.tree[1].session_ids, (QStringList{QStringLiteral("s1")}));
+  QCOMPARE(nested.tree[1].session_count, 1);
 }
 
 void PreferencesTest::promptHistoryEditsQueuedAndSteeredEntries() {
@@ -3455,6 +3511,7 @@ void PreferencesTest::uiCacheRoundTripsSessionsAndProjects() {
   session.provider = QStringLiteral("p1");
   session.reasoning_effort = QStringLiteral("high");
   session.project_id = QStringLiteral("p1");
+  session.cwd = QStringLiteral("/code/alpha");
   session.started_at_secs = 100;
   session.last_active_secs = 200;
   session.message_count = 2;
@@ -3496,6 +3553,7 @@ void PreferencesTest::uiCacheRoundTripsSessionsAndProjects() {
   QCOMPARE(loaded_session.sessions[0].revision, 4);
   QCOMPARE(loaded_session.sessions[0].reasoning_effort, QStringLiteral("high"));
   QCOMPARE(loaded_session.sessions[0].project_id, QStringLiteral("p1"));
+  QCOMPARE(loaded_session.sessions[0].cwd, QStringLiteral("/code/alpha"));
   QCOMPARE(static_cast<int>(loaded_session.messages.size()), 1);
   QCOMPARE(loaded_session.messages[0].row_id, static_cast<qint64>(42));
   QCOMPARE(loaded_session.messages[0].blocks[0].kind,

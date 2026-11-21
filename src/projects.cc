@@ -27,6 +27,89 @@ void AppendSessionIdsFromRows(const QJsonArray& rows, QStringList* ids) {
   }
 }
 
+QString NormalizedPath(QString path) {
+  path = QDir::fromNativeSeparators(path.trimmed());
+  if (path.isEmpty()) {
+    return path;
+  }
+  path = QDir::cleanPath(path);
+  while (path.size() > 1 && path.endsWith(QLatin1Char('/'))) {
+    path.chop(1);
+  }
+  return path;
+}
+
+bool PathIsInside(const QString& path, const QString& folder) {
+  if (path.isEmpty() || folder.isEmpty()) {
+    return false;
+  }
+  if (folder == QStringLiteral("/")) {
+    return path.startsWith(QLatin1Char('/'));
+  }
+  return path == folder || path.startsWith(folder + QLatin1Char('/'));
+}
+
+struct FolderOwnerCandidate {
+  QString project_id;
+  QString folder;
+  bool primary = false;
+  qint64 created_at = 0;
+  int order = 0;
+};
+
+bool BetterFolderOwner(const FolderOwnerCandidate& candidate,
+                       const FolderOwnerCandidate& best) {
+  if (candidate.folder.size() != best.folder.size()) {
+    return candidate.folder.size() > best.folder.size();
+  }
+  if (candidate.primary != best.primary) {
+    return candidate.primary;
+  }
+  if (candidate.created_at != best.created_at) {
+    return candidate.created_at > best.created_at;
+  }
+  return candidate.order < best.order;
+}
+
+std::vector<FolderOwnerCandidate> FolderOwnerCandidates(
+    const ProjectsState& state) {
+  std::vector<FolderOwnerCandidate> candidates;
+  QSet<QString> explicit_ids;
+  int order = 0;
+  for (const ProjectInfo& project : state.projects) {
+    explicit_ids.insert(project.id);
+    bool added = false;
+    for (const ProjectFolderInfo& folder : project.folders) {
+      const QString path = NormalizedPath(folder.path);
+      if (path.isEmpty()) {
+        continue;
+      }
+      candidates.push_back({project.id, path, folder.is_primary,
+                            project.created_at, order++});
+      added = true;
+    }
+    if (!added) {
+      const QString path = NormalizedPath(project.primary_path);
+      if (!path.isEmpty()) {
+        candidates.push_back(
+            {project.id, path, true, project.created_at, order++});
+      }
+    }
+  }
+  // Auto-discovered projects have a tree row but no `projects.list` record.
+  for (const ProjectNode& node : state.tree) {
+    if (node.id.isEmpty() || node.is_no_project ||
+        explicit_ids.contains(node.id)) {
+      continue;
+    }
+    const QString path = NormalizedPath(node.path);
+    if (!path.isEmpty()) {
+      candidates.push_back({node.id, path, true, 0, order++});
+    }
+  }
+  return candidates;
+}
+
 }  // namespace
 
 bool ParseProjectsList(const QJsonObject& payload, ProjectsState* state,
@@ -370,6 +453,72 @@ bool ProjectTreeContainsSession(const std::vector<ProjectNode>& tree,
     }
   }
   return false;
+}
+
+QString ProjectOwnerForPath(const ProjectsState& state, const QString& path) {
+  const QString normalized = NormalizedPath(path);
+  if (normalized.isEmpty()) {
+    return QString();
+  }
+  const std::vector<FolderOwnerCandidate> candidates =
+      FolderOwnerCandidates(state);
+  const FolderOwnerCandidate* best = nullptr;
+  for (const FolderOwnerCandidate& candidate : candidates) {
+    if (!PathIsInside(normalized, candidate.folder)) {
+      continue;
+    }
+    if (best == nullptr || BetterFolderOwner(candidate, *best)) {
+      best = &candidate;
+    }
+  }
+  return best == nullptr ? QString() : best->project_id;
+}
+
+void ReconcileProjectSessionOwnership(
+    ProjectsState* state, const std::vector<SessionSummary>& sessions,
+    const QString& selected_session_id) {
+  if (state == nullptr || state->tree.empty()) {
+    return;
+  }
+  QSet<QString> touched;
+  for (const SessionSummary& session : sessions) {
+    if (session.id.isEmpty() || session.cwd.isEmpty()) {
+      continue;
+    }
+    // The backend tree omits zero-message chats. A just-created selected chat
+    // already has a sidebar path through its project tag; do not resurrect
+    // every abandoned empty session here.
+    const bool selected_empty =
+        session.id == selected_session_id && session.message_count <= 0 &&
+        !session.project_id.isEmpty();
+    if (session.message_count <= 0 && !selected_empty) {
+      continue;
+    }
+    const QString owner = ProjectOwnerForPath(*state, session.cwd);
+    if (owner.isEmpty() || owner == AllProjectsId()) {
+      continue;
+    }
+    auto owner_node = std::find_if(
+        state->tree.begin(), state->tree.end(),
+        [&owner](const ProjectNode& node) { return node.id == owner; });
+    if (owner_node == state->tree.end() || owner_node->is_no_project) {
+      continue;
+    }
+    for (ProjectNode& node : state->tree) {
+      if (node.id != owner && node.session_ids.removeAll(session.id) > 0) {
+        touched.insert(node.id);
+      }
+    }
+    if (!owner_node->session_ids.contains(session.id)) {
+      owner_node->session_ids.push_back(session.id);
+      touched.insert(owner_node->id);
+    }
+  }
+  for (ProjectNode& node : state->tree) {
+    if (!node.is_no_project && touched.contains(node.id)) {
+      node.session_count = static_cast<int>(node.session_ids.size());
+    }
+  }
 }
 
 ProjectEntryDecision ResolveProjectEntry(const ProjectsState& state,

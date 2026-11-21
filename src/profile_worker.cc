@@ -215,7 +215,7 @@ bool SessionsEqual(const std::vector<SessionSummary>& left,
     const SessionSummary& b = right[index];
     if (a.id != b.id || a.title != b.title || a.preview != b.preview ||
         a.source != b.source || a.project_id != b.project_id ||
-        a.model != b.model || a.provider != b.provider ||
+        a.cwd != b.cwd || a.model != b.model || a.provider != b.provider ||
         a.reasoning_effort != b.reasoning_effort ||
         a.started_at_secs != b.started_at_secs ||
         a.last_active_secs != b.last_active_secs ||
@@ -1061,9 +1061,11 @@ void ProfileWorker::NewSessionInDir(const QString& cwd,
     return;
   }
   pending_create_project_id_ = project_id;
+  pending_create_cwd_ = cwd;
   pending_create_id_ = socket_->CreateSession(QString(), cwd);
   if (pending_create_id_ < 0) {
     pending_create_project_id_.clear();
+    pending_create_cwd_.clear();
     FailDeferredPrompts(QStringLiteral("Could not request a new session"));
     PublishError(QStringLiteral("Could not request a new session"));
     return;
@@ -1210,6 +1212,7 @@ void ProfileWorker::FetchSessions() {
       session.title = SessionTitle(row);
       session.preview = row.value(QStringLiteral("preview")).toString();
       session.source = row.value(QStringLiteral("source")).toString();
+      session.cwd = row.value(QStringLiteral("cwd")).toString();
       session.model = row.value(QStringLiteral("model")).toString();
       session.provider = row.value(QStringLiteral("provider")).toString();
       session.reasoning_effort =
@@ -4481,6 +4484,7 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
     pending_create_id_ = -1;
     const QString project_id =
         std::exchange(pending_create_project_id_, QString());
+    const QString cwd = std::exchange(pending_create_cwd_, QString());
     if (!error.isEmpty()) {
       FailDeferredPrompts(error);
       PublishError(error);
@@ -4534,6 +4538,7 @@ void ProfileWorker::OnSocketResponse(int id, const QJsonObject& result,
       placeholder.title = QStringLiteral("New chat");
       placeholder.source = QStringLiteral("local");
       placeholder.project_id = project_id;
+      placeholder.cwd = cwd;
       placeholder.model = state_.model;
       placeholder.started_at_secs = QDateTime::currentSecsSinceEpoch();
       placeholder.last_active_secs = placeholder.started_at_secs;

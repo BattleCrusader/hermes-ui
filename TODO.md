@@ -42,6 +42,26 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-22 (chats stay in their most-specific project)
+
+- A chat created under `ceo -> cron-reminder` disappeared from that project:
+  the gateway tree attributed every session in `/SSC/cron-reminder` to `SSC`
+  because both projects declare that folder (SSC as a secondary folder, the
+  dedicated project as primary), and the tree's tie-break keeps the first
+  project in scan order. The backend also deliberately omits zero-message chats
+  from `projects.tree`.
+- `SessionSummary` now carries `cwd` from the REST session rows and through the
+  session cache. Before the sidebar renders project rows, sessions with
+  messages are re-homed to the project whose declared folder most specifically
+  contains their cwd; equal-depth folders prefer the primary declaration, then
+  the newer project. Project badge counts follow the normalized rows.
+- The selected brand-new chat still uses the local project placeholder path, so
+  it remains visible before its first message is persisted; abandoned empty
+  sessions are not resurrected into every project.
+- Tests: `PreferencesTest::projectsParseListTreeAndMutators` covers the nested
+  parent/child collision and `uiCacheRoundTripsSessionsAndProjects` covers cwd
+  persistence. Full native suite: 10/10 passed (36.01 s).
+
 ## Status update — 2026-11-22 (composer recall stays inside its chat)
 
 - Up-arrow history could walk into prompts from other chats because the

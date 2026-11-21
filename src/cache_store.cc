@@ -110,6 +110,7 @@ QJsonObject SessionToJson(const SessionSummary& session) {
   row.insert(QStringLiteral("preview"), session.preview);
   row.insert(QStringLiteral("source"), session.source);
   row.insert(QStringLiteral("project_id"), session.project_id);
+  row.insert(QStringLiteral("cwd"), session.cwd);
   row.insert(QStringLiteral("model"), session.model);
   row.insert(QStringLiteral("provider"), session.provider);
   row.insert(QStringLiteral("reasoning_effort"), session.reasoning_effort);
@@ -136,6 +137,7 @@ bool SessionFromJson(const QJsonObject& row, SessionSummary* session) {
   session->preview = row.value(QStringLiteral("preview")).toString();
   session->source = row.value(QStringLiteral("source")).toString();
   session->project_id = row.value(QStringLiteral("project_id")).toString();
+  session->cwd = row.value(QStringLiteral("cwd")).toString();
   session->model = row.value(QStringLiteral("model")).toString();
   session->provider = row.value(QStringLiteral("provider")).toString();
   session->reasoning_effort =

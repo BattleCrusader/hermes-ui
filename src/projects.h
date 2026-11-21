@@ -8,6 +8,8 @@
 #include <QStringList>
 #include <vector>
 
+#include "src/model.h"
+
 namespace hermes::ui {
 
 // Projects are per-profile multi-folder workspaces served by the gateway's
@@ -128,6 +130,23 @@ QString ProjectWorkingDirectory(const ProjectsState& state,
 // vanish from its project until the backend finished claiming it.
 bool ProjectTreeContainsSession(const std::vector<ProjectNode>& tree,
                                 const QString& session_id);
+
+// Project whose declared folder most specifically contains `path`. A project
+// can list a subfolder that is another project's primary folder; the gateway
+// then keeps whichever project it scanned first, so callers resolving a
+// session by cwd need an explicit deepest-folder rule. Ties prefer the project
+// where the folder is primary, then the newer project.
+QString ProjectOwnerForPath(const ProjectsState& state, const QString& path);
+
+// Re-home sessions whose cwd proves a more specific project owns them. Applied
+// to a copy of `projects.tree` before the sidebar renders it, this corrects
+// parent/child folder collisions (a chat in `SSC/cron-reminder` belongs to the
+// `cron-reminder` project, not to `SSC`). Sessions that are not yet in the
+// tree and have no messages stay out; the local placeholder path covers the
+// just-created chat.
+void ReconcileProjectSessionOwnership(
+    ProjectsState* state, const std::vector<SessionSummary>& sessions,
+    const QString& selected_session_id = QString());
 
 // What entering a project should do to the active conversation.
 enum class ProjectEntryAction {

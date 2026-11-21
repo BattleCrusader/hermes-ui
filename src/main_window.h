@@ -151,6 +151,11 @@ class MainWindow : public QWidget {
   void ScheduleProjectCacheSave();
   void PersistProjectCacheNow();
   void ApplyProjectState();
+  // A copy of the project rows with sessions re-homed to the most specific
+  // declared folder. The gateway tree resolves duplicate parent/child folder
+  // declarations by scan order; the sidebar must follow the chat's cwd.
+  std::vector<ProjectNode> SidebarProjectRows() const;
+  void RefreshSidebarProjectRows();
   void SyncArtifactsRoot();
   void SyncRightRailProject();
   // Sidebar/right-rail panes are splitter children. Collapse flips a pinned

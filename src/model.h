@@ -131,6 +131,10 @@ struct SessionSummary {
   // the sidebar keep a fresh new chat under the project that started it
   // without treating every selected local chat as a member of every project.
   QString project_id;
+  // Session working directory from `/api/sessions`. Project membership is
+  // derived from cwd on the gateway, so keeping it here lets the sidebar
+  // resolve a folder that two projects both declare (a parent and its child).
+  QString cwd;
   QString model;
   QString provider;
   // Empty when the gateway list does not carry it yet. The cache and live

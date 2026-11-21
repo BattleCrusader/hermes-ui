@@ -302,6 +302,7 @@ class ProfileWorker : public QObject {
   QHash<QString, QString> stored_session_by_runtime_;
   int pending_create_id_ = -1;
   QString pending_create_project_id_;
+  QString pending_create_cwd_;
   int pending_catalog_id_ = -1;
   bool catalog_requested_ = false;
   // Execution identity of the turn currently claimed on this session; the

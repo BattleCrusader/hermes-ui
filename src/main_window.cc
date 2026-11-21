@@ -3756,6 +3756,7 @@ void MainWindow::Refresh() {
   if (snapshot && snapshot->revision != last_revision_) {
     chat_view_->SetSnapshot(snapshot);
     sidebar_->SetSnapshot(*snapshot);
+    RefreshSidebarProjectRows();
     composer_->SetModelCatalog(snapshot->model_providers, snapshot->provider,
                                snapshot->model);
     composer_->SetReasoning(snapshot->reasoning_effort);
@@ -4388,6 +4389,33 @@ void MainWindow::RefreshProjects(bool force) {
       });
 }
 
+std::vector<ProjectNode> MainWindow::SidebarProjectRows() const {
+  const bool list_only = project_state_.tree.empty();
+  std::vector<ProjectNode> rows =
+      list_only ? ProjectListNodes(project_state_.projects)
+                : project_state_.tree;
+  const auto snapshot = supervisor_.ActiveSnapshot();
+  if (snapshot != nullptr) {
+    ProjectsState view = project_state_;
+    view.tree = rows;
+    ReconcileProjectSessionOwnership(&view, snapshot->sessions,
+                                     snapshot->selected_session_id);
+    rows = std::move(view.tree);
+  }
+  return rows;
+}
+
+void MainWindow::RefreshSidebarProjectRows() {
+  if (sidebar_ == nullptr || (project_state_.projects.empty() &&
+                              project_state_.tree.empty())) {
+    return;
+  }
+  const std::vector<ProjectNode> visible = FilterVisibleProjects(
+      SidebarProjectRows(), dismissed_auto_project_ids_);
+  sidebar_->SetProjects(visible, project_scope_, project_state_.active_id,
+                        project_state_.available);
+}
+
 void MainWindow::ApplyProjectState() {
   if (sidebar_ == nullptr) {
     return;
@@ -4396,10 +4424,7 @@ void MainWindow::ApplyProjectState() {
   // Paint those explicit rows immediately so startup shows projects next to
   // the session list instead of waiting for counts and auto-discovery. The
   // authoritative tree replaces them as soon as it lands.
-  const bool list_only = project_state_.tree.empty();
-  const std::vector<ProjectNode> rows =
-      list_only ? ProjectListNodes(project_state_.projects)
-                : project_state_.tree;
+  const std::vector<ProjectNode> rows = SidebarProjectRows();
   // A dismissed auto project is a local layout preference, not a backend
   // delete: keep the full tree in `project_state_` for cache/refresh parity and
   // hide only the rows the user removed.
