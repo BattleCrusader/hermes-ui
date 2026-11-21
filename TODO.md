@@ -42,7 +42,7 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
-## Status update — 2026-11-21 (composer recall stays inside its chat)
+## Status update — 2026-11-22 (composer recall stays inside its chat)
 
 - Up-arrow history could walk into prompts from other chats because the
   profile-wide ring was appended as a fallback. Local inputs were already
