@@ -2,6 +2,7 @@
 #define HERMES_UI_KANBAN_VIEW_H_
 
 #include <QJsonObject>
+#include <QPointF>
 #include <QString>
 #include <QVector>
 #include <QWidget>
@@ -11,6 +12,7 @@
 #include "src/theme.h"
 
 class QComboBox;
+class QDialog;
 class QLabel;
 class QLineEdit;
 class QPushButton;
@@ -71,6 +73,16 @@ class KanbanView : public QWidget {
   QStringList SelectionForTest() const;
   void SelectForTest(const QString& task_id);
   QColor CanvasBackgroundForTest() const;
+  QWidget* CanvasForTest() const;
+  QPointF TaskCenterForTest(const QString& task_id) const;
+  QPointF ColumnCenterForTest(const QString& column) const;
+  bool DragInProgressForTest() const;
+  QString DragTaskForTest() const;
+  void MoveForTest(const QStringList& ids, const QString& column);
+  void OpenTaskForTest(const QString& task_id);
+  void OpenOrchestrationForTest();
+  QString TaskDialogStyleForTest() const;
+  QString OrchestrationDialogStyleForTest() const;
 
  protected:
   void showEvent(QShowEvent* event) override;
@@ -103,7 +115,7 @@ class KanbanView : public QWidget {
   void ShowOrchestration();
   void ShowFilterMenu();
   void PatchTask(const QString& task_id, const QJsonObject& body,
-                 const QString& success);
+                 const QString& success, const QString& warning = {});
   void DeleteTask(const QString& task_id);
   void BulkMove(const QStringList& ids, const QString& column);
   void BulkAssign(const QStringList& ids, const QString& assignee);
@@ -115,7 +127,9 @@ class KanbanView : public QWidget {
   void OpenTask(const QString& task_id);
   void ShowError(const QString& error);
   void ShowStatus(const QString& text);
-  void ShowCreated(const QString& task_id, const QString& requested_status);
+  void ShowCreated(const QString& task_id, const QString& requested_status,
+                   const QString& warning = {});
+  void NudgeDispatcher(bool quiet);
   void SetBusy(bool busy);
   void UpdateHeader();
   kanban::KanbanBoardMeta CurrentMeta() const;
@@ -138,9 +152,11 @@ class KanbanView : public QWidget {
   bool roster_pending_ = false;
   bool projects_pending_ = false;
   bool orchestration_pending_ = false;
+  bool dispatch_pending_ = false;
   int poll_tick_ = 0;
   KanbanTaskDialog* task_dialog_ = nullptr;
   QString task_dialog_id_;
+  QVector<QDialog*> aux_dialogs_;
 
   QLabel* count_ = nullptr;
   QComboBox* board_combo_ = nullptr;
@@ -148,6 +164,7 @@ class KanbanView : public QWidget {
   QToolButton* filter_button_ = nullptr;
   QLineEdit* search_ = nullptr;
   QToolButton* orchestration_button_ = nullptr;
+  QToolButton* run_ready_ = nullptr;
   QPushButton* new_task_ = nullptr;
   QLabel* status_ = nullptr;
   KanbanBoardCanvas* canvas_ = nullptr;

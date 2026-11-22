@@ -203,16 +203,25 @@ class KanbanBoardCanvas : public QWidget {
                 bool reset_view = false) {
     board_ = board;
     meta_ = meta;
+    QSet<QString> live;
+    for (const kanban::KanbanTask& task : board_.tasks) {
+      live.insert(task.id);
+    }
     if (reset_view) {
       selection_.clear();
       column_scroll_.clear();
       collapsed_.clear();
+      dragging_ = false;
+      drag_started_ = false;
+      drag_id_.clear();
+      pressed_id_.clear();
+      hover_drop_.clear();
     } else {
-      // Keep only selected cards that still exist after the refresh.
-      QSet<QString> live;
-      for (const kanban::KanbanTask& task : board_.tasks) {
-        live.insert(task.id);
-      }
+      // A polled refresh is data, not navigation. Keep only selected cards
+      // that still exist, but do not cancel a drag that is already in flight.
+      // The old code cleared pressed_id_/drag_started_/drag_id_ here, so the
+      // four-second board poll could eat the mouse press between press and
+      // release and the card would never move.
       for (auto it = selection_.begin(); it != selection_.end();) {
         if (live.contains(*it)) {
           ++it;
@@ -220,11 +229,20 @@ class KanbanBoardCanvas : public QWidget {
           it = selection_.erase(it);
         }
       }
+      if (!pressed_id_.isEmpty() && !live.contains(pressed_id_)) {
+        pressed_id_.clear();
+        drag_started_ = false;
+        drag_id_.clear();
+        dragging_ = false;
+        hover_drop_.clear();
+      }
+      if (!drag_id_.isEmpty() && !live.contains(drag_id_)) {
+        drag_started_ = false;
+        drag_id_.clear();
+        dragging_ = false;
+        hover_drop_.clear();
+      }
     }
-    dragging_ = false;
-    drag_started_ = false;
-    drag_id_.clear();
-    pressed_id_.clear();
     update();
   }
 
@@ -288,6 +306,29 @@ class KanbanBoardCanvas : public QWidget {
   }
   QVector<QRectF> TaskRects() const { return task_rects_; }
   QColor BackgroundForTest() const { return theme_.background; }
+  QPointF TaskCenter(const QString& id) {
+    Layout();
+    for (const ColumnVisual& column : columns_) {
+      for (const CardVisual& card : column.cards) {
+        if (card.id == id) {
+          return card.rect.center();
+        }
+      }
+    }
+    return QPointF();
+  }
+  QPointF ColumnCenter(const QString& slug) {
+    Layout();
+    for (const ColumnVisual& column : columns_) {
+      if (column.slug == slug) {
+        return QPointF(column.rect.center().x(),
+                       column.rect.top() + kHeaderHeight / 2.0);
+      }
+    }
+    return QPointF();
+  }
+  bool DragInProgress() const { return drag_started_ && !drag_id_.isEmpty(); }
+  QString DragTask() const { return drag_id_; }
   int VisibleTaskCount() const {
     int count = 0;
     for (const auto& column : columns_) {
@@ -1965,8 +2006,13 @@ class KanbanTaskDialog : public QDialog {
             "QLabel#kanbanSection { color: %3; font-size: 9px; font-weight: 700; "
             "letter-spacing: 0.8px; }"
             "QLabel#kanbanMuted { color: %3; font-size: 10px; }"
-            "QTextEdit#kanbanBody, QPlainTextEdit { background: %4; color: %2; "
-            "border: 1px solid %5; border-radius: 8px; padding: 6px; }"
+            "QLineEdit, QComboBox, QSpinBox, QTextEdit, QPlainTextEdit { "
+            "background: %4; color: %2; border: 1px solid %5; "
+            "border-radius: 7px; padding: 5px 7px; }"
+            "QComboBox QAbstractItemView { background: %4; color: %2; "
+            "border: 1px solid %5; selection-background-color: %8; }"
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
             "QWidget#kanbanCallout { background: %4; border: 1px solid %5; "
             "border-radius: 8px; }"
             "QPushButton#kanbanPrimary { background: %6; color: %7; "
@@ -2226,6 +2272,11 @@ class KanbanNewTaskDialog : public QDialog {
             "QLineEdit, QComboBox, QSpinBox, QTextEdit#kanbanBody { "
             "background: %4; color: %2; border: 1px solid %5; "
             "border-radius: 7px; padding: 5px 7px; }"
+            "QComboBox QAbstractItemView { background: %4; color: %2; "
+            "border: 1px solid %5; selection-background-color: %8; }"
+            "QCheckBox { color: %2; spacing: 7px; }"
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
             "QPushButton#kanbanPrimary { background: %6; color: %7; "
             "border: none; border-radius: 7px; padding: 7px 14px; "
             "font-weight: 600; }"
@@ -2234,7 +2285,7 @@ class KanbanNewTaskDialog : public QDialog {
             .arg(theme_.background.name(), theme_.foreground.name(),
                  theme_.text_secondary.name(), theme_.surface.name(),
                  theme_.stroke.name(), theme_.accent.name(),
-                 theme_.accent_text.name()));
+                 theme_.accent_text.name(), theme_.hover.name()));
     update();
   }
 
@@ -2274,6 +2325,11 @@ class KanbanBoardSettingsDialog : public QDialog {
     setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     resize(520, create ? 430 : 520);
     BuildUi();
+    ApplyStyle();
+  }
+
+  void SetTheme(const Theme& theme) {
+    theme_ = theme;
     ApplyStyle();
   }
 
@@ -2520,8 +2576,13 @@ class KanbanBoardSettingsDialog : public QDialog {
             "QLabel#kanbanDialogTitle { color: %2; font-size: 18px; "
             "font-weight: 600; }"
             "QLabel#kanbanMuted { color: %3; font-size: 10px; }"
-            "QLineEdit, QComboBox { background: %4; color: %2; "
+            "QLineEdit, QComboBox, QSpinBox { background: %4; color: %2; "
             "border: 1px solid %5; border-radius: 7px; padding: 5px 7px; }"
+            "QComboBox QAbstractItemView { background: %4; color: %2; "
+            "border: 1px solid %5; selection-background-color: %9; }"
+            "QCheckBox { color: %2; spacing: 7px; }"
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
             "QPushButton#kanbanPrimary { background: %6; color: %7; "
             "border: none; border-radius: 7px; padding: 7px 14px; "
             "font-weight: 600; }"
@@ -2532,7 +2593,8 @@ class KanbanBoardSettingsDialog : public QDialog {
             .arg(theme_.background.name(), theme_.foreground.name(),
                  theme_.text_secondary.name(), theme_.surface.name(),
                  theme_.stroke.name(), theme_.accent.name(),
-                 theme_.accent_text.name(), theme_.danger.name()));
+                 theme_.accent_text.name(), theme_.danger.name(),
+                 theme_.hover.name()));
     update();
   }
 
@@ -2562,6 +2624,11 @@ class KanbanOrchestrationDialog : public QDialog {
     setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     resize(760, 640);
     BuildUi();
+    ApplyStyle();
+  }
+
+  void SetTheme(const Theme& theme) {
+    theme_ = theme;
     ApplyStyle();
   }
 
@@ -2749,8 +2816,13 @@ class KanbanOrchestrationDialog : public QDialog {
             "QLabel#kanbanSection { color: %3; font-size: 9px; "
             "font-weight: 700; letter-spacing: 0.8px; }"
             "QLabel#kanbanMuted { color: %3; font-size: 10px; }"
-            "QLineEdit, QComboBox { background: %4; color: %2; "
+            "QLineEdit, QComboBox, QSpinBox { background: %4; color: %2; "
             "border: 1px solid %5; border-radius: 7px; padding: 5px 7px; }"
+            "QComboBox QAbstractItemView { background: %4; color: %2; "
+            "border: 1px solid %5; selection-background-color: %8; }"
+            "QCheckBox { color: %2; spacing: 7px; }"
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
             "QPushButton#kanbanPrimary { background: %6; color: %7; "
             "border: none; border-radius: 7px; padding: 7px 14px; "
             "font-weight: 600; }"
@@ -2759,7 +2831,7 @@ class KanbanOrchestrationDialog : public QDialog {
             .arg(theme_.background.name(), theme_.foreground.name(),
                  theme_.text_secondary.name(), theme_.surface.name(),
                  theme_.stroke.name(), theme_.accent.name(),
-                 theme_.accent_text.name()));
+                 theme_.accent_text.name(), theme_.hover.name()));
     update();
   }
 
@@ -2798,6 +2870,10 @@ KanbanView::KanbanView(Theme theme, QWidget* parent)
       FetchRoster();
       FetchOrchestration();
       FetchProjects();
+      // ``kanban.dispatch_in_gateway`` is false on some profiles, so no
+      // gateway dispatcher promotes and claims ready cards. While this page is
+      // open, run the same once-a-minute tick through the plugin endpoint.
+      NudgeDispatcher(true);
     }
   });
 }
@@ -2831,10 +2907,14 @@ void KanbanView::BuildUi() {
   });
   header_row->addWidget(board_combo_);
 
+  // Board choice has exactly one control (``board_combo_``). This button only
+  // holds board actions; duplicating the board list here made two dropdowns
+  // that looked like the same selector.
   board_menu_ = new QToolButton(header);
   board_menu_->setObjectName(QStringLiteral("kanbanIconButton"));
-  board_menu_->setText(QStringLiteral("▾"));
-  board_menu_->setToolTip(QStringLiteral("Boards"));
+  board_menu_->setText(QStringLiteral("Board actions"));
+  board_menu_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  board_menu_->setToolTip(QStringLiteral("New board, board settings, orchestration"));
   connect(board_menu_, &QToolButton::clicked, this, [this]() {
     ShowBoardMenu();
   });
@@ -2871,6 +2951,17 @@ void KanbanView::BuildUi() {
   connect(orchestration_button_, &QToolButton::clicked, this,
           [this]() { ShowOrchestration(); });
   header_row->addWidget(orchestration_button_);
+
+  run_ready_ = new QToolButton(header);
+  run_ready_->setObjectName(QStringLiteral("kanbanIconButton"));
+  run_ready_->setText(QStringLiteral("Run ready"));
+  run_ready_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+  run_ready_->setToolTip(
+      QStringLiteral("Claim and start ready cards now instead of waiting for "
+                     "a gateway dispatcher"));
+  connect(run_ready_, &QToolButton::clicked, this,
+          [this]() { NudgeDispatcher(false); });
+  header_row->addWidget(run_ready_);
   header_row->addStretch(1);
 
   new_task_ = new QPushButton(QStringLiteral("New task"), header);
@@ -2974,6 +3065,20 @@ void KanbanView::SetTheme(const Theme& theme) {
   if (task_dialog_ != nullptr) {
     task_dialog_->SetTheme(theme);
   }
+  // Settings/orchestration/new-task are long-lived dialogs too. They used to
+  // be WA_DeleteOnClose locals that only got the theme they were born with, so
+  // switching the app theme left an open dialog on the old palette.
+  for (QDialog* dialog : aux_dialogs_) {
+    if (auto* new_task = dynamic_cast<KanbanNewTaskDialog*>(dialog)) {
+      new_task->SetTheme(theme);
+    } else if (auto* settings =
+                   dynamic_cast<KanbanBoardSettingsDialog*>(dialog)) {
+      settings->SetTheme(theme);
+    } else if (auto* orchestration =
+                   dynamic_cast<KanbanOrchestrationDialog*>(dialog)) {
+      orchestration->SetTheme(theme);
+    }
+  }
 }
 
 void KanbanView::showEvent(QShowEvent* event) {
@@ -3009,6 +3114,7 @@ void KanbanView::Activate() {
   if (poll_timer_ != nullptr) {
     poll_timer_->start();
   }
+  NudgeDispatcher(true);
 }
 
 void KanbanView::NewTask() { ShowNewTask(QStringLiteral("triage")); }
@@ -3251,6 +3357,7 @@ void KanbanView::SelectBoard(const QString& slug, bool persist) {
   }
   UpdateHeader();
   FetchBoard();
+  NudgeDispatcher(true);
 }
 
 void KanbanView::SetBoard(const kanban::KanbanBoard& board,
@@ -3330,6 +3437,9 @@ void KanbanView::ShowTask(const QString& task_id) {
 void KanbanView::ShowNewTask(const QString& column) {
   auto* dialog = new KanbanNewTaskDialog(this, theme_, column, this);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
+  aux_dialogs_.push_back(dialog);
+  connect(dialog, &QObject::destroyed, this,
+          [this, dialog]() { aux_dialogs_.removeAll(dialog); });
   dialog->show();
   dialog->raise();
   dialog->activateWindow();
@@ -3354,12 +3464,17 @@ void KanbanView::CreateTask(const kanban::KanbanNewTask& task) {
                        .value(QStringLiteral("id"))
                        .toString();
             }
-            ShowCreated(id, requested_status);
+            // The plugin warns when a created task lands in ready with an
+            // assignee but no dispatcher is running. Swallowing it leaves a
+            // card that looks queued forever.
+            const QString warning = data.value(QStringLiteral("warning")).toString();
+            ShowCreated(id, requested_status, warning);
           });
 }
 
 void KanbanView::ShowCreated(const QString& task_id,
-                             const QString& requested_status) {
+                             const QString& requested_status,
+                             const QString& warning) {
   FetchBoard();
   FetchBoards();
   if (!requested_status.isEmpty() &&
@@ -3368,7 +3483,10 @@ void KanbanView::ShowCreated(const QString& task_id,
       !task_id.isEmpty() && !kanban::LockedTarget(requested_status)) {
     PatchTask(task_id, kanban::BuildMovePayload(requested_status),
               QStringLiteral("Created in %1")
-                  .arg(kanban::ColumnLabel(requested_status)));
+                  .arg(kanban::ColumnLabel(requested_status)),
+              warning);
+  } else if (!warning.isEmpty()) {
+    ShowStatus(warning);
   } else {
     ShowStatus(QStringLiteral("Task created."));
   }
@@ -3376,18 +3494,6 @@ void KanbanView::ShowCreated(const QString& task_id,
 
 void KanbanView::ShowBoardMenu() {
   QMenu menu(this);
-  for (const kanban::KanbanBoardMeta& meta : boards_) {
-    auto* action = menu.addAction(
-        meta.archived ? QStringLiteral("%1 (archived)").arg(meta.name)
-                      : meta.name);
-    action->setCheckable(true);
-    action->setChecked(meta.slug == selected_board_);
-    connect(action, &QAction::triggered, this,
-            [this, slug = meta.slug]() { SelectBoard(slug, true); });
-  }
-  if (!boards_.isEmpty()) {
-    menu.addSeparator();
-  }
   menu.addAction(QStringLiteral("New board…"), this,
                  [this]() { ShowBoardSettings(true); });
   menu.addAction(QStringLiteral("Board settings…"), this,
@@ -3406,6 +3512,9 @@ void KanbanView::ShowBoardSettings(bool create) {
   auto* dialog =
       new KanbanBoardSettingsDialog(this, theme_, create, this);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
+  aux_dialogs_.push_back(dialog);
+  connect(dialog, &QObject::destroyed, this,
+          [this, dialog]() { aux_dialogs_.removeAll(dialog); });
   dialog->show();
   dialog->raise();
   dialog->activateWindow();
@@ -3415,6 +3524,9 @@ void KanbanView::ShowOrchestration() {
   FetchRoster();
   auto* dialog = new KanbanOrchestrationDialog(this, theme_, this);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
+  aux_dialogs_.push_back(dialog);
+  connect(dialog, &QObject::destroyed, this,
+          [this, dialog]() { aux_dialogs_.removeAll(dialog); });
   dialog->show();
   dialog->raise();
   dialog->activateWindow();
@@ -3476,20 +3588,29 @@ void KanbanView::ShowFilterMenu() {
 }
 
 void KanbanView::PatchTask(const QString& task_id, const QJsonObject& body,
-                           const QString& success) {
+                           const QString& success, const QString& warning) {
   if (task_id.isEmpty()) {
     return;
   }
+  const bool moved_to_ready =
+      body.value(QStringLiteral("status")).toString() ==
+      QStringLiteral("ready");
   Request(QStringLiteral("PATCH"),
           QStringLiteral("/tasks/%1").arg(task_id), body,
-          [this, task_id, success](const QJsonObject&, const QString& error) {
+          [this, task_id, success, warning, moved_to_ready](
+              const QJsonObject&, const QString& error) {
             if (!error.isEmpty()) {
               return;
             }
-            ShowStatus(success);
+            ShowStatus(warning.isEmpty() ? success
+                                         : success + QStringLiteral(" — ") +
+                                               warning);
             FetchBoard();
             if (task_dialog_ != nullptr && task_dialog_id_ == task_id) {
               ShowTask(task_id);
+            }
+            if (moved_to_ready) {
+              NudgeDispatcher(false);
             }
           });
 }
@@ -3538,6 +3659,9 @@ void KanbanView::BulkMove(const QStringList& ids, const QString& column) {
                            .arg(count)
                            .arg(kanban::ColumnLabel(column)));
             FetchBoard();
+            if (column == QStringLiteral("ready")) {
+              NudgeDispatcher(false);
+            }
           });
 }
 
@@ -3554,7 +3678,7 @@ void KanbanView::BulkAssign(const QStringList& ids,
   Request(QStringLiteral("POST"), QStringLiteral("/tasks/bulk"),
           QJsonObject{{QStringLiteral("ids"), array},
                       {QStringLiteral("assignee"), assignee}},
-          [this, assignee](const QJsonObject&, const QString& error) {
+          [this, assignee, ids](const QJsonObject&, const QString& error) {
             if (!error.isEmpty()) {
               return;
             }
@@ -3562,6 +3686,17 @@ void KanbanView::BulkAssign(const QStringList& ids,
                            ? QStringLiteral("Cards unassigned.")
                            : QStringLiteral("Assigned to %1.").arg(assignee));
             FetchBoard();
+            if (!assignee.isEmpty()) {
+              for (const QString& id : ids) {
+                for (const kanban::KanbanTask& task : board_.tasks) {
+                  if (task.id == id &&
+                      task.status == QStringLiteral("ready")) {
+                    NudgeDispatcher(false);
+                    return;
+                  }
+                }
+              }
+            }
           });
 }
 
@@ -3637,6 +3772,86 @@ void KanbanView::AddTaskToColumn(const QString& column) {
 }
 
 void KanbanView::OpenTask(const QString& task_id) { ShowTask(task_id); }
+
+void KanbanView::NudgeDispatcher(bool quiet) {
+  if (dispatch_pending_ || selected_board_.isEmpty() || !on_request) {
+    return;
+  }
+  dispatch_pending_ = true;
+  Request(QStringLiteral("POST"), QStringLiteral("/dispatch?max=8"), {},
+          [this, quiet](const QJsonObject& data, const QString& error) {
+            dispatch_pending_ = false;
+            if (!error.isEmpty()) {
+              return;
+            }
+            const int spawned =
+                data.value(QStringLiteral("spawned")).toArray().size();
+            const int promoted =
+                data.value(QStringLiteral("promoted")).toInt();
+            const bool locked =
+                data.value(QStringLiteral("skipped_locked")).toBool();
+            const QString memory_pressure =
+                data.value(QStringLiteral("memory_pressure")).toString();
+            const int unassigned =
+                data.value(QStringLiteral("skipped_unassigned")).toArray().size();
+            const int capped = data.value(QStringLiteral("skipped_per_profile_capped"))
+                                   .toArray()
+                                   .size();
+            const int nonspawnable =
+                data.value(QStringLiteral("skipped_nonspawnable")).toArray().size();
+            const int crashed =
+                data.value(QStringLiteral("crashed")).toArray().size();
+
+            QString summary;
+            if (spawned > 0) {
+              summary = QStringLiteral("Started %1 ready card%2.")
+                            .arg(spawned)
+                            .arg(spawned == 1 ? QString() : QStringLiteral("s"));
+            } else if (promoted > 0) {
+              summary = QStringLiteral("Promoted %1 card%2.")
+                            .arg(promoted)
+                            .arg(promoted == 1 ? QString() : QStringLiteral("s"));
+            } else if (locked) {
+              summary = QStringLiteral(
+                  "Another dispatcher is already running.");
+            } else if (!memory_pressure.isEmpty()) {
+              summary = QStringLiteral("Dispatch paused: %1")
+                            .arg(memory_pressure);
+            } else if (crashed > 0) {
+              summary = QStringLiteral("Dispatch crashed %1 worker%2.")
+                            .arg(crashed)
+                            .arg(crashed == 1 ? QString() : QStringLiteral("s"));
+            } else if (unassigned > 0) {
+              summary = QStringLiteral(
+                  "%1 ready card%2 need an assignee.")
+                            .arg(unassigned)
+                            .arg(unassigned == 1 ? QString()
+                                                 : QStringLiteral("s"));
+            } else if (capped > 0) {
+              summary = QStringLiteral(
+                  "%1 ready card%2 are waiting on the per-profile limit.")
+                            .arg(capped)
+                            .arg(capped == 1 ? QString() : QStringLiteral("s"));
+            } else if (nonspawnable > 0) {
+              summary = QStringLiteral("%1 ready card%2 cannot start here.")
+                            .arg(nonspawnable)
+                            .arg(nonspawnable == 1 ? QString()
+                                                   : QStringLiteral("s"));
+            } else {
+              summary = QStringLiteral("No ready cards to start.");
+            }
+
+            const bool changed = spawned > 0 || promoted > 0 ||
+                                 !memory_pressure.isEmpty() || crashed > 0;
+            if (!quiet || changed) {
+              ShowStatus(summary);
+            }
+            if (changed) {
+              FetchBoard();
+              FetchBoards();
+            }
+          });
+}
 
 void KanbanView::ShowError(const QString& error) {
   error_text_ = error;
@@ -3752,6 +3967,45 @@ void KanbanView::SelectForTest(const QString& task_id) {
   if (canvas_ != nullptr) {
     canvas_->SelectOnly(task_id);
   }
+}
+
+QWidget* KanbanView::CanvasForTest() const { return canvas_; }
+
+QPointF KanbanView::TaskCenterForTest(const QString& task_id) const {
+  return canvas_ == nullptr ? QPointF() : canvas_->TaskCenter(task_id);
+}
+
+QPointF KanbanView::ColumnCenterForTest(const QString& column) const {
+  return canvas_ == nullptr ? QPointF() : canvas_->ColumnCenter(column);
+}
+
+bool KanbanView::DragInProgressForTest() const {
+  return canvas_ != nullptr && canvas_->DragInProgress();
+}
+
+QString KanbanView::DragTaskForTest() const {
+  return canvas_ == nullptr ? QString() : canvas_->DragTask();
+}
+
+void KanbanView::MoveForTest(const QStringList& ids, const QString& column) {
+  BulkMove(ids, column);
+}
+
+void KanbanView::OpenTaskForTest(const QString& task_id) { ShowTask(task_id); }
+
+void KanbanView::OpenOrchestrationForTest() { ShowOrchestration(); }
+
+QString KanbanView::TaskDialogStyleForTest() const {
+  return task_dialog_ == nullptr ? QString() : task_dialog_->styleSheet();
+}
+
+QString KanbanView::OrchestrationDialogStyleForTest() const {
+  for (QDialog* dialog : aux_dialogs_) {
+    if (auto* orchestration = dynamic_cast<KanbanOrchestrationDialog*>(dialog)) {
+      return orchestration->styleSheet();
+    }
+  }
+  return QString();
 }
 
 }  // namespace hermes::ui

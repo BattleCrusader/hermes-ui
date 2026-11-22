@@ -219,6 +219,109 @@ class KanbanModelTest : public QObject {
     QCOMPARE(scroll->value(), maximum);
   }
 
+  void boardRefreshDoesNotCancelDrag() {
+    KanbanView view(Theme::Light());
+    KanbanBoard board;
+    board.board = QStringLiteral("test");
+    board.columns = OrderedColumns(
+        {QStringLiteral("triage"), QStringLiteral("ready")});
+    board.tasks.push_back(ParseTask(Task("one", "triage")));
+    board.tasks.push_back(ParseTask(Task("two", "ready")));
+    KanbanBoardMeta meta;
+    meta.slug = QStringLiteral("test");
+    meta.name = QStringLiteral("Test");
+    view.SetBoardForTest(board, meta);
+    view.resize(1200, 640);
+    view.show();
+    QCoreApplication::processEvents();
+
+    QWidget* canvas = view.CanvasForTest();
+    QVERIFY(canvas != nullptr);
+    const QPoint from = view.TaskCenterForTest(QStringLiteral("one")).toPoint();
+    const QPoint to = view.ColumnCenterForTest(QStringLiteral("ready")).toPoint();
+    QVERIFY(!from.isNull());
+    QVERIFY(!to.isNull());
+
+    QTest::mousePress(canvas, Qt::LeftButton, Qt::NoModifier, from);
+    QTest::mouseMove(canvas, to, 20);
+    QVERIFY(view.DragInProgressForTest());
+    QCOMPARE(view.DragTaskForTest(), QStringLiteral("one"));
+
+    // Regression: the four-second board poll used to call SetBoard and clear
+    // the drag state, so release never moved the card.
+    view.SetBoardForTest(board, meta);
+    QCoreApplication::processEvents();
+    QVERIFY(view.DragInProgressForTest());
+    QCOMPARE(view.DragTaskForTest(), QStringLiteral("one"));
+
+    QTest::mouseRelease(canvas, Qt::LeftButton, Qt::NoModifier, to);
+    QVERIFY(!view.DragInProgressForTest());
+  }
+
+  void moveIntoReadyNudgesTheDispatcher() {
+    KanbanView view(Theme::Light());
+    KanbanBoard board;
+    board.board = QStringLiteral("test");
+    board.columns = OrderedColumns(
+        {QStringLiteral("triage"), QStringLiteral("ready")});
+    board.tasks.push_back(ParseTask(Task("one", "triage")));
+    KanbanBoardMeta meta;
+    meta.slug = QStringLiteral("test");
+    meta.name = QStringLiteral("Test");
+    view.SetBoardForTest(board, meta);
+
+    QStringList calls;
+    view.on_request = [&calls](const QString& method, const QString& path,
+                               const QJsonObject&, KanbanView::JsonCallback done) {
+      calls.push_back(method + QStringLiteral(" ") + path);
+      QJsonObject data;
+      if (path.startsWith(QStringLiteral("/dispatch"))) {
+        data = QJsonObject{{"spawned", QJsonArray{QJsonArray{"one", "ceo", ""}}}};
+      }
+      if (done) {
+        done(data, QString());
+      }
+    };
+
+    view.MoveForTest({QStringLiteral("one")}, QStringLiteral("ready"));
+    QVERIFY(calls.contains(QStringLiteral("PATCH /tasks/one?board=test")));
+    // ``kanban.dispatch_in_gateway`` can be false; without this POST the ready
+    // card sits idle until someone starts a dispatcher.
+    QVERIFY(calls.contains(
+        QStringLiteral("POST /dispatch?max=8&board=test")));
+  }
+
+  void dialogsThemeFormControlsAndFollowThemeChanges() {
+    KanbanView view(Theme::Light());
+    KanbanBoard board;
+    board.board = QStringLiteral("test");
+    board.columns = OrderedColumns(
+        {QStringLiteral("triage"), QStringLiteral("ready")});
+    board.tasks.push_back(ParseTask(Task("one", "triage")));
+    KanbanBoardMeta meta;
+    meta.slug = QStringLiteral("test");
+    meta.name = QStringLiteral("Test");
+    view.SetBoardForTest(board, meta);
+
+    view.OpenTaskForTest(QStringLiteral("one"));
+    const QString light_task = view.TaskDialogStyleForTest();
+    QVERIFY(light_task.contains(QStringLiteral("QComboBox")));
+    QVERIFY(light_task.contains(QStringLiteral("QSpinBox")));
+    QVERIFY(light_task.contains(QStringLiteral("QScrollArea")));
+    QVERIFY(light_task.contains(Theme::Light().background.name()));
+
+    view.OpenOrchestrationForTest();
+    const QString light_orchestration = view.OrchestrationDialogStyleForTest();
+    QVERIFY(light_orchestration.contains(QStringLiteral("QCheckBox")));
+    QVERIFY(light_orchestration.contains(Theme::Light().background.name()));
+
+    view.SetTheme(Theme::Dark());
+    QVERIFY(view.TaskDialogStyleForTest().contains(
+        Theme::Dark().background.name()));
+    QVERIFY(view.OrchestrationDialogStyleForTest().contains(
+        Theme::Dark().background.name()));
+  }
+
   void viewRefreshKeepsSelectionOnlyForLiveCards() {
     KanbanView view(hermes::ui::Theme{});
     KanbanBoard board;

@@ -42,6 +42,45 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-22 (kanban board is usable and dispatches)
+
+- **Cards can move again.** The four-second board poll called
+  `KanbanBoardCanvas::SetBoard`, which unconditionally cleared
+  `pressed_id_`/`drag_started_`/`drag_id_`. A press could be erased before the
+  release, so `mouseReleaseEvent` saw no drag. A polled refresh now preserves
+  the in-flight card until that card disappears from the board; only a board
+  switch (`reset_view`) clears drag state.
+- **Task dialogs are themed.** `KanbanTaskDialog::ApplyStyle` styled text
+  widgets but not `QComboBox`, `QSpinBox`, or the scroll viewport, so status,
+  assignee, priority, and link controls fell back to the platform palette.
+  Those controls and the transparent scroll viewport now follow the active
+  theme.
+- **Every Kanban dialog follows theme changes.** Board settings,
+  orchestration, and new-task dialogs were `WA_DeleteOnClose` locals, so an
+  already-open dialog never received `KanbanView::SetTheme`. They are tracked in
+  `aux_dialogs_`, receive theme updates, and their style sheets now cover
+  `QComboBox` popups, `QSpinBox`, `QCheckBox`, and scroll viewports.
+- **One board selector.** The header had a board combo box and a `▾` menu that
+  repeated the same board list. The combo box is now the only selector; the menu
+  button is text-only “Board actions” and contains New board, Board settings,
+  and Orchestration.
+- **Ready cards now run.** `kanban.dispatch_in_gateway` is false in the live
+  config and no `hermes kanban` dispatcher is running, while the native UI never
+  called the plugin dispatch endpoint. A visible “Run ready” action, board
+  activation/switch, the 60-second board tick, moves into Ready, and
+  assignments of Ready cards now `POST /dispatch?max=8`; the response is
+  summarized in the status bar. Create-response `warning` text is surfaced
+  instead of swallowed.
+- `dispatch_once` claims/spawns Ready cards only. Triage decomposition still
+  belongs to the gateway dispatcher (`auto_decompose_tick`) or an explicit
+  per-card decompose call, so a pile of Triage cards is not silently turned into
+  ready work by this change.
+- Tests: `KanbanModelTest::boardRefreshDoesNotCancelDrag` keeps a drag alive
+  across `SetBoard`; `moveIntoReadyNudgesTheDispatcher` asserts the PATCH and
+  dispatch calls; `dialogsThemeFormControlsAndFollowThemeChanges` checks form
+  controls, scroll/checkbox coverage, and live theme changes. Full native suite:
+  10/10 passed (44.70 s).
+
 ## Status update — 2026-11-22 (chats stay in their most-specific project)
 
 - A chat created under `ceo -> cron-reminder` disappeared from that project:
