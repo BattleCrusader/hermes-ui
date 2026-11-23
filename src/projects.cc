@@ -536,6 +536,27 @@ void ReconcileProjectSessionOwnership(
   }
 }
 
+QStringList RecencyOrderedSessionIds(
+    const std::vector<SessionSummary>& sessions) {
+  std::vector<const SessionSummary*> ordered;
+  ordered.reserve(sessions.size());
+  for (const SessionSummary& session : sessions) {
+    if (!session.archived) {
+      ordered.push_back(&session);
+    }
+  }
+  std::stable_sort(ordered.begin(), ordered.end(),
+                   [](const SessionSummary* a, const SessionSummary* b) {
+                     return a->last_active_secs > b->last_active_secs;
+                   });
+  QStringList ids;
+  ids.reserve(static_cast<int>(ordered.size()));
+  for (const SessionSummary* session : ordered) {
+    ids.push_back(session->id);
+  }
+  return ids;
+}
+
 ProjectEntryDecision ResolveProjectEntry(const ProjectsState& state,
                                          const QString& project_id,
                                          const QStringList& sessions_by_recency,
@@ -568,9 +589,10 @@ ProjectEntryDecision ResolveProjectEntry(const ProjectsState& state,
     decision.session_id = node->session_ids.first();
     return decision;
   }
-  if (node->session_count <= 0) {
-    decision.action = ProjectEntryAction::kStartSession;
-  }
+  // A stale count with no ids is an empty project row. Entering it should
+  // start a chat instead of leaving the reader on some other project's
+  // conversation.
+  decision.action = ProjectEntryAction::kStartSession;
   return decision;
 }
 

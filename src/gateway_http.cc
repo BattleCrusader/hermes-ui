@@ -50,28 +50,27 @@ bool GatewayHttp::MintTicket(QString* ticket, QString* error) {
                     QStringLiteral("native-http"), ticket, &ticket_error)) {
     return true;
   }
-  if (!IsStaleEndpointError(ticket_error)) {
-    if (error != nullptr) {
-      *error = ticket_error;
+  if (!endpoint_.valid() || IsStaleEndpointError(ticket_error)) {
+    QString discover_error;
+    if (!DiscoverEndpoint(&endpoint_, &discover_error)) {
+      if (error != nullptr) {
+        *error = ticket_error + QStringLiteral("; ") + discover_error;
+      }
+      return false;
     }
-    return false;
-  }
-
-  QString discover_error;
-  if (!DiscoverEndpoint(&endpoint_, &discover_error)) {
-    if (error != nullptr) {
-      *error = ticket_error + QStringLiteral("; ") + discover_error;
+    if (!RequestTicket(home_, profile_name_, endpoint_,
+                       QStringLiteral("native-http"), ticket, &ticket_error)) {
+      if (error != nullptr) {
+        *error = ticket_error;
+      }
+      return false;
     }
-    return false;
+    return true;
   }
-  if (!RequestTicket(home_, profile_name_, endpoint_,
-                     QStringLiteral("native-http"), ticket, &ticket_error)) {
-    if (error != nullptr) {
-      *error = ticket_error;
-    }
-    return false;
+  if (error != nullptr) {
+    *error = ticket_error;
   }
-  return true;
+  return false;
 }
 
 void GatewayHttp::Abort() {

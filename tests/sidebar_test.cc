@@ -6,11 +6,15 @@
 
 #include "src/sidebar.h"
 
+#include <QAction>
+#include <QApplication>
 #include <QCompleter>
 #include <QCoreApplication>
 #include <QImage>
 #include <QLineEdit>
+#include <QMenu>
 #include <QScrollBar>
+#include <QTimer>
 #include <QtTest>
 #include <vector>
 
@@ -43,6 +47,7 @@ class SidebarTest : public QObject {
  private slots:
   void navRowsRouteToWorkspacePages();
   void addProfileButtonInvokesCallback();
+  void overflowingProjectsDoNotShadowRailControls();
   void activityPulseTracksBackgroundSession();
   void activityPulseTracksBackgroundProfile();
   void activityPulseTracksBackgroundProject();
@@ -97,6 +102,8 @@ void SidebarTest::projectScrollSurvivesSnapshotsAndHomeLeads() {
   auto* scrollbar =
       sidebar.findChild<QScrollBar*>(QStringLiteral("sessionScrollBar"));
   QVERIFY(scrollbar != nullptr);
+  sidebar.ClickTargets();
+  QCoreApplication::processEvents();
   QVERIFY(scrollbar->isVisible());
   QVERIFY(scrollbar->maximum() > 0);
   scrollbar->setValue(scrollbar->maximum() / 2);
@@ -127,7 +134,9 @@ void SidebarTest::projectScrollSurvivesSnapshotsAndHomeLeads() {
 void SidebarTest::sessionDensityChangesRowHeightAndContext() {
   hermes::ui::Theme theme = hermes::ui::Theme::Light();
   hermes::ui::Sidebar sidebar(theme);
-  sidebar.resize(theme.sidebar_width, 500);
+  // Tall enough that every density renders the last row in full; hit rects
+  // are clipped to the visible band so a row cannot shadow the profile rail.
+  sidebar.resize(theme.sidebar_width, 560);
   sidebar.show();
 
   hermes::ui::ProfileSnapshot snapshot = SnapshotWithSessions();
@@ -282,6 +291,110 @@ void SidebarTest::addProfileButtonInvokesCallback() {
   QCOMPARE(added, 1);
 }
 
+void SidebarTest::overflowingProjectsDoNotShadowRailControls() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::Sidebar sidebar(theme);
+  sidebar.resize(theme.sidebar_width, 500);
+  sidebar.show();
+  sidebar.SetSnapshot(SnapshotWithSessions());
+  std::vector<hermes::ui::ProfileChip> chips(5);
+  for (int i = 0; i < 5; ++i) {
+    chips[static_cast<std::size_t>(i)].label = QStringLiteral("P%1").arg(i);
+  }
+  sidebar.SetProfileChips(chips, 0);
+
+  std::vector<hermes::ui::ProjectNode> projects;
+  for (int i = 0; i < 40; ++i) {
+    hermes::ui::ProjectNode node;
+    node.id = QStringLiteral("p%1").arg(i);
+    node.label = QStringLiteral("Project %1").arg(i);
+    node.session_count = 0;
+    projects.push_back(node);
+  }
+  sidebar.SetProjects(projects, hermes::ui::AllProjectsId(), QString(), true);
+
+  // Scroll to the bottom so the final project rows sit directly above (and
+  // used to hit-test over) the profile rail.
+  auto* scrollbar =
+      sidebar.findChild<QScrollBar*>(QStringLiteral("sessionScrollBar"));
+  QVERIFY(scrollbar != nullptr);
+  // The project overflow test needs the rail geometry computed before it can
+  // inspect the scroll range.
+  sidebar.ClickTargets();
+  QCoreApplication::processEvents();
+  QVERIFY(scrollbar->maximum() > 0);
+  scrollbar->setValue(scrollbar->maximum());
+  QCoreApplication::processEvents();
+
+  QRectF add_profile;
+  QRectF more;
+  std::vector<QRectF> projects_visible;
+  for (const hermes::ui::ClickTarget& target : sidebar.ClickTargets()) {
+    if (target.name == QStringLiteral("sidebar:add-profile")) {
+      add_profile = target.rect;
+    } else if (target.name == QStringLiteral("sidebar:more")) {
+      more = target.rect;
+    } else if (target.name.startsWith(QStringLiteral("sidebar:project:"))) {
+      projects_visible.push_back(target.rect);
+    }
+  }
+  QVERIFY(!add_profile.isNull());
+  QVERIFY(!more.isNull());
+  for (const QRectF& project : projects_visible) {
+    QVERIFY2(!project.intersects(add_profile),
+             "scrolled project row shadows the add-profile control");
+    QVERIFY2(!project.intersects(more),
+             "scrolled project row shadows the profile overflow control");
+  }
+
+  int added = 0;
+  sidebar.on_add_profile = [&added]() { ++added; };
+  QTest::mouseClick(&sidebar, Qt::LeftButton, Qt::NoModifier,
+                    add_profile.center().toPoint());
+  QCOMPARE(added, 1);
+
+  // Every rail chip remains clickable with the project list scrolled to the
+  // bottom; the clipped project hit rects must not shadow the profile rail.
+  int activated = -1;
+  sidebar.on_profile_selected = [&activated](int index) { activated = index; };
+  QRectF chip_four;
+  for (const hermes::ui::ClickTarget& target : sidebar.ClickTargets()) {
+    if (target.name == QStringLiteral("sidebar:profile:4")) {
+      chip_four = target.rect;
+    }
+  }
+  QVERIFY(!chip_four.isNull());
+  QTest::mouseClick(&sidebar, Qt::LeftButton, Qt::NoModifier,
+                    chip_four.center().toPoint());
+  QCOMPARE(activated, 4);
+
+  // The overflow control opens its profile menu even when the project list is
+  // scrolled to the bottom. QMenu::exec() owns a nested loop, so close it from
+  // a timer after inspecting the actions.
+  bool menu_opened = false;
+  bool saw_add_profile = false;
+  bool saw_manage_bots = false;
+  QTimer::singleShot(20, [&]() {
+    auto* popup = qobject_cast<QMenu*>(QApplication::activePopupWidget());
+    if (popup != nullptr) {
+      menu_opened = true;
+      for (const QAction* action : popup->actions()) {
+        if (action->text().startsWith(QStringLiteral("Add profile"))) {
+          saw_add_profile = true;
+        } else if (action->text().startsWith(QStringLiteral("Manage bots"))) {
+          saw_manage_bots = true;
+        }
+      }
+      popup->close();
+    }
+  });
+  QTest::mouseClick(&sidebar, Qt::LeftButton, Qt::NoModifier,
+                    more.center().toPoint());
+  QVERIFY(menu_opened);
+  QVERIFY(saw_add_profile);
+  QVERIFY(saw_manage_bots);
+}
+
 void SidebarTest::activityPulseTracksBackgroundSession() {
   hermes::ui::Theme theme = hermes::ui::Theme::Light();
   hermes::ui::Sidebar sidebar(theme);
@@ -308,11 +421,21 @@ void SidebarTest::activityPulseTracksBackgroundSession() {
   QCoreApplication::processEvents();
   const QImage after = sidebar.grab().toImage();
   const qreal dpr = after.devicePixelRatio();
-  const QPoint sample(qRound((row.left() + 8) * dpr),
-                      qRound(row.center().y() * dpr));
+  const QRect row_px(qRound(row.left() * dpr), qRound(row.top() * dpr),
+                     qRound(row.width() * dpr), qRound(row.height() * dpr));
+  const QRect sample = row_px.intersected(after.rect());
+  bool changed = false;
+  for (int y = sample.top(); y <= sample.bottom() && !changed; ++y) {
+    for (int x = sample.left(); x <= sample.right(); ++x) {
+      if (before.pixelColor(x, y) != after.pixelColor(x, y)) {
+        changed = true;
+        break;
+      }
+    }
+  }
   // The turn belongs to s0 while s1 is selected: the dot must follow the
   // working session, not the selection.
-  QVERIFY(before.pixelColor(sample) != after.pixelColor(sample));
+  QVERIFY(changed);
 }
 
 void SidebarTest::activityPulseTracksBackgroundProfile() {

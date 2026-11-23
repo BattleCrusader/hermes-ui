@@ -42,6 +42,38 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-24 (profiles stay visible and sessions open promptly)
+
+- **Profiles come from the gateway handshake.** Startup could race `/api/status`
+  and freeze the roster on the `default` fallback: the gateway was serving five
+  profiles while the rail said “4 profiles warm”. `LoadProfiles()` now builds
+  the roster from `endpoint_.served_profiles` first and only uses status for
+  version/fallback. `MainWindow` reconciles the served roster every 15 s on a
+  background discovery pass; `Supervisor::RefreshProfileRoster()` appends only
+  new workers, so existing chats/transcripts are untouched.
+- **The rail is no longer shadowed by scrolled project rows.** Custom-painted
+  hit rects were pushed even when a project row was scrolled under the profile
+  rail, so the three-dot menu and profile chips received clicks meant for the
+  list. Hit rects are now intersected with the same visible band used by
+  `paintEvent`; offscreen rows cannot intercept rail controls.
+- **Entering a project focuses its most recent chat; an empty project starts a
+  chat.** `RecencyOrderedSessionIds()` stably orders non-archived sessions by
+  real activity. `EnsureSessionForProjectScope()` uses that order but still
+  preserves the current session when it already belongs to the project. An
+  empty project row now always starts a session, and `NewSession()` focuses the
+  composer.
+- **Long sessions paint before their composer history is hydrated.**
+  `FetchMessages()` used to walk up to twenty compacted pages before publishing
+  anything. The visible transcript now publishes first. When the first page is
+  not full, recall is derived from that page without another request. Only the
+  background profiles fetch one page; foreground profiles fetch the full 500
+  on activation, and background profiles no longer prefetch transcripts.
+- Tests: `SidebarTest::overflowingProjectsDoNotShadowRailControls` scrolls 40
+  projects, proves no row overlaps the rail, clicks profile chip 4, and opens
+  the three-dot menu. `PreferencesTest::projectsParseListTreeAndMutators`
+  covers recency order and empty-project creation. Full native suite:
+  **10/10 passed** (45.12 s).
+
 ## Status update — 2026-11-23 (a project's chats stay in that project)
 
 - **Folderless projects keep their chats.** The backend project tree matches

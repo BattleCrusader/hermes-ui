@@ -51,6 +51,12 @@ QStringList ServedProfileNames(const QStringList& profile_ids) {
   return names;
 }
 
+void NormalizeProfileNames(QStringList* names) {
+  names->removeDuplicates();
+  names->removeAll(QStringLiteral("default"));
+  names->push_front(QStringLiteral("default"));
+}
+
 QColor ProfileColorFor(const QString& name) {
   if (name.isEmpty() || name == QStringLiteral("default")) {
     return QColor(QStringLiteral("#6E6E78"));
@@ -483,7 +489,11 @@ void Supervisor::LoadProfiles() {
     error_ = discover_error;
   }
 
-  QStringList names;
+  // The served roster comes from the gateway handshake, not from
+  // `/api/status`. Status can fail transiently at launch (or be slower than
+  // the control socket), and freezing the roster on the `default` fallback
+  // made every subsequently served profile permanently invisible.
+  QStringList names = ServedProfileNames(endpoint_.served_profiles);
   if (endpoint_.valid()) {
     GatewayHttp status_http(HermesHome(), QStringLiteral("default"), endpoint_);
     QJsonDocument status;
@@ -493,15 +503,13 @@ void Supervisor::LoadProfiles() {
       const QJsonObject object = status.object();
       gateway_version_ = object.value(QStringLiteral("version"))
                              .toString(QStringLiteral("unknown"));
-      const QJsonArray profiles =
-          object.value(QStringLiteral("profiles")).toArray();
-      const QStringList served = ServedProfileNames(endpoint_.served_profiles);
-      if (!served.isEmpty()) {
+      if (names.isEmpty()) {
         // `/api/status.profiles` lists every profile on disk, including ones
         // this multiplexer does not serve. Starting a worker for those only
-        // produces permanent `bootstrap binding rejected` retries.
-        names = served;
-      } else {
+        // produces permanent `bootstrap binding rejected` retries, so this is
+        // only a fallback when the handshake did not publish a roster.
+        const QJsonArray profiles =
+            object.value(QStringLiteral("profiles")).toArray();
         for (const QJsonValue& value : profiles) {
           const QString name = value.toString();
           if (!name.isEmpty()) {
@@ -517,9 +525,7 @@ void Supervisor::LoadProfiles() {
   if (names.isEmpty()) {
     names.push_back(QStringLiteral("default"));
   }
-  names.removeDuplicates();
-  names.removeAll(QStringLiteral("default"));
-  names.push_front(QStringLiteral("default"));
+  NormalizeProfileNames(&names);
 
   entries_.reserve(static_cast<std::size_t>(names.size()));
   for (const QString& name : names) {
@@ -533,6 +539,56 @@ void Supervisor::LoadProfiles() {
                                      gateway_version_, enable_streaming_);
     entries_.push_back(std::move(entry));
   }
+}
+
+bool Supervisor::RefreshProfileRoster(const GatewayEndpoint& endpoint) {
+  if (!endpoint.valid()) {
+    return false;
+  }
+  QStringList names = ServedProfileNames(endpoint.served_profiles);
+  if (names.isEmpty()) {
+    return false;
+  }
+  NormalizeProfileNames(&names);
+
+  endpoint_ = endpoint;
+  QStringList current;
+  current.reserve(profile_count());
+  for (const Entry& entry : entries_) {
+    current.push_back(entry.name);
+  }
+
+  std::vector<QString> added;
+  for (const QString& name : names) {
+    if (current.contains(name)) {
+      continue;
+    }
+    Entry entry;
+    entry.name = name;
+    entry.label = name;
+    entry.color = ProfileColorFor(name);
+    entry.is_default = name == QStringLiteral("default");
+    entry.worker = new ProfileWorker(name, ProfileHome(name), entry.color,
+                                     entry.is_default, endpoint_,
+                                     gateway_version_, enable_streaming_);
+    entries_.push_back(std::move(entry));
+    added.push_back(name);
+  }
+  if (added.empty()) {
+    return false;
+  }
+
+  if (started_ && !stopped_) {
+    for (const QString& name : added) {
+      for (Entry& entry : entries_) {
+        if (entry.name == name) {
+          StartWorker(&entry);
+          break;
+        }
+      }
+    }
+  }
+  return true;
 }
 
 int Supervisor::profile_count() const {
@@ -1876,6 +1932,7 @@ void Supervisor::ReloadProfiles() {
           ? entries_[static_cast<std::size_t>(active_index_)].name
           : QString();
   for (Entry& entry : entries_) {
+    StopRelay(&entry);
     if (entry.thread != nullptr && entry.thread->isRunning()) {
       QMetaObject::invokeMethod(entry.worker, "Shutdown",
                                 Qt::BlockingQueuedConnection);

@@ -15,6 +15,7 @@
 #include <QToolTip>
 #include <QWheelEvent>
 #include <algorithm>
+#include <optional>
 #include <vector>
 
 #include "src/paint_utils.h"
@@ -769,13 +770,37 @@ void Sidebar::RebuildHitRects() {
   session_scroll_max_ = std::max(0, static_cast<int>(total - available));
   session_scroll_ = std::clamp(session_scroll_, 0, session_scroll_max_);
 
+  // Hit testing follows what is actually painted. Rows that scroll under the
+  // profile rail must not remain clickable there: they used to sit on top of
+  // the rail's chip/add/overflow controls and swallow those clicks.
+  const QRectF visible_content(0, content_top, width(), available);
+  auto clip_project_row = [&visible_content](ProjectRect row) {
+    if (!row.rect.intersects(visible_content)) {
+      return std::optional<ProjectRect>();
+    }
+    row.rect = row.rect.intersected(visible_content);
+    if (!row.chevron.isNull()) {
+      row.chevron = row.chevron.intersected(row.rect);
+    }
+    return std::optional<ProjectRect>(row);
+  };
+  auto clip_session_row = [&visible_content](RowRect row) {
+    if (!row.rect.intersects(visible_content)) {
+      return std::optional<RowRect>();
+    }
+    row.rect = row.rect.intersected(visible_content);
+    return std::optional<RowRect>(row);
+  };
+
   qreal y = content_top - session_scroll_;
   if (ProjectsVisible()) {
     ProjectRect all;
     all.id = AllProjectsId();
     all.rect = QRectF(kOuterPadding, y, width() - kOuterPadding * 2,
                       kProjectRowHeight - 2);
-    project_rects_.push_back(all);
+    if (auto clipped = clip_project_row(all)) {
+      project_rects_.push_back(*clipped);
+    }
     y += kProjectRowHeight;
 
     for (const ProjectNode& node : projects_) {
@@ -785,7 +810,9 @@ void Sidebar::RebuildHitRects() {
                         kProjectRowHeight - 2);
       row.chevron = QRectF(row.rect.left() + 3, row.rect.top() + 4, 18, 18);
       row.expanded = node.id == expanded_project_id_;
-      project_rects_.push_back(row);
+      if (auto clipped = clip_project_row(row)) {
+        project_rects_.push_back(*clipped);
+      }
       y += kProjectRowHeight;
 
       if (row.expanded) {
@@ -795,9 +822,8 @@ void Sidebar::RebuildHitRects() {
               QRectF(kOuterPadding + 18, y, width() - kOuterPadding * 2 - 18,
                      SessionRowHeight());
           session_row.index = position;
-          if (session_row.rect.bottom() > content_top &&
-              session_row.rect.top() < content_bottom) {
-            session_rects_.push_back(session_row);
+          if (auto clipped = clip_session_row(session_row)) {
+            session_rects_.push_back(*clipped);
           }
           y += SessionRowHeight() + SessionGap();
         }
@@ -818,8 +844,8 @@ void Sidebar::RebuildHitRects() {
       row.rect = QRectF(kOuterPadding, y, width() - kOuterPadding * 2,
                         SessionRowHeight());
       row.index = position;
-      if (row.rect.bottom() > content_top && row.rect.top() < content_bottom) {
-        session_rects_.push_back(row);
+      if (auto clipped = clip_session_row(row)) {
+        session_rects_.push_back(*clipped);
       }
       y += SessionRowHeight() + SessionGap();
     }

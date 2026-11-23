@@ -220,6 +220,12 @@ class Supervisor {
   bool ImportProfile(const QString& archive, QString* error,
                      bool reload = true);
   void ReloadProfiles();
+  // Reconciles the warm worker roster with the served profiles published by
+  // the live gateway. Additions are started incrementally; existing workers
+  // keep their selected chat and transcript. Returns true when a chip needs
+  // to be added. Never blocks on discovery (the caller already did that off
+  // the UI thread).
+  bool RefreshProfileRoster(const GatewayEndpoint& endpoint);
 
   QString ProfileName(int index) const;
   QString ProfileLabel(int index) const;

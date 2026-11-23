@@ -174,6 +174,13 @@ ProjectEntryDecision ResolveProjectEntry(const ProjectsState& state,
                                          const QString& current_session_id,
                                          const QString& current_project_id);
 
+// Non-archived session ids ordered by real activity, newest first. The
+// snapshot vector is not a recency list: pinned rows and backend grouping can
+// put an older chat first. Project entry must follow the chat the reader last
+// used, not the snapshot's storage order.
+QStringList RecencyOrderedSessionIds(
+    const std::vector<SessionSummary>& sessions);
+
 // Default folder for the workspace file browser: the active project's
 // working directory, or the user's home when no project is selected.
 QString ArtifactsWorkingDirectory(const ProjectsState& state,

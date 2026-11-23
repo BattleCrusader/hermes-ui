@@ -2647,8 +2647,10 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
   using hermes::ui::ProjectsState;
   using hermes::ui::ProjectOwnerForPath;
   using hermes::ui::ProjectWorkingDirectory;
+  using hermes::ui::RecencyOrderedSessionIds;
   using hermes::ui::ReconcileProjectSessionOwnership;
   using hermes::ui::ResolveProjectEntry;
+  using hermes::ui::SessionSummary;
 
   const QJsonObject list{
       {QStringLiteral("active_id"), QStringLiteral("p1")},
@@ -2725,6 +2727,19 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
            (QStringList{QStringLiteral("s1"), QStringLiteral("s2"),
                         QStringLiteral("s3")}));
   QVERIFY(state.tree[1].is_no_project);
+  SessionSummary pinned_older;
+  pinned_older.id = QStringLiteral("s2");
+  pinned_older.pinned = true;
+  pinned_older.last_active_secs = 100;
+  SessionSummary newer;
+  newer.id = QStringLiteral("s3");
+  newer.last_active_secs = 200;
+  SessionSummary archived_newest;
+  archived_newest.id = QStringLiteral("s4");
+  archived_newest.archived = true;
+  archived_newest.last_active_secs = 300;
+  QCOMPARE(RecencyOrderedSessionIds({pinned_older, newer, archived_newest}),
+           (QStringList{QStringLiteral("s3"), QStringLiteral("s2")}));
   const auto p1_entry = ResolveProjectEntry(
       state, QStringLiteral("p1"),
       {QStringLiteral("s3"), QStringLiteral("s2"), QStringLiteral("s1")},
@@ -2755,7 +2770,7 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
   orphan_state.tree.push_back(orphan);
   const auto orphan_entry =
       ResolveProjectEntry(orphan_state, orphan.id, {}, QString(), QString());
-  QVERIFY(orphan_entry.action == ProjectEntryAction::kKeepCurrent);
+  QVERIFY(orphan_entry.action == ProjectEntryAction::kStartSession);
   hermes::ui::ProjectsState stale_state;
   hermes::ui::ProjectNode stale_target;
   stale_target.id = QStringLiteral("p1");

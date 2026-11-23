@@ -387,8 +387,11 @@ void ProfileWorker::SetForeground(bool foreground) {
     QTimer::singleShot(0, this, [this]() { FetchModelOptions(); });
   }
   if (foreground) {
-    // SetForeground runs on the UI thread; attach the session on the worker
-    // thread, where the socket lives.
+    // The background pass only reads the first session page. Hydrate the full
+    // recent window now that this profile is visible, then attach the socket
+    // on the worker thread where it lives.
+    QMetaObject::invokeMethod(
+        this, [this]() { FetchSessions(true); }, Qt::QueuedConnection);
     QMetaObject::invokeMethod(this, "AttachIfForeground", Qt::QueuedConnection);
   }
 }
@@ -1197,10 +1200,14 @@ void ProfileWorker::FlushSessionCache() {
   }
 }
 
-void ProfileWorker::FetchSessions() {
+void ProfileWorker::FetchSessions(bool full) {
   if (shutting_down_ || http_ == nullptr) {
     return;
   }
+
+  const bool hydrate_all = full || foreground_;
+  const int page_limit =
+      hydrate_all ? kSessionFetchLimit : kSessionFetchPageSize;
 
   const auto parse_rows = [](const QJsonArray& rows) {
     std::vector<SessionSummary> parsed;
@@ -1246,7 +1253,7 @@ void ProfileWorker::FetchSessions() {
   // ids; dedupe while keeping the first (most relevant) occurrence.
   std::set<QString> seen_ids;
   int total = 0;
-  for (int offset = 0; offset < kSessionFetchLimit;
+  for (int offset = 0; offset < page_limit;
        offset += kSessionFetchPageSize) {
     QJsonDocument document;
     QString error;
@@ -1396,7 +1403,7 @@ void ProfileWorker::FetchSessions() {
     }
   }
 
-  if (!fetch_session_id.isEmpty()) {
+  if (!fetch_session_id.isEmpty() && foreground_) {
     FetchMessages(fetch_session_id);
   }
   if (!models_loaded_ && foreground_) {
@@ -3083,70 +3090,7 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
     }
   }
 
-  // The transcript page above intentionally contains only live rows. Ask for
-  // the display lineage separately so compaction-archived user prompts remain
-  // recallable without painting them into the visible transcript.
-  QStringList composer_history;
-  bool history_fetched = false;
-  const auto cached_history = composer_history_cache_.constFind(session_id);
-  if (cached_history != composer_history_cache_.cend()) {
-    composer_history = cached_history.value();
-    history_fetched = true;
-  } else {
-    // The newest page alone can be almost entirely tool output, so walk older
-    // pages until the lineage is exhausted. This is a REST SQLite read and the
-    // result is cached for the lifetime of the profile worker.
-    std::vector<std::pair<qint64, QString>> history_rows;
-    bool history_failed = false;
-    for (int offset = 0; offset < kComposerHistoryFetchLimit;
-         offset += kMessageFetchLimit) {
-      QJsonDocument history_document;
-      QString history_error;
-      if (!http_->GetJson(
-              QStringLiteral(
-                  "/api/sessions/%1/messages?limit=%2&offset=%3&order=latest"
-                  "&include_compacted=true")
-                  .arg(session_id)
-                  .arg(kMessageFetchLimit)
-                  .arg(offset),
-              &history_document, &history_error)) {
-        history_failed = true;
-        break;
-      }
-      const QJsonArray history_messages =
-          history_document.object().value(QStringLiteral("messages")).toArray();
-      for (const QJsonValue& value : history_messages) {
-        const QJsonObject row = value.toObject();
-        const QString role = row.value(QStringLiteral("role")).toString();
-        const QString content = row.value(QStringLiteral("content")).toString();
-        if (role == QStringLiteral("user") && !content.trimmed().isEmpty()) {
-          history_rows.emplace_back(
-              static_cast<qint64>(row.value(QStringLiteral("id")).toDouble()),
-              content);
-        }
-      }
-      if (history_messages.size() < kMessageFetchLimit) {
-        break;
-      }
-    }
-    if (!history_rows.empty()) {
-      std::sort(history_rows.begin(), history_rows.end(),
-                [](const auto& left, const auto& right) {
-                  return left.first < right.first;
-                });
-      for (auto it = history_rows.rbegin(); it != history_rows.rend(); ++it) {
-        composer_history.append(it->second);
-      }
-      // A failed HTTP page should be retried on the next refresh. A lineage
-      // that merely hit the safety cap is still worth caching so every refresh
-      // does not repeat the full walk.
-      if (!history_failed) {
-        composer_history_cache_.insert(session_id, composer_history);
-      }
-      history_fetched = true;
-    }
-  }
-
+  const bool transcript_page_complete = rows.size() < kMessageFetchLimit;
   if (messages.size() > kRenderMessageLimit) {
     std::size_t start = messages.size() - kRenderMessageLimit;
     const std::size_t lookback = start > 40 ? start - 40 : 0;
@@ -3158,6 +3102,31 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
     }
     messages.erase(messages.begin(),
                    messages.begin() + static_cast<std::ptrdiff_t>(start));
+  }
+
+  // The transcript page above intentionally contains only live rows. Ask for
+  // the display lineage separately so compaction-archived user prompts remain
+  // recallable without painting them into the visible transcript.
+  QStringList composer_history;
+  bool history_fetched = false;
+  const auto cached_history = composer_history_cache_.constFind(session_id);
+  if (cached_history != composer_history_cache_.cend()) {
+    composer_history = cached_history.value();
+    history_fetched = true;
+  } else if (transcript_page_complete) {
+    // The newest page was not full, so there is no older page. It already
+    // contains every user prompt in the session; derive recall from it
+    // instead of making another request (and another full page walk) just to
+    // rediscover the same rows.
+    for (auto it = messages.rbegin(); it != messages.rend(); ++it) {
+      if (it->role != MessageRole::kUser ||
+          it->raw_text.trimmed().isEmpty()) {
+        continue;
+      }
+      composer_history.append(it->raw_text);
+    }
+    composer_history_cache_.insert(session_id, composer_history);
+    history_fetched = true;
   }
 
   {
@@ -3218,7 +3187,74 @@ void ProfileWorker::FetchMessages(const QString& session_id) {
       state_.status_text = QStringLiteral("ready");
     }
     history_loaded_ = true;
+    // Paint the transcript before looking for older composer history. For a
+    // compacted session the history walk can take twenty sequential REST
+    // requests; making the visible chat wait on it made long sessions feel
+    // stuck on "loading".
     PublishLocked();
+  }
+
+  if (!history_fetched) {
+    // The newest page is full, so the lineage may continue in older pages.
+    // This result is only needed for Up-arrow recall, never for the visible
+    // transcript, so it must not hold up the publish above.
+    std::vector<std::pair<qint64, QString>> history_rows;
+    bool history_failed = false;
+    for (int offset = 0; offset < kComposerHistoryFetchLimit;
+         offset += kMessageFetchLimit) {
+      QJsonDocument history_document;
+      QString history_error;
+      if (!http_->GetJson(
+              QStringLiteral(
+                  "/api/sessions/%1/messages?limit=%2&offset=%3&order=latest"
+                  "&include_compacted=true")
+                  .arg(session_id)
+                  .arg(kMessageFetchLimit)
+                  .arg(offset),
+              &history_document, &history_error)) {
+        history_failed = true;
+        break;
+      }
+      const QJsonArray history_messages =
+          history_document.object().value(QStringLiteral("messages")).toArray();
+      for (const QJsonValue& value : history_messages) {
+        const QJsonObject row = value.toObject();
+        const QString role = row.value(QStringLiteral("role")).toString();
+        const QString content = row.value(QStringLiteral("content")).toString();
+        if (role == QStringLiteral("user") && !content.trimmed().isEmpty()) {
+          history_rows.emplace_back(
+              static_cast<qint64>(row.value(QStringLiteral("id")).toDouble()),
+              VisibleUserPromptText(content));
+        }
+      }
+      if (history_messages.size() < kMessageFetchLimit) {
+        break;
+      }
+    }
+    if (!history_rows.empty()) {
+      std::sort(history_rows.begin(), history_rows.end(),
+                [](const auto& left, const auto& right) {
+                  return left.first < right.first;
+                });
+      for (auto it = history_rows.rbegin(); it != history_rows.rend(); ++it) {
+        if (it->second.trimmed().isEmpty()) {
+          continue;
+        }
+        composer_history.append(it->second);
+      }
+      // A failed HTTP page should be retried on the next refresh. A lineage
+      // that merely hit the safety cap is still worth caching so every refresh
+      // does not repeat the full walk.
+      if (!history_failed) {
+        composer_history_cache_.insert(session_id, composer_history);
+      }
+      history_fetched = true;
+    }
+    if (history_fetched) {
+      std::lock_guard<std::mutex> lock(mutex_);
+      state_.composer_history = std::move(composer_history);
+      PublishLocked();
+    }
   }
 }
 

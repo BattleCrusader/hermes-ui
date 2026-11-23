@@ -131,6 +131,7 @@ class MainWindow : public QWidget {
   void ApplyTheme();
   void ApplyAppearancePreferences();
   void Refresh();
+  void RefreshProfileRoster();
   void UpdateSidebarChips();
   void UpdateStatus();
   void CheckProfileCompletions();
@@ -262,6 +263,11 @@ class MainWindow : public QWidget {
   QString pet_revision_;
   StatusBar* status_bar_ = nullptr;
   QTimer* poll_timer_ = nullptr;
+  // The gateway can start serving a profile after the app's first handshake
+  // (or `/api/status` can be transiently unavailable at launch). Reconcile the
+  // served roster off the UI thread instead of freezing the startup list.
+  QTimer* profile_refresh_timer_ = nullptr;
+  bool profile_refresh_pending_ = false;
   std::vector<QString> drafts_;
   int last_revision_ = -1;
   int last_unread_sum_ = -1;
@@ -343,6 +349,7 @@ class MainWindow : public QWidget {
   int last_active_ = -1;
   int last_connected_ = -1;
   QString last_running_signature_;
+  QString last_profile_signature_;
   double last_switch_ms_ = 0.0;
   double font_scale_ = 1.0;
   QString theme_preset_;

@@ -231,6 +231,13 @@ MainWindow::MainWindow(ThemeMode mode, bool enable_streaming, QWidget* parent)
   connect(poll_timer_, &QTimer::timeout, this, [this]() { Refresh(); });
   poll_timer_->start();
 
+  profile_refresh_timer_ = new QTimer(this);
+  profile_refresh_timer_->setInterval(15000);
+  connect(profile_refresh_timer_, &QTimer::timeout, this,
+          [this]() { RefreshProfileRoster(); });
+  profile_refresh_timer_->start();
+  QTimer::singleShot(1500, this, [this]() { RefreshProfileRoster(); });
+
   // Project scope changes are cheap and frequent; coalesce cache writes so a
   // click never turns into a synchronous filesystem operation on the UI.
   project_cache_timer_ = new QTimer(this);
@@ -2396,6 +2403,7 @@ void MainWindow::NewSession() {
   supervisor_.NewSession(supervisor_.active_index(), NewSessionCwd(),
                          project_id);
   ClearPinnedContext();
+  composer_->FocusEditor();
 }
 
 void MainWindow::SetAutoApprove(bool auto_approve) {
@@ -3664,6 +3672,9 @@ void MainWindow::ActivateProfile(int index) {
   if (index < 0 || index >= supervisor_.profile_count()) {
     return;
   }
+  if (drafts_.size() != static_cast<std::size_t>(supervisor_.profile_count())) {
+    drafts_.resize(static_cast<std::size_t>(supervisor_.profile_count()));
+  }
   const int previous = supervisor_.active_index();
   if (previous >= 0 && previous < static_cast<int>(drafts_.size())) {
     drafts_[static_cast<std::size_t>(previous)] = composer_->Text();
@@ -3803,6 +3814,56 @@ void MainWindow::Refresh() {
   RefreshProjects();
 }
 
+void MainWindow::RefreshProfileRoster() {
+  if (profile_refresh_pending_ || supervisor_.profile_count() == 0) {
+    return;
+  }
+  profile_refresh_pending_ = true;
+  auto endpoint = std::make_shared<GatewayEndpoint>();
+  RunBackground(
+      this,
+      [endpoint]() {
+        BackgroundResult result;
+        QString error;
+        if (!DiscoverEndpoint(endpoint.get(), &error)) {
+          result.error = error;
+        }
+        return result;
+      },
+      [this, endpoint](const BackgroundResult& result) {
+        profile_refresh_pending_ = false;
+        if (!result.ok()) {
+          return;
+        }
+        const int previous_count = supervisor_.profile_count();
+        QHash<QString, QString> drafts_by_name;
+        for (int index = 0;
+             index < previous_count &&
+             index < static_cast<int>(drafts_.size());
+             ++index) {
+          drafts_by_name.insert(supervisor_.ProfileName(index),
+                                drafts_[static_cast<std::size_t>(index)]);
+        }
+        if (previous_count > 0) {
+          drafts_by_name.insert(supervisor_.ProfileName(
+                                    supervisor_.active_index()),
+                                composer_->Text());
+        }
+        if (!supervisor_.RefreshProfileRoster(*endpoint)) {
+          return;
+        }
+        drafts_.assign(static_cast<std::size_t>(supervisor_.profile_count()),
+                       QString());
+        for (int index = 0; index < supervisor_.profile_count(); ++index) {
+          drafts_[static_cast<std::size_t>(index)] =
+              drafts_by_name.value(supervisor_.ProfileName(index));
+        }
+        ActivateProfile(supervisor_.active_index());
+        UpdateSidebarChips();
+        UpdateStatus();
+      });
+}
+
 void MainWindow::UpdateSidebarChips() {
   if (supervisor_.profile_count() == 0) {
     return;
@@ -3810,12 +3871,17 @@ void MainWindow::UpdateSidebarChips() {
   int unread_sum = 0;
   int connected_count = 0;
   QString running_signature;
+  QString profile_signature;
   std::vector<ProfileChip> chips;
   chips.reserve(static_cast<std::size_t>(supervisor_.profile_count()));
   for (int index = 0; index < supervisor_.profile_count(); ++index) {
     const auto snapshot = supervisor_.SnapshotAt(index);
     ProfileChip chip;
     chip.label = supervisor_.ProfileLabel(index);
+    profile_signature.append(supervisor_.ProfileName(index));
+    profile_signature.append(QLatin1Char('\x1f'));
+    profile_signature.append(chip.label);
+    profile_signature.append(QLatin1Char('\x1e'));
     chip.color = supervisor_.ProfileColor(index);
     chip.is_default = supervisor_.IsDefault(index);
     chip.unread = snapshot ? snapshot->unread : 0;
@@ -3836,13 +3902,15 @@ void MainWindow::UpdateSidebarChips() {
   const int active = supervisor_.active_index();
   if (unread_sum == last_unread_sum_ && active == last_active_ &&
       connected_count == last_connected_ &&
-      running_signature == last_running_signature_) {
+      running_signature == last_running_signature_ &&
+      profile_signature == last_profile_signature_) {
     return;
   }
   last_unread_sum_ = unread_sum;
   last_active_ = active;
   last_connected_ = connected_count;
   last_running_signature_ = running_signature;
+  last_profile_signature_ = profile_signature;
   sidebar_->SetProfileChips(chips, active);
 }
 
@@ -4693,16 +4761,14 @@ void MainWindow::EnsureSessionForProjectScope() {
 
   const QString current = snapshot->selected_session_id;
   QString current_project_id;
-  QStringList recency;
-  recency.reserve(static_cast<int>(snapshot->sessions.size()));
   for (const SessionSummary& session : snapshot->sessions) {
     if (session.id == current) {
       current_project_id = session.project_id;
-    }
-    if (!session.archived) {
-      recency.push_back(session.id);
+      break;
     }
   }
+  const QStringList recency =
+      RecencyOrderedSessionIds(snapshot->sessions);
 
   // Resolve against the same reconciled rows the sidebar shows. Raw
   // `projects.tree` can put a chat in the parent project (or omit a

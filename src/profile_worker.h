@@ -215,7 +215,11 @@ class ProfileWorker : public QObject {
   void FinishActivePromptOperation();
   void FlushDeferredPrompts();
   void FailDeferredPrompts(const QString& error);
-  void FetchSessions();
+  // `full` hydrates the whole recent-session window. Background profiles only
+  // need the first page for their rail badge and switch preview; walking five
+  // pages per profile every ten seconds made foreground loads contend with
+  // four idle workers.
+  void FetchSessions(bool full = false);
   void LoadCachedState();
   void FlushSessionCache();
   void FetchMessages(const QString& session_id);
