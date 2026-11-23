@@ -85,6 +85,7 @@ add_executable(hermes_ui MACOSX_BUNDLE
   src/project_appearance.cc
   src/prompt_history_dialog.cc
   src/cache_store.cc
+  src/input_cache.cc
   src/right_rail.cc
   src/session_search_bar.cc
   src/terminal_widget.cc
@@ -194,6 +195,7 @@ add_executable(hermes_ui_tests
   src/project_appearance.cc
   src/prompt_history_dialog.cc
   src/cache_store.cc
+  src/input_cache.cc
   src/browser_automation.cc
   src/gateway_events.cc
   src/audio_data_url.cc
@@ -396,6 +398,8 @@ add_executable(hermes_kanban_tests
   src/kanban_model.cc
   src/kanban_view.cc
   src/pages_view.cc
+  src/cache_store.cc
+  src/input_cache.cc
   src/theme.cc
   src/theme_presets.cc
   src/paint_utils.cc

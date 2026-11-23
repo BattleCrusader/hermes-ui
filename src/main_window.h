@@ -189,6 +189,13 @@ class MainWindow : public QWidget {
   void UpdateRequest(const ProfileSnapshot& snapshot);
   void UpdateFindBar();
   void UpdateComposerHistory(const ProfileSnapshot& snapshot);
+  // Crash-safe drafts are keyed by profile + session. Programmatic history
+  // recall does not overwrite them, so Up-arrow keeps its own browsing state.
+  void SyncComposerDraft(Composer* composer, const QString& profile,
+                         const QString& session_id, const QString& prefix,
+                         QString* key);
+  void SyncComposerDraft(const ProfileSnapshot& snapshot);
+  void SyncDetachedComposerDraft(const ProfileSnapshot& snapshot);
   // Composer input history is per session and kept in submission order, so a
   // local slash command is just as recoverable as a gateway prompt.
   QString ComposerHistoryKey(const ProfileSnapshot& snapshot) const;
@@ -228,6 +235,8 @@ class MainWindow : public QWidget {
   qsizetype composer_history_prompt_count_ = 0;
   qint64 composer_history_last_row_ = -1;
   QString composer_history_tail_;
+  QString composer_draft_key_;
+  QString detached_composer_draft_key_;
   QHash<QString, QStringList> composer_input_history_;
   // Persisted history is keyed by profile + session, never by profile alone.
   // Up-arrow recall must stay inside the chat the composer belongs to.

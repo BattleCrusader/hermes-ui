@@ -117,6 +117,10 @@ class Composer : public QWidget {
   void AttachRequested();
   void VoiceToggleRequested();
   void Submitted(const QString& text);
+  // User-authored text changed. Programmatic history recall does not emit, so
+  // the shell can cache a crash-safe draft without replacing it with a
+  // recalled prompt.
+  void DraftChanged(const QString& text);
   // Files dropped onto the card; the shell stages them through the worker so
   // they get the same 0600 copy as the attach picker.
   void FilesDropped(const QStringList& paths);
@@ -209,6 +213,7 @@ class Composer : public QWidget {
   QString history_draft_;
   bool send_hovered_ = false;
   bool editor_focused_ = false;
+  bool suppress_draft_changed_ = false;
   QPointer<QDialog> model_visibility_dialog_;
   bool model_refresh_pending_ = false;
   bool model_refresh_completed_ = false;

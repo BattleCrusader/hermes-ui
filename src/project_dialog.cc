@@ -41,6 +41,9 @@ ProjectDialog::ProjectDialog(const Theme& theme, const ProjectInfo* existing,
   setWindowTitle(create_ ? QStringLiteral("New project")
                          : QStringLiteral("Edit project"));
   setObjectName(QStringLiteral("projectDialog"));
+  setProperty("draftScope",
+              create_ ? QStringLiteral("new")
+                      : QStringLiteral("project:") + existing->id);
   resize(560, 520);
 
   const bool dark = theme.sidebar.lightness() < 128;

@@ -65,6 +65,7 @@
 #include "src/gateway_events.h"
 #include "src/gateway_http.h"
 #include "src/gateway_protocol.h"
+#include "src/input_cache.h"
 #include "src/kanban_view.h"
 #include "src/model_visibility.h"
 #include "src/native_prefs.h"
@@ -183,6 +184,7 @@ MainWindow::MainWindow(ThemeMode mode, bool enable_streaming, QWidget* parent)
   // Application-level: a focused editor, an open popup or a dialog would keep a
   // window-level QShortcut from ever firing.
   qApp->installEventFilter(this);
+  InstallInputDraftCache();
   theme_ = mode_ == ThemeMode::kDark ? Theme::Dark() : Theme::Light();
   default_ui_family_ = theme_.ui_family;
   default_mono_family_ = theme_.mono_family;
@@ -303,12 +305,14 @@ MainWindow::MainWindow(ThemeMode mode, bool enable_streaming, QWidget* parent)
     }
     composer_->SetMentionRoot(ComposerMentionRoot());
     UpdateComposerHistory(*snapshot);
+    SyncComposerDraft(*snapshot);
     ApplyRunIndicators(*snapshot);
     last_voice_transcript_serial_ = snapshot->voice_transcript_serial;
     ApplyVoiceState(*snapshot);
     ApplyPetState(*snapshot);
     if (detached_chat_ != nullptr) {
       detached_chat_->SetSnapshot(snapshot);
+      SyncDetachedComposerDraft(*snapshot);
     }
     if (settings_view_ != nullptr && settings_view_->IsOpen()) {
       settings_view_->SetSnapshot(*snapshot);
@@ -739,6 +743,10 @@ void MainWindow::BuildUi() {
   };
   settings_view_->on_close = [this]() { settings_view_->hide(); };
   settings_view_->on_select_session = [this](const QString& session_id) {
+    if (const auto snapshot = supervisor_.ActiveSnapshot()) {
+      SyncComposerDraft(composer_, snapshot->name, session_id,
+                        QStringLiteral("composer\x1f"), &composer_draft_key_);
+    }
     supervisor_.SelectSession(supervisor_.active_index(), session_id);
     ClearPinnedContext();
     settings_view_->hide();
@@ -1469,6 +1477,12 @@ void MainWindow::BuildUi() {
   };
   sidebar_->on_new_chat = [this]() { NewSession(); };
   sidebar_->on_session_selected = [this](const QString& session_id) {
+    const std::shared_ptr<const ProfileSnapshot> snapshot =
+        supervisor_.ActiveSnapshot();
+    if (snapshot != nullptr) {
+      SyncComposerDraft(composer_, snapshot->name, session_id,
+                        QStringLiteral("composer\x1f"), &composer_draft_key_);
+    }
     supervisor_.SelectSession(supervisor_.active_index(), session_id);
     ClearPinnedContext();
   };
@@ -1483,6 +1497,12 @@ void MainWindow::BuildUi() {
 
   connect(composer_, &Composer::Submitted, this,
           [this](const QString& text) { SubmitText(text); });
+  connect(composer_, &Composer::DraftChanged, this,
+          [this](const QString& text) {
+            if (!composer_draft_key_.isEmpty()) {
+              CacheInputDraft(composer_draft_key_, text);
+            }
+          });
   connect(composer_, &Composer::VoiceToggleRequested, this,
           [this]() { ToggleLiveVoice(); });
   connect(composer_, &Composer::QueuedReviewRequested, this,
@@ -2755,8 +2775,10 @@ void MainWindow::ShowDetachedChat() {
     return;
   }
   detached_chat_ = new DetachedChatWindow(theme_);
-  connect(detached_chat_, &QObject::destroyed, this,
-          [this]() { detached_chat_ = nullptr; });
+  connect(detached_chat_, &QObject::destroyed, this, [this]() {
+    detached_chat_ = nullptr;
+    detached_composer_draft_key_.clear();
+  });
   ChatView* view = detached_chat_->chat_view();
   view->SetEditMessageHandler(
       [this](const ChatMessage& message, const QString& text) {
@@ -2795,7 +2817,17 @@ void MainWindow::ShowDetachedChat() {
   Composer* composer = detached_chat_->composer();
   if (const auto snapshot = supervisor_.ActiveSnapshot()) {
     composer->SetHistory(SessionComposerHistory(*snapshot));
+    SyncComposerDraft(composer, snapshot->name,
+                      snapshot->selected_session_id,
+                      QStringLiteral("detached-composer\x1f"),
+                      &detached_composer_draft_key_);
   }
+  connect(composer, &Composer::DraftChanged, this,
+          [this](const QString& text) {
+            if (!detached_composer_draft_key_.isEmpty()) {
+              CacheInputDraft(detached_composer_draft_key_, text);
+            }
+          });
   composer->SetHiddenModels(
       ParseHiddenModels(NativePref(QStringLiteral("native.model_visibility"))));
   composer->on_stop = [this]() {
@@ -3706,6 +3738,7 @@ void MainWindow::ActivateProfile(int index) {
     }
     composer_->SetMentionRoot(ComposerMentionRoot());
     UpdateComposerHistory(*snapshot);
+    SyncComposerDraft(*snapshot);
     ApplyRunIndicators(*snapshot);
     pinned_context_.clear();
     last_voice_transcript_serial_ = snapshot->voice_transcript_serial;
@@ -3729,7 +3762,6 @@ void MainWindow::ActivateProfile(int index) {
     }
     title_bar_->SetTitle(title);
   }
-  composer_->SetText(drafts_[static_cast<std::size_t>(index)]);
   sidebar_->SetActiveIndex(index);
   chat_view_->ScrollToBottom();
   chat_view_->repaint();
@@ -3779,12 +3811,14 @@ void MainWindow::Refresh() {
     }
     composer_->SetMentionRoot(ComposerMentionRoot());
     UpdateComposerHistory(*snapshot);
+    SyncComposerDraft(*snapshot);
     ApplyRunIndicators(*snapshot);
     ApplyVoiceState(*snapshot);
     ApplyGatewayEvents(*snapshot);
     ApplyPetState(*snapshot);
     if (detached_chat_ != nullptr) {
       detached_chat_->SetSnapshot(snapshot);
+      SyncDetachedComposerDraft(*snapshot);
     }
     while (last_attachment_serial_ < snapshot->attachment_serial &&
            last_attachment_serial_ < snapshot->attachments.size()) {
@@ -5416,6 +5450,55 @@ void MainWindow::UpdateComposerHistory(const ProfileSnapshot& snapshot) {
   if (detached_chat_ != nullptr && detached_chat_->composer() != nullptr) {
     detached_chat_->composer()->SetHistory(SessionComposerHistory(snapshot));
   }
+}
+
+void MainWindow::SyncComposerDraft(Composer* composer,
+                                   const QString& profile,
+                                   const QString& session_id,
+                                   const QString& prefix, QString* key) {
+  if (composer == nullptr || key == nullptr) {
+    return;
+  }
+  const QString next =
+      prefix + profile + QLatin1Char('\x1f') + session_id;
+  if (*key == next) {
+    return;
+  }
+  if (key->isEmpty()) {
+    // A draft typed before the first snapshot arrived belongs to the chat
+    // that is about to be selected; don't let a delayed snapshot erase it.
+    *key = next;
+    const QString cached = CachedInputDraft(next);
+    if (!cached.isEmpty()) {
+      if (composer->Text() != cached) {
+        composer->SetText(cached);
+      }
+    } else if (!composer->Text().isEmpty()) {
+      CacheInputDraft(next, composer->Text());
+    }
+    return;
+  }
+  *key = next;
+  const QString cached = CachedInputDraft(next);
+  if (composer->Text() != cached) {
+    composer->SetText(cached);
+  }
+}
+
+void MainWindow::SyncComposerDraft(const ProfileSnapshot& snapshot) {
+  SyncComposerDraft(composer_, snapshot.name, snapshot.selected_session_id,
+                    QStringLiteral("composer\x1f"), &composer_draft_key_);
+}
+
+void MainWindow::SyncDetachedComposerDraft(
+    const ProfileSnapshot& snapshot) {
+  if (detached_chat_ == nullptr || detached_chat_->composer() == nullptr) {
+    return;
+  }
+  SyncComposerDraft(detached_chat_->composer(), snapshot.name,
+                    snapshot.selected_session_id,
+                    QStringLiteral("detached-composer\x1f"),
+                    &detached_composer_draft_key_);
 }
 
 QString MainWindow::ComposerHistoryKey(

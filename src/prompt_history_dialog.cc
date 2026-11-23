@@ -93,6 +93,10 @@ PromptHistoryDialog::PromptHistoryDialog(const Theme& theme,
   layout->addWidget(preview_label);
   editor_ = new QPlainTextEdit(this);
   editor_->setObjectName(QStringLiteral("queuedPromptEditor"));
+  // The editor mirrors whichever queued prompt is selected. Restoring a
+  // previous draft on show would silently replace that prompt with unrelated
+  // text before the user picks a row.
+  editor_->setProperty("noDraftCache", true);
   editor_->setPlaceholderText(
       QStringLiteral("Select a prompt to view or edit it."));
   editor_->setMinimumHeight(120);

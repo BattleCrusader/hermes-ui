@@ -42,6 +42,33 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-24 (input drafts survive crashes and stay scoped)
+
+- **Every editable input now keeps a crash-safe draft.** A new application-level
+  `InputDraftStore` (`src/input_cache.cc`) watches `QLineEdit`, `QPlainTextEdit`
+  and `QTextEdit` widgets. User edits append a compact JSON record to
+  `input-drafts.journal` under `HERMES_UI_CACHE` immediately, so a crash does
+  not lose the last keystrokes; the journal is folded into `input-drafts.json`
+  periodically and on quit. Clearing an input removes its cached value.
+- **Drafts are restored only where they belong.** Cache keys follow the widget's
+  owner path, with a `draftScope` for reused dialogs: `new` vs `project:<id>`,
+  `kanban-task:<task_id>`, and `kanban-new:<column>`. Search fields, password
+  fields, read-only fields, combo internals and file-dialog fields are excluded.
+  Accepted dialogs clear their drafts; cancelled dialogs keep them.
+- **The composer draft is per chat, not per profile or app.** `Composer` emits
+  `DraftChanged` only for user edits; programmatic `SetText()`/history recall is
+  suppressed. `MainWindow` keys the main and detached composers by
+  `profile + session`, so switching chats restores that chat's draft without
+  disturbing Up/Down prompt history.
+- **Async detail bodies can opt back in after population.** `RestoreInputDraft()`
+  lets the Kanban task dialog reapply a draft after the server body arrives and
+  marks it dirty so the next poll does not clobber it. The queued-prompt editor
+  opts out (`noDraftCache`) because it mirrors the selected queue row.
+- Tests: `PreferencesTest::inputDraftsSurviveRestartAndClearWhenEmptied`,
+  `inputDraftsSkipSearchPasswordsAndReadOnlyFields`, and
+  `composerDraftSignalOnlyTracksUserEdits`. Full native suite: **10/10 passed**
+  (70.39 s).
+
 ## Status update — 2026-11-24 (profiles stay visible and sessions open promptly)
 
 - **Profiles come from the gateway handshake.** Startup could race `/api/status`

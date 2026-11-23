@@ -57,6 +57,7 @@
 #include "src/composer.h"
 #include "src/composer_history.h"
 #include "src/flow_layout.h"
+#include "src/input_cache.h"
 #include "src/message_history.h"
 #include "src/model.h"
 #include "src/model_visibility.h"
@@ -169,6 +170,9 @@ class PreferencesTest : public QObject {
   void projectDialogEditsCreateAndDisplayFields();
   void projectAppearanceParsesColorsIconsAndFiltersDismissedAutos();
   void uiCacheRoundTripsSessionsAndProjects();
+  void inputDraftsSurviveRestartAndClearWhenEmptied();
+  void inputDraftsSkipSearchPasswordsAndReadOnlyFields();
+  void composerDraftSignalOnlyTracksUserEdits();
   void profileSelectionFallsBackWhenSavedNameIsGone();
   void browserAutomationParsesEndpointsAndConsent();
   void browserAutomationBuildsPointerEventsAndScreenshots();
@@ -3717,6 +3721,177 @@ void PreferencesTest::uiCacheRoundTripsSessionsAndProjects() {
   } else {
     qputenv("HERMES_UI_CACHE", old_cache);
   }
+}
+
+void PreferencesTest::inputDraftsSurviveRestartAndClearWhenEmptied() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const QByteArray old_cache = qgetenv("HERMES_UI_CACHE");
+  qputenv("HERMES_UI_CACHE", dir.path().toUtf8());
+
+  hermes::ui::ResetInputDraftCacheForTest();
+  hermes::ui::InstallInputDraftCache();
+
+  {
+    QWidget window;
+    window.setObjectName(QStringLiteral("inputDraftTestWindow"));
+    auto* line = new QLineEdit(&window);
+    line->setObjectName(QStringLiteral("inputDraftTestLine"));
+    window.resize(240, 60);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    line->setFocus();
+    QTRY_VERIFY(line->hasFocus());
+    QTest::keyClicks(line, QStringLiteral("hello draft"));
+    QCOMPARE(line->text(), QStringLiteral("hello draft"));
+  }
+
+  // Reset deletes the in-memory store without compacting the journal, exactly
+  // like a process crash. The next instance must replay the journal.
+  hermes::ui::ResetInputDraftCacheForTest();
+  hermes::ui::InstallInputDraftCache();
+
+  {
+    QWidget window;
+    window.setObjectName(QStringLiteral("inputDraftTestWindow"));
+    auto* line = new QLineEdit(&window);
+    line->setObjectName(QStringLiteral("inputDraftTestLine"));
+    window.resize(240, 60);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    QTRY_COMPARE(line->text(), QStringLiteral("hello draft"));
+
+    line->setFocus();
+    QTRY_VERIFY(line->hasFocus());
+    line->selectAll();
+    QTest::keyClick(line, Qt::Key_Backspace);
+    QCOMPARE(line->text(), QString());
+  }
+
+  hermes::ui::ResetInputDraftCacheForTest();
+  hermes::ui::InstallInputDraftCache();
+
+  {
+    QWidget window;
+    window.setObjectName(QStringLiteral("inputDraftTestWindow"));
+    auto* line = new QLineEdit(&window);
+    line->setObjectName(QStringLiteral("inputDraftTestLine"));
+    window.resize(240, 60);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+    // Emptying an input must erase the old draft instead of resurrecting it.
+    QCOMPARE(line->text(), QString());
+  }
+
+  hermes::ui::ResetInputDraftCacheForTest();
+  if (old_cache.isEmpty()) {
+    qunsetenv("HERMES_UI_CACHE");
+  } else {
+    qputenv("HERMES_UI_CACHE", old_cache);
+  }
+}
+
+void PreferencesTest::inputDraftsSkipSearchPasswordsAndReadOnlyFields() {
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  const QByteArray old_cache = qgetenv("HERMES_UI_CACHE");
+  qputenv("HERMES_UI_CACHE", dir.path().toUtf8());
+
+  hermes::ui::ResetInputDraftCacheForTest();
+  hermes::ui::InstallInputDraftCache();
+
+  {
+    QWidget window;
+    window.setObjectName(QStringLiteral("inputDraftSkipWindow"));
+    auto* search = new QLineEdit(&window);
+    search->setObjectName(QStringLiteral("sessionSearch"));
+    auto* password = new QLineEdit(&window);
+    password->setObjectName(QStringLiteral("gatewayPassword"));
+    password->setEchoMode(QLineEdit::Password);
+    auto* read_only = new QLineEdit(&window);
+    read_only->setObjectName(QStringLiteral("gatewayPath"));
+    read_only->setReadOnly(true);
+    auto* allowed = new QLineEdit(&window);
+    allowed->setObjectName(QStringLiteral("gatewayName"));
+    window.resize(320, 160);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+    search->setFocus();
+    QTRY_VERIFY(search->hasFocus());
+    QTest::keyClicks(search, QStringLiteral("find me"));
+    password->setFocus();
+    QTRY_VERIFY(password->hasFocus());
+    QTest::keyClicks(password, QStringLiteral("secret"));
+    read_only->setFocus();
+    QTRY_VERIFY(read_only->hasFocus());
+    QTest::keyClicks(read_only, QStringLiteral("locked"));
+    allowed->setFocus();
+    QTRY_VERIFY(allowed->hasFocus());
+    QTest::keyClicks(allowed, QStringLiteral("keep me"));
+  }
+
+  hermes::ui::ResetInputDraftCacheForTest();
+  hermes::ui::InstallInputDraftCache();
+
+  {
+    QWidget window;
+    window.setObjectName(QStringLiteral("inputDraftSkipWindow"));
+    auto* search = new QLineEdit(&window);
+    search->setObjectName(QStringLiteral("sessionSearch"));
+    auto* password = new QLineEdit(&window);
+    password->setObjectName(QStringLiteral("gatewayPassword"));
+    password->setEchoMode(QLineEdit::Password);
+    auto* read_only = new QLineEdit(&window);
+    read_only->setObjectName(QStringLiteral("gatewayPath"));
+    read_only->setReadOnly(true);
+    auto* allowed = new QLineEdit(&window);
+    allowed->setObjectName(QStringLiteral("gatewayName"));
+    window.resize(320, 160);
+    window.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&window));
+
+    QCOMPARE(search->text(), QString());
+    QCOMPARE(password->text(), QString());
+    QCOMPARE(read_only->text(), QString());
+    QTRY_COMPARE(allowed->text(), QStringLiteral("keep me"));
+  }
+
+  hermes::ui::ResetInputDraftCacheForTest();
+  if (old_cache.isEmpty()) {
+    qunsetenv("HERMES_UI_CACHE");
+  } else {
+    qputenv("HERMES_UI_CACHE", old_cache);
+  }
+}
+
+void PreferencesTest::composerDraftSignalOnlyTracksUserEdits() {
+  hermes::ui::Composer composer(hermes::ui::Theme::Light());
+  composer.resize(640, 220);
+  composer.show();
+  QVERIFY(QTest::qWaitForWindowExposed(&composer));
+  auto* editor = composer.findChild<QTextEdit*>();
+  QVERIFY(editor != nullptr);
+  QSignalSpy drafts(&composer, &hermes::ui::Composer::DraftChanged);
+
+  // Programmatic restore, prefill and history recall must not overwrite the
+  // per-session crash draft with text the user never authored in this editor.
+  composer.SetText(QStringLiteral("programmatic"));
+  QCOMPARE(drafts.count(), 0);
+
+  editor->setFocus();
+  QTRY_VERIFY(editor->hasFocus());
+  QTest::keyClicks(editor, QStringLiteral("typed"));
+  QVERIFY(drafts.count() > 0);
+  QCOMPARE(drafts.last().at(0).toString(), composer.Text());
+
+  composer.SetHistory({QStringLiteral("old prompt")});
+  composer.SetText(QStringLiteral("draft"));
+  drafts.clear();
+  editor->moveCursor(QTextCursor::Start);
+  QTest::keyClick(editor, Qt::Key_Up);
+  QCOMPARE(composer.Text(), QStringLiteral("old prompt"));
+  QCOMPARE(drafts.count(), 0);
 }
 
 void PreferencesTest::profileSelectionFallsBackWhenSavedNameIsGone() {

@@ -128,6 +128,10 @@ Composer::Composer(const Theme& theme, QWidget* parent)
   setMouseTracking(true);
   setAcceptDrops(true);
   editor_ = new QTextEdit(this);
+  editor_->setObjectName(QStringLiteral("composerEditor"));
+  // The shell stores this editor under a profile + session key; generic
+  // widget-path caching would let one chat's draft leak into another.
+  editor_->setProperty("noDraftCache", true);
   editor_->setFrameShape(QFrame::NoFrame);
   editor_->setAcceptRichText(false);
   editor_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -185,6 +189,9 @@ Composer::Composer(const Theme& theme, QWidget* parent)
   connect(editor_, &QTextEdit::textChanged, this, [this]() {
     UpdateSlashMenu();
     UpdateMentionMenu();
+    if (!suppress_draft_changed_) {
+      emit DraftChanged(editor_->toPlainText());
+    }
   });
 }
 
@@ -989,7 +996,9 @@ void Composer::UpdateEditorStyle() {
 }
 
 void Composer::SetText(const QString& text) {
+  suppress_draft_changed_ = true;
   editor_->setPlainText(text);
+  suppress_draft_changed_ = false;
   QTextCursor cursor = editor_->textCursor();
   cursor.movePosition(QTextCursor::End);
   editor_->setTextCursor(cursor);
@@ -1485,6 +1494,9 @@ void Composer::AcceptSlashCommand() {
   QTextCursor caret = editor_->textCursor();
   caret.setPosition(completed.size());
   editor_->setTextCursor(caret);
+  // Completing a slash command is a user edit even though the text was set
+  // programmatically; keep the crash draft in sync with what is on screen.
+  emit DraftChanged(Text());
   HideSlashMenu();
   FocusEditor();
 }

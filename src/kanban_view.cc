@@ -41,6 +41,7 @@
 #include <cmath>
 #include <utility>
 
+#include "src/input_cache.h"
 #include "src/paint_utils.h"
 
 namespace hermes::ui {
@@ -1137,6 +1138,10 @@ class KanbanTaskDialog : public QDialog {
 
   void SetStatus(const QString& text) { status_->setText(text); }
 
+  void SetDraftScope(const QString& task_id) {
+    setProperty("draftScope", QStringLiteral("kanban-task:") + task_id);
+  }
+
   void SetDetail(const kanban::KanbanTaskDetail& detail,
                  const QVector<kanban::KanbanTask>& all_tasks,
                  const QStringList& columns, const QStringList& assignees,
@@ -1165,6 +1170,11 @@ class KanbanTaskDialog : public QDialog {
     if (new_task || !body_dirty_) {
       body_->setPlainText(detail.task.body);
       body_dirty_ = false;
+      if (new_task) {
+        const QString server_body = body_->toPlainText();
+        RestoreInputDraft(body_);
+        body_dirty_ = body_->toPlainText() != server_body;
+      }
     }
     status_->clear();
     status_combo_->clear();
@@ -2095,6 +2105,8 @@ class KanbanNewTaskDialog : public QDialog {
       : QDialog(parent ? parent : view), view_(view), theme_(std::move(theme)),
         column_(column) {
     setObjectName(QStringLiteral("kanbanNewTaskDialog"));
+    setProperty("draftScope",
+                QStringLiteral("kanban-new:") + column);
     setWindowTitle(QStringLiteral("New task"));
     setWindowFlag(Qt::WindowContextHelpButtonHint, false);
     resize(660, 700);
@@ -3399,6 +3411,7 @@ void KanbanView::ShowTask(const QString& task_id) {
     });
   }
   task_dialog_id_ = task_id;
+  task_dialog_->SetDraftScope(task_id);
   task_dialog_->SetStatus(QStringLiteral("Loading task…"));
   if (!task_dialog_->isVisible()) {
     task_dialog_->show();
