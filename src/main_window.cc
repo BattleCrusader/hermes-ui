@@ -4704,8 +4704,14 @@ void MainWindow::EnsureSessionForProjectScope() {
     }
   }
 
+  // Resolve against the same reconciled rows the sidebar shows. Raw
+  // `projects.tree` can put a chat in the parent project (or omit a
+  // folderless project's chats entirely), which would make entering that
+  // project start a fresh chat and strand the running one.
+  ProjectsState view = project_state_;
+  view.tree = SidebarProjectRows();
   const ProjectEntryDecision decision = ResolveProjectEntry(
-      project_state_, project_scope_, recency, current, current_project_id);
+      view, project_scope_, recency, current, current_project_id);
   if (decision.action == ProjectEntryAction::kSelectSession) {
     supervisor_.SelectSession(supervisor_.active_index(), decision.session_id);
     ClearPinnedContext();

@@ -2884,6 +2884,63 @@ void PreferencesTest::projectsParseListTreeAndMutators() {
   QCOMPARE(nested.tree[0].session_count, 1);
   QCOMPARE(nested.tree[1].session_ids, (QStringList{QStringLiteral("s1")}));
   QCOMPARE(nested.tree[1].session_count, 1);
+
+  // A project with no folder has no path the backend can match, so a chat
+  // started there falls into Home once it is no longer selected. The native
+  // session.create tag keeps it in that project, including after switching
+  // away and back. A real folder still wins when one matches cwd.
+  hermes::ui::ProjectsState tagged;
+  hermes::ui::ProjectInfo lotto;
+  lotto.id = QStringLiteral("lotto");
+  lotto.name = QStringLiteral("Lotto");
+  lotto.created_at = 100;
+  hermes::ui::ProjectInfo work;
+  work.id = QStringLiteral("work");
+  work.name = QStringLiteral("Work");
+  work.primary_path = QStringLiteral("/work");
+  work.folders = {{QStringLiteral("/work"), QStringLiteral("Work"), true}};
+  tagged.projects = {lotto, work};
+  hermes::ui::ProjectNode lotto_node;
+  lotto_node.id = lotto.id;
+  lotto_node.label = lotto.name;
+  lotto_node.session_count = 0;
+  hermes::ui::ProjectNode work_node;
+  work_node.id = work.id;
+  work_node.label = work.name;
+  work_node.path = work.primary_path;
+  work_node.session_count = 0;
+  hermes::ui::ProjectNode tagged_home;
+  tagged_home.id = QStringLiteral("__no_project__");
+  tagged_home.is_no_project = true;
+  tagged_home.session_ids = {QStringLiteral("lotto-chat")};
+  tagged_home.session_count = 1;
+  tagged.tree = {lotto_node, work_node, tagged_home};
+
+  hermes::ui::SessionSummary lotto_chat;
+  lotto_chat.id = QStringLiteral("lotto-chat");
+  lotto_chat.cwd = QDir::homePath();
+  lotto_chat.message_count = 12;
+  lotto_chat.project_id = lotto.id;
+  hermes::ui::SessionSummary work_chat;
+  work_chat.id = QStringLiteral("work-chat");
+  work_chat.cwd = QStringLiteral("/work/project");
+  work_chat.message_count = 3;
+  work_chat.project_id = lotto.id;
+  ReconcileProjectSessionOwnership(
+      &tagged, {lotto_chat, work_chat}, QStringLiteral("other"));
+  QCOMPARE(tagged.tree[0].session_ids,
+           (QStringList{QStringLiteral("lotto-chat")}));
+  QCOMPARE(tagged.tree[0].session_count, 1);
+  QCOMPARE(tagged.tree[1].session_ids,
+           (QStringList{QStringLiteral("work-chat")}));
+  QCOMPARE(tagged.tree[1].session_count, 1);
+  QVERIFY(tagged.tree[2].session_ids.isEmpty());
+  QCOMPARE(tagged.tree[2].session_count, 0);
+  const auto lotto_entry = ResolveProjectEntry(
+      tagged, lotto.id, {QStringLiteral("lotto-chat"), QStringLiteral("other")},
+      QStringLiteral("other"), QString());
+  QVERIFY(lotto_entry.action == ProjectEntryAction::kSelectSession);
+  QCOMPARE(lotto_entry.session_id, QStringLiteral("lotto-chat"));
 }
 
 void PreferencesTest::promptHistoryEditsQueuedAndSteeredEntries() {

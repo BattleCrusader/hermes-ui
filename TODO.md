@@ -42,6 +42,32 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-23 (a project's chats stay in that project)
+
+- **Folderless projects keep their chats.** The backend project tree matches
+  sessions to projects by `cwd`. A project created without a folder (for
+  example `Lotto`) therefore has no path to match, so its chats were re-homed
+  into Home by `ReconcileProjectSessionOwnership`. The native `session.create`
+  tag (`SessionSummary.project_id`) is now the fallback owner when `cwd` has no
+  folder owner. A real, more-specific folder still wins; the tag only fills the
+  gap the backend cannot resolve.
+- **Home counts drop when a tagged chat returns to its project.** The touched
+  Home node is now recounted along with the destination project, so the
+  sidebar does not keep a phantom session in `__no_project__`.
+- **Entering the project selects its existing chat.** `EnsureSessionForProjectScope`
+  resolved sessions against the raw gateway tree while the sidebar rendered
+  the reconciled tree. Entering `Lotto` could see zero raw sessions and start a
+  blank chat even though the tagged chat existed. It now resolves against the
+  same `SidebarProjectRows()` view the sidebar displays.
+- **Live check:** the CEO profile's “Backtest Australian Powerball number
+  predictions” chat (`local-b078aaa…`, `cwd=/Users/cyberdeth`) previously fell
+  into Home. After the fix it appears under `Lotto`, and switching
+  `Ssc → Lotto` reselects it instead of creating an empty chat.
+- Tests: `PreferencesTest::projectsParseListTreeAndMutators` now covers a
+  folderless project tag, removal from Home and its count, a real folder
+  outranking the tag, and `ResolveProjectEntry` selecting the tagged chat.
+  Full `ctest`: **10/10 passed** (43.73 s).
+
 ## Status update — 2026-11-22 (kanban board is usable and dispatches)
 
 - **Cards can move again.** The four-second board poll called

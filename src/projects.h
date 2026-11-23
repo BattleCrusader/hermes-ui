@@ -141,9 +141,10 @@ QString ProjectOwnerForPath(const ProjectsState& state, const QString& path);
 // Re-home sessions whose cwd proves a more specific project owns them. Applied
 // to a copy of `projects.tree` before the sidebar renders it, this corrects
 // parent/child folder collisions (a chat in `SSC/cron-reminder` belongs to the
-// `cron-reminder` project, not to `SSC`). Sessions that are not yet in the
-// tree and have no messages stay out; the local placeholder path covers the
-// just-created chat.
+// `cron-reminder` project, not to `SSC`). When cwd has no folder owner, a
+// native `session.create` project tag keeps folderless projects' chats from
+// falling into Home. Sessions that are not yet in the tree and have no
+// messages stay out; the local placeholder path covers the just-created chat.
 void ReconcileProjectSessionOwnership(
     ProjectsState* state, const std::vector<SessionSummary>& sessions,
     const QString& selected_session_id = QString());

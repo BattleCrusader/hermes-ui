@@ -482,7 +482,7 @@ void ReconcileProjectSessionOwnership(
   }
   QSet<QString> touched;
   for (const SessionSummary& session : sessions) {
-    if (session.id.isEmpty() || session.cwd.isEmpty()) {
+    if (session.id.isEmpty()) {
       continue;
     }
     // The backend tree omits zero-message chats. A just-created selected chat
@@ -494,7 +494,22 @@ void ReconcileProjectSessionOwnership(
     if (session.message_count <= 0 && !selected_empty) {
       continue;
     }
-    const QString owner = ProjectOwnerForPath(*state, session.cwd);
+    // A project created without a folder has no path the backend can match, so
+    // its chats otherwise fall into Home as soon as the user switches away.
+    // The native `session.create` tag is the only ownership record for those
+    // chats; keep it until a real folder gives cwd a more specific owner.
+    QString owner = ProjectOwnerForPath(*state, session.cwd);
+    if ((owner.isEmpty() || owner == AllProjectsId()) &&
+        !session.project_id.isEmpty()) {
+      const auto tagged = std::find_if(
+          state->tree.begin(), state->tree.end(),
+          [&session](const ProjectNode& node) {
+            return !node.is_no_project && node.id == session.project_id;
+          });
+      if (tagged != state->tree.end()) {
+        owner = tagged->id;
+      }
+    }
     if (owner.isEmpty() || owner == AllProjectsId()) {
       continue;
     }
@@ -515,7 +530,7 @@ void ReconcileProjectSessionOwnership(
     }
   }
   for (ProjectNode& node : state->tree) {
-    if (!node.is_no_project && touched.contains(node.id)) {
+    if (touched.contains(node.id)) {
       node.session_count = static_cast<int>(node.session_ids.size());
     }
   }
