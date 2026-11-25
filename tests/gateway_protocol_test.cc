@@ -51,6 +51,7 @@ class GatewayProtocolTest : public QObject {
   void sidebarPatchMapsOntoClosedOperations();
   void replayAndReceiptParamsCarryWatermarks();
   void stopCallsAreSessionScopedAndOrdered();
+  void stopResumeUsesLiveRuntimeAndGeneration();
   void pendingAdmissionsParseAndBuildQueueActions();
   void pendingPromptTrackerAnnouncesOnlyProcessedQueueRows();
   void promptOperationsStayFifoAndWaitForAck();
@@ -310,6 +311,44 @@ void GatewayProtocolTest::stopCallsAreSessionScopedAndOrdered() {
   QVERIFY(!calls[1].params.contains(QStringLiteral("kill_all")));
   QCOMPARE(calls[1].params.size(), 1);
   QVERIFY(BuildSessionStopCalls(QString(), 12).empty());
+}
+
+void GatewayProtocolTest::stopResumeUsesLiveRuntimeAndGeneration() {
+  // A reaped/detached runtime can hand back a new runtime id and a newer
+  // claim generation. Stop must fence its interrupt on that live identity,
+  // not the generation cached before the event stream went quiet.
+  const QJsonObject resumed{
+      {QStringLiteral("session_id"), QStringLiteral("runtime-9")},
+      {QStringLiteral("stored_session_id"), QStringLiteral("stored-4")},
+      {QStringLiteral("execution_generation"), 34},
+      {QStringLiteral("running"), true},
+  };
+  const StopResumeTarget target =
+      ResolveStopResumeTarget(resumed, QStringLiteral("stored-4"), 33);
+  QCOMPARE(target.session_id, QStringLiteral("runtime-9"));
+  QCOMPARE(target.execution_generation, 34);
+  QVERIFY(target.running);
+
+  // An idle stored session reports no claim: do not invent one, and keep the
+  // stored id so `process.stop` can still reap this chat's processes.
+  const QJsonObject idle{
+      {QStringLiteral("stored_session_id"), QStringLiteral("stored-4")},
+      {QStringLiteral("running"), false},
+  };
+  const StopResumeTarget stopped =
+      ResolveStopResumeTarget(idle, QStringLiteral("stored-4"), 33);
+  QCOMPARE(stopped.session_id, QStringLiteral("stored-4"));
+  QCOMPARE(stopped.execution_generation, 33);
+  QVERIFY(!stopped.running);
+
+  // A metadata-only reply still names the live turn.
+  const StopResumeTarget metadata =
+      ResolveStopResumeTarget(QJsonObject{{QStringLiteral("session_id"),
+                                           QStringLiteral("runtime-9")}},
+                              QStringLiteral("stored-4"), -1);
+  QCOMPARE(metadata.session_id, QStringLiteral("runtime-9"));
+  QCOMPARE(metadata.execution_generation, -1);
+  QVERIFY(!metadata.running);
 }
 
 void GatewayProtocolTest::pendingAdmissionsParseAndBuildQueueActions() {

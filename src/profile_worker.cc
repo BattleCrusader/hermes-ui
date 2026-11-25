@@ -447,10 +447,14 @@ void ProfileWorker::SelectSession(const QString& session_id) {
       pinned_provider_.clear();
       pinned_model_.clear();
     }
+    const bool switched = state_.selected_session_id != session_id;
     state_.selected_session_id = session_id;
-    // A generation belongs to one session. Carrying it across a switch would
-    // make Stop target a claim that is not on screen.
-    execution_generation_ = -1;
+    if (switched) {
+      // A generation belongs to one session. Carrying it across a switch would
+      // make Stop target a claim that is not on screen. Reselecting the same
+      // chat (a refresh, a project re-entry) must not forget the live claim.
+      execution_generation_ = -1;
+    }
     // Never let the previous chat's runtime controls leak into a placeholder
     // session that has not reached /api/sessions yet.
     state_.model.clear();

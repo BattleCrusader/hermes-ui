@@ -63,6 +63,19 @@ struct GatewayCall {
 std::vector<GatewayCall> BuildSessionStopCalls(const QString& session_id,
                                                int execution_generation);
 
+// A cached execution generation can be stale when the event stream was
+// detached or reaped. `session.resume` reports the live runtime id and claim
+// identity, so Stop refreshes both before fencing its interrupt. Missing
+// fields fall back to what the UI already knew.
+struct StopResumeTarget {
+  QString session_id;
+  int execution_generation = -1;
+  bool running = false;
+};
+StopResumeTarget ResolveStopResumeTarget(const QJsonObject& resume,
+                                         const QString& fallback_session_id,
+                                         int fallback_generation);
+
 // Gateway-owned queue snapshot. `session.resume` and `session.info` publish
 // the same row shape; parsing it here keeps the worker and the queue dialog on
 // one definition. Rows remain in FIFO order.

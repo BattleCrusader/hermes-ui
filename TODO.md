@@ -42,6 +42,26 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-25 (Stop refreshes the live claim)
+
+- **Stop no longer trusts a cached `execution_generation`.** Native Stop asks
+  `session.resume` for the live runtime id and claim identity (`omit_messages`
+  keeps it metadata-only), fires the cached interrupt immediately, and retries
+  with the live generation if the cached one was stale. `process.stop` then
+  names the resolved live session id. This closes the silent
+  `stale_generation` path where Stop looked registered but the gateway had
+  already advanced to a newer claim.
+- **Same-session reselection keeps the generation.** `SelectSession` now clears
+  the generation only when the selected session id actually changes; a refresh
+  or project re-entry no longer forgets the claim on screen.
+- **An explicit Stop nudges a disconnected relay.** If the relay socket is
+  between reconnect attempts, Stop calls `Connect()` immediately and its
+  pending request now outlives the 15 s backoff cycle instead of expiring at
+  10 s. Expiry and resume/process failures are logged.
+- Added `ResolveStopResumeTarget` coverage for live runtime ids, idle stored
+  sessions, and metadata-only resume replies. Full native suite: **10/10
+  passed** (31.82 s).
+
 ## Status update — 2026-11-25 (Plugins search and paging)
 
 - **Installed plugins and the catalog are independently searchable and

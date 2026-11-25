@@ -136,6 +136,30 @@ std::vector<GatewayCall> BuildSessionStopCalls(const QString& session_id,
   };
 }
 
+StopResumeTarget ResolveStopResumeTarget(const QJsonObject& resume,
+                                         const QString& fallback_session_id,
+                                         int fallback_generation) {
+  StopResumeTarget target;
+  target.session_id = resume.value(QStringLiteral("session_id")).toString();
+  if (target.session_id.isEmpty()) {
+    target.session_id =
+        resume.value(QStringLiteral("stored_session_id")).toString();
+  }
+  if (target.session_id.isEmpty()) {
+    target.session_id = fallback_session_id;
+  }
+  const QJsonValue generation =
+      resume.value(QStringLiteral("execution_generation"));
+  target.execution_generation =
+      generation.isDouble() ? generation.toInt() : fallback_generation;
+  const QJsonValue running = resume.value(QStringLiteral("running"));
+  // A resume answer that only carries a claim identity still describes a live
+  // turn; without either field there is nothing to interrupt.
+  target.running = running.isBool() ? running.toBool()
+                                    : target.execution_generation >= 0;
+  return target;
+}
+
 std::vector<PendingAdmission> ParsePendingAdmissions(const QJsonArray& rows) {
   std::vector<PendingAdmission> pending;
   pending.reserve(static_cast<std::size_t>(rows.size()));
