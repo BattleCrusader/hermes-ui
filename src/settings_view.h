@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "src/model.h"
+#include "src/settings_pages.h"
 #include "src/theme.h"
 
 class QLabel;
@@ -133,6 +134,7 @@ class SettingsView : public QWidget {
   QString last_keybinds_hash_;
   QString memory_config_requested_;
   QHash<QString, QString> subpage_by_section_;
+  PluginsPageState plugins_page_state_;
   QString pending_field_;
 };
 

@@ -1112,6 +1112,7 @@ void SettingsView::RebuildForm() {
       SetPref(key, value);
     };
     context.send_notification = on_send_notification;
+    context.plugins_state = &plugins_page_state_;
 
     building_ = true;
     ClearForm();

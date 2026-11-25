@@ -31,7 +31,7 @@ not enough; only then is the row removed.
 |---|---|---|---|
 | 1 | Settings data pages | About, Sessions, Notifications, Keybinds | **done** — notifications now delivers OS alerts with per-kind policy and a live test |
 | 2 | Providers, keys, vault, gateway | Provider accounts, API keys, custom endpoints, `/api/env`, credential vault, web access | **done** |
-| 3 | Plugins, billing, updates | Plugin inventory, billing/plans, managed updates | **partial** — list + rescan + hub enable/disable/update/remove + lazy catalog install + manifest `settings_schema` forms; billing/plans and plugin deep-link pages missing |
+| 3 | Plugins, billing, updates | Plugin inventory, billing/plans, managed updates | **partial** — list + rescan + hub enable/disable/update/remove + lazy catalog install + manifest `settings_schema` forms + separate name/description search and 10/20/30/50/100-row paging for installed and catalog lists; billing/plans and plugin deep-link pages missing |
 | 4 | Cron, artifacts, capabilities | Cron jobs/runs/actions; artifact browser/preview; skills/toolsets/MCP | **partial** — cron jobs + runs + blueprints + delivery targets + create/edit, with wrapped 80%-width cards and an icon action row per task; artifacts browse/edit/save/mkdir/delete/upload/download/image preview, file browser rooted at the scoped project (home when unscoped) with refresh-safe list/preview scroll and docs-style Markdown preview; capability inventory + MCP add/test/toggle/OAuth/catalog/raw edit + skill enable/lock/edit/new + hub sources/search/preview/scan/install/update/uninstall + per-toolset provider/env/model config; connector accounts (rename/remove), tools (cached/refresh), catalog browse, list/connect + operation polling; generated HTML/SVG/code artifact browser with version history, copy/save and source toggle; generated artifact project binding missing |
 | 5 | Chat parity | Full markdown, attachments/images, inline cards, message actions, session import/export | **partial** — full markdown (headings/lists/tasks/quotes/rules/tables/links/images/diff/math/mermaid/artifacts/footnotes/citations), reasoning blocks, attachment chips/thumbnails/clipboard paste/overflow drawer/removal/drag-drop, prompt history with view/edit/delete for queued and steered entries plus background side tasks (running/completed output, Run again, dismiss) and backend pending-admission edit/replace/cancel/steer plus ACK-gated “Inject now” into the live turn, context meter, `@` path completion, queue/steer, file dictation and gateway live-voice input, session export/import, edit/regenerate, the desktop hover action row on every message item (assistant: duration/branch/copy/copy-full/read-aloud/refresh/react; user: branch/copy/copy-full/read-aloud/edit/react; system/tool-only: copy/copy-full), right-click branch/rewind/react/delete, read-aloud, inline transcript cards, client-side prompt pinning, profile-scoped projects (backend-derived membership, sidebar scope filter, project-entry session selection/blank-chat creation, create/edit/delete, folder mutators, project cwd for new chats), right rail Project/Git/Terminal + Context/Agents/Todo/Timeline/Outputs accordion (collapsible/resizable shell splitter, project file tree with themed Markdown/HTML/image/code preview, one collapsible
 Git card per project repository with independent status, per-file
@@ -41,6 +41,29 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 6 | Platform surfaces | Agents/teams, messaging onboarding, webhooks, voice, browser/computer use, HUD/pets/starmap, multi-window, quick entry | **partial** — messaging inventory/toggles/test + Telegram and WhatsApp QR onboarding, Bots, Webhooks, event-driven agents panel with steer/stop/handoff, read-aloud TTS with output-device selection, gateway live microphone input, starmap, quick entry, computer-use diagnostics/grant, terminal-backend picker, desktop-pet overlay, a detachable chat window, and browser/CDP automation (`browser.manage` discovery plus a native CDP client for screenshots and coordinate input, with real-profile consent); GPT-Live/WebRTC voice sessions, floating HUD/wake indicator and the remaining multi-window panes still missing |
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
+
+## Status update — 2026-11-25 (Plugins search and paging)
+
+- **Installed plugins and the catalog are independently searchable and
+  pageable.** Each section has its own search field, `Previous`/`Next`, a
+  `Page X of Y` label, and a row-count selector with exactly `10`, `20`, `30`,
+  `50`, and `100`. Both default to 10 rows.
+- **Search matches name and description, case-insensitively.** Filtering runs
+  over the full gateway payload before the page slice is taken, so a catalog
+  entry that would have fallen outside the old hard-coded first ten remains
+  discoverable. The catalog is still lazy: until `Browse catalog` (or Return in
+  an unloaded catalog search) fetches `plugincatalog`, the section explains that
+  it is not loaded rather than pretending there are no matches.
+- **Search and paging state survive page rebuilds.** `SettingsView` owns a
+  `PluginsPageState` passed through `PageContext`; plugin toggles, rescans,
+  installs, and unrelated snapshot revisions therefore rebuild rows without
+  clearing the query, selected row count, or current page. The generic input
+  cache intentionally ignores fields whose object name contains `search`.
+- Added `SettingsViewTest::pluginsSearchAndPaging` covering default paging,
+  next-page behavior, page-size choices, name-only and description-only
+  matches, case-insensitivity, no-match summaries, filtering beyond the first
+  slice, and state persistence across a rebuild. Full native suite: **10/10
+  passed**.
 
 ## Status update — 2026-11-24 (Stop matches Desktop and Settings stops rebuilding)
 

@@ -23,6 +23,18 @@ namespace hermes::ui {
 using PageJsonCallback = std::function<void(const QJsonObject&,
                                             const QString&)>;  // NOLINT
 
+// Local view state for the Plugins page. Search queries and page sizes must
+// survive a snapshot rebuild (plugin toggles, rescans, installs) just like a
+// scroll position; the rows themselves are rebuilt from the new payload.
+struct PluginsPageState {
+  QString installed_query;
+  QString catalog_query;
+  int installed_page_size = 10;
+  int catalog_page_size = 10;
+  int installed_page = 0;
+  int catalog_page = 0;
+};
+
 struct PageContext {
   Theme theme;
   const ProfileSnapshot* snapshot = nullptr;
@@ -206,6 +218,9 @@ struct PageContext {
   std::function<bool(const QString& title, const QString& body, bool silent,
                      QString* error)>
       send_notification;
+  // Settings owns this across form rebuilds; standalone callers may omit it
+  // and get page-local search/pagination state.
+  PluginsPageState* plugins_state = nullptr;
 };
 
 // True for pages whose content comes from gateway REST routes rather than

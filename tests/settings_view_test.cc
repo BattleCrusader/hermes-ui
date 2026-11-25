@@ -25,6 +25,7 @@
 #include <QTextBrowser>
 #include <QTextFrame>
 #include <QTextTable>
+#include <QVector>
 #include <QtTest>
 #include <memory>
 #include <utility>
@@ -95,6 +96,7 @@ class SettingsViewTest : public QObject {
   void artifactsPreviewRendersMarkdownHtmlAndCsv();
   void artifactsScrollSurvivesPageRebuild();
   void pluginPageSurvivesUnrelatedSnapshotRevisions();
+  void pluginsSearchAndPaging();
   void sessionsPageRebuildsWhenSessionListChanges();
   void notificationsPersistKindsAndSendTest();
   void preferencesApplyKeybindsAndFontScale();
@@ -3915,6 +3917,210 @@ void SettingsViewTest::pluginPageSurvivesUnrelatedSnapshotRevisions() {
       view.findChild<QCheckBox*>(QStringLiteral("pluginToggle_core"));
   QVERIFY(next_toggle != nullptr);
   QVERIFY(next_toggle->isChecked());
+}
+
+void SettingsViewTest::pluginsSearchAndPaging() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::SettingsView view(theme);
+  view.resize(1100, 720);
+  view.show();
+
+  auto snapshot = DataSnapshot();
+  auto& plugins_page = snapshot.pages[QStringLiteral("plugins")];
+  QJsonObject hub = plugins_page.data.value(QStringLiteral("hub")).toObject();
+  QJsonArray installed;
+  for (int i = 0; i < 25; ++i) {
+    installed.append(QJsonObject{
+        {QStringLiteral("name"),
+         QStringLiteral("plugin") +
+             QString::number(i).rightJustified(2, QLatin1Char('0'))},
+        {QStringLiteral("description"),
+         QStringLiteral("Installed package %1").arg(i)},
+        {QStringLiteral("runtime_status"), QStringLiteral("enabled")}});
+  }
+  installed.append(QJsonObject{
+      {QStringLiteral("name"), QStringLiteral("needle")},
+      {QStringLiteral("description"),
+       QStringLiteral("Unique searchable words for the haystack")},
+      {QStringLiteral("runtime_status"), QStringLiteral("enabled")}});
+  hub.insert(QStringLiteral("plugins"), installed);
+  plugins_page.data.insert(QStringLiteral("hub"), hub);
+
+  auto& catalog_page = snapshot.pages[QStringLiteral("plugincatalog")];
+  QJsonObject catalog =
+      catalog_page.data.value(QStringLiteral("catalog")).toObject();
+  QJsonArray entries;
+  for (int i = 0; i < 15; ++i) {
+    entries.append(QJsonObject{
+        {QStringLiteral("name"),
+         QStringLiteral("catalog") +
+             QString::number(i).rightJustified(2, QLatin1Char('0'))},
+        {QStringLiteral("description"),
+         QStringLiteral("Catalog package %1").arg(i)},
+        {QStringLiteral("installed"), false}});
+  }
+  entries.append(QJsonObject{
+      {QStringLiteral("name"), QStringLiteral("zebra")},
+      {QStringLiteral("description"),
+       QStringLiteral("Unique catalog words for the haystack")},
+      {QStringLiteral("installed"), false}});
+  catalog.insert(QStringLiteral("entries"), entries);
+  catalog_page.data.insert(QStringLiteral("catalog"), catalog);
+
+  const auto settle = []() {
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCoreApplication::processEvents();
+  };
+  const auto visible_rows = [&](const QString& prefix) {
+    int count = 0;
+    for (QWidget* row : view.findChildren<QWidget*>()) {
+      if (row->objectName().startsWith(prefix) && row->isVisible()) {
+        ++count;
+      }
+    }
+    return count;
+  };
+
+  view.SetSnapshot(snapshot);
+  view.OpenPage(QStringLiteral("plugins"));
+  settle();
+
+  auto* installed_search =
+      view.findChild<QLineEdit*>(QStringLiteral("pluginsSearchInstalled"));
+  auto* installed_size = view.findChild<QComboBox*>(
+      QStringLiteral("pluginsInstalledPageSize"));
+  auto* installed_next =
+      view.findChild<QPushButton*>(QStringLiteral("pluginsInstalledNext"));
+  auto* installed_summary =
+      view.findChild<QLabel*>(QStringLiteral("pluginsInstalledSummary"));
+  QVERIFY(installed_search != nullptr);
+  QVERIFY(installed_size != nullptr);
+  QVERIFY(installed_next != nullptr);
+  QVERIFY(installed_summary != nullptr);
+
+  const QVector<int> expected_sizes{10, 20, 30, 50, 100};
+  QCOMPARE(installed_size->count(), expected_sizes.size());
+  for (int i = 0; i < expected_sizes.size(); ++i) {
+    QCOMPARE(installed_size->itemData(i).toInt(), expected_sizes.at(i));
+  }
+
+  // Default page: only the first ten rows exist, not merely hidden.
+  QCOMPARE(visible_rows(QStringLiteral("pluginRow_")), 10);
+  QVERIFY(view.findChild<QWidget*>(QStringLiteral("pluginRow_plugin10")) ==
+          nullptr);
+  installed_next->click();
+  settle();
+  QCOMPARE(visible_rows(QStringLiteral("pluginRow_")), 10);
+  auto* second_page =
+      view.findChild<QWidget*>(QStringLiteral("pluginRow_plugin10"));
+  QVERIFY(second_page != nullptr);
+  QVERIFY(second_page->isVisible());
+
+  installed_size->setCurrentIndex(installed_size->findData(20));
+  settle();
+  QCOMPARE(visible_rows(QStringLiteral("pluginRow_")), 20);
+
+  // Search runs against the full payload before the page slice, so a match
+  // on page three is still discoverable.
+  installed_search->setText(QStringLiteral("PLUGIN24"));
+  settle();
+  QCOMPARE(visible_rows(QStringLiteral("pluginRow_")), 1);
+  auto* last_plugin =
+      view.findChild<QWidget*>(QStringLiteral("pluginRow_plugin24"));
+  QVERIFY(last_plugin != nullptr);
+  QVERIFY(last_plugin->isVisible());
+
+  installed_search->setText(QStringLiteral("unique searchable"));
+  settle();
+  QCOMPARE(visible_rows(QStringLiteral("pluginRow_")), 1);
+  QVERIFY(view.findChild<QWidget*>(QStringLiteral("pluginRow_needle")) !=
+          nullptr);
+
+  installed_search->setText(QStringLiteral("no-such-plugin"));
+  settle();
+  QCOMPARE(visible_rows(QStringLiteral("pluginRow_")), 0);
+  QVERIFY(installed_summary->text().contains(
+      QStringLiteral("No installed plugins match")));
+
+  // Local search and page-size state survive a snapshot rebuild.
+  installed_search->setText(QStringLiteral("plugin24"));
+  settle();
+  plugins_page.notice = QStringLiteral("Plugin state refreshed");
+  snapshot.revision = 301;
+  view.SetSnapshot(snapshot);
+  settle();
+  auto* next_search =
+      view.findChild<QLineEdit*>(QStringLiteral("pluginsSearchInstalled"));
+  auto* next_size = view.findChild<QComboBox*>(
+      QStringLiteral("pluginsInstalledPageSize"));
+  QVERIFY(next_search != nullptr);
+  QVERIFY(next_size != nullptr);
+  QCOMPARE(next_search->text(), QStringLiteral("plugin24"));
+  QCOMPARE(next_size->currentData().toInt(), 20);
+  QCOMPARE(visible_rows(QStringLiteral("pluginRow_")), 1);
+  QVERIFY(view.findChild<QWidget*>(QStringLiteral("pluginRow_plugin24")) !=
+          nullptr);
+
+  auto* catalog_search =
+      view.findChild<QLineEdit*>(QStringLiteral("pluginsSearchCatalog"));
+  auto* catalog_size = view.findChild<QComboBox*>(
+      QStringLiteral("pluginsCatalogPageSize"));
+  auto* catalog_next =
+      view.findChild<QPushButton*>(QStringLiteral("pluginsCatalogNext"));
+  auto* catalog_summary =
+      view.findChild<QLabel*>(QStringLiteral("pluginsCatalogSummary"));
+  QVERIFY(catalog_search != nullptr);
+  QVERIFY(catalog_size != nullptr);
+  QVERIFY(catalog_next != nullptr);
+  QVERIFY(catalog_summary != nullptr);
+  QCOMPARE(catalog_size->count(), expected_sizes.size());
+  for (int i = 0; i < expected_sizes.size(); ++i) {
+    QCOMPARE(catalog_size->itemData(i).toInt(), expected_sizes.at(i));
+  }
+
+  QCOMPARE(visible_rows(QStringLiteral("catalogRow_")), 10);
+  QVERIFY(view.findChild<QWidget*>(QStringLiteral("catalogRow_catalog10")) ==
+          nullptr);
+  catalog_next->click();
+  settle();
+  auto* second_catalog =
+      view.findChild<QWidget*>(QStringLiteral("catalogRow_catalog10"));
+  QVERIFY(second_catalog != nullptr);
+  QVERIFY(second_catalog->isVisible());
+
+  catalog_search->setText(QStringLiteral("CATALOG14"));
+  settle();
+  QCOMPARE(visible_rows(QStringLiteral("catalogRow_")), 1);
+  QVERIFY(view.findChild<QWidget*>(QStringLiteral("catalogRow_catalog14")) !=
+          nullptr);
+
+  catalog_search->setText(QStringLiteral("unique catalog"));
+  settle();
+  QCOMPARE(visible_rows(QStringLiteral("catalogRow_")), 1);
+  QVERIFY(view.findChild<QWidget*>(QStringLiteral("catalogRow_zebra")) !=
+          nullptr);
+
+  catalog_search->setText(QStringLiteral("no-such-catalog-plugin"));
+  settle();
+  QCOMPARE(visible_rows(QStringLiteral("catalogRow_")), 0);
+  QVERIFY(catalog_summary->text().contains(
+      QStringLiteral("No catalog plugins match")));
+
+  catalog_search->setText(QStringLiteral("catalog1"));
+  catalog_size->setCurrentIndex(catalog_size->findData(20));
+  settle();
+  plugins_page.notice = QStringLiteral("Plugin state refreshed again");
+  snapshot.revision = 302;
+  view.SetSnapshot(snapshot);
+  settle();
+  auto* next_catalog_search =
+      view.findChild<QLineEdit*>(QStringLiteral("pluginsSearchCatalog"));
+  auto* next_catalog_size = view.findChild<QComboBox*>(
+      QStringLiteral("pluginsCatalogPageSize"));
+  QVERIFY(next_catalog_search != nullptr);
+  QVERIFY(next_catalog_size != nullptr);
+  QCOMPARE(next_catalog_search->text(), QStringLiteral("catalog1"));
+  QCOMPARE(next_catalog_size->currentData().toInt(), 20);
 }
 
 void SettingsViewTest::sessionsPageRebuildsWhenSessionListChanges() {

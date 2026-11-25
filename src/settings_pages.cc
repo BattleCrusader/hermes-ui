@@ -228,6 +228,9 @@ QPushButton* Button(QWidget* parent, const QString& text) {
 void ClearLayout(QLayout* layout) {
   while (QLayoutItem* item = layout->takeAt(0)) {
     if (QWidget* widget = item->widget()) {
+      // Hidden pending-deletion widgets must not intercept hit testing or be
+      // the first match for an object-name lookup.
+      widget->hide();
       widget->deleteLater();
     }
     delete item;
@@ -1335,6 +1338,34 @@ QWidget* NotificationsPage(const PageContext& context, QWidget* parent) {
   return page;
 }
 
+constexpr int kPluginPageSizes[] = {10, 20, 30, 50, 100};
+
+int NormalizePluginPageSize(int requested) {
+  for (const int size : kPluginPageSizes) {
+    if (requested == size) {
+      return size;
+    }
+  }
+  return kPluginPageSizes[0];
+}
+
+bool PluginMatchesQuery(const QJsonObject& plugin, const QString& query) {
+  const QString needle = query.trimmed();
+  if (needle.isEmpty()) {
+    return true;
+  }
+  return plugin.value(QStringLiteral("name"))
+             .toString()
+             .contains(needle, Qt::CaseInsensitive) ||
+         plugin.value(QStringLiteral("description"))
+             .toString()
+             .contains(needle, Qt::CaseInsensitive);
+}
+
+QString PluginPageLabel(int page, int pages) {
+  return QStringLiteral("Page %1 of %2").arg(page + 1).arg(pages);
+}
+
 QWidget* PluginsPage(const PageContext& context, QWidget* parent) {
   auto* page = new QWidget(parent);
   page->setObjectName(QStringLiteral("settingsPage:plugins"));
@@ -1377,9 +1408,64 @@ QWidget* PluginsPage(const PageContext& context, QWidget* parent) {
   }
 
   // Agent plugins carry the enable/disable state; dashboard plugins are tabs
-  // contributed by some of the same packages.
-  for (const QJsonValue& value : hub) {
-    const QJsonObject plugin = value.toObject();
+  // contributed by some of the same packages. Search and paging are local:
+  // the gateway returns the whole hub/catalog payload in one read.
+  std::shared_ptr<PluginsPageState> state_owner;
+  if (context.plugins_state != nullptr) {
+    state_owner = std::shared_ptr<PluginsPageState>(
+        context.plugins_state, [](PluginsPageState*) {});
+  } else {
+    state_owner = std::make_shared<PluginsPageState>();
+  }
+  PluginsPageState* page_state = state_owner.get();
+  page_state->installed_page_size =
+      NormalizePluginPageSize(page_state->installed_page_size);
+
+  auto* installed_search = new QLineEdit(page);
+  installed_search->setObjectName(QStringLiteral("pluginsSearchInstalled"));
+  installed_search->setPlaceholderText(
+      QStringLiteral("Search installed plugins by name or description"));
+  installed_search->setClearButtonEnabled(true);
+  installed_search->setText(page_state->installed_query);
+  layout->addWidget(installed_search);
+
+  auto* installed_list = new QWidget(page);
+  auto* installed_list_layout = new QVBoxLayout(installed_list);
+  installed_list_layout->setContentsMargins(0, 0, 0, 0);
+  installed_list_layout->setSpacing(12);
+  layout->addWidget(installed_list);
+
+  auto* installed_summary = Description(page, QString());
+  installed_summary->setObjectName(QStringLiteral("pluginsInstalledSummary"));
+  layout->addWidget(installed_summary);
+
+  auto* installed_pager = new QWidget(page);
+  auto* installed_pager_layout = new QHBoxLayout(installed_pager);
+  installed_pager_layout->setContentsMargins(0, 0, 0, 0);
+  installed_pager_layout->setSpacing(8);
+  auto* installed_prev = Button(installed_pager, QStringLiteral("Previous"));
+  installed_prev->setObjectName(QStringLiteral("pluginsInstalledPrev"));
+  auto* installed_page_label = Description(installed_pager, QString());
+  installed_page_label->setObjectName(QStringLiteral("pluginsInstalledPage"));
+  auto* installed_next = Button(installed_pager, QStringLiteral("Next"));
+  installed_next->setObjectName(QStringLiteral("pluginsInstalledNext"));
+  auto* installed_page_size = new QComboBox(installed_pager);
+  installed_page_size->setObjectName(QStringLiteral("pluginsInstalledPageSize"));
+  for (const int size : kPluginPageSizes) {
+    installed_page_size->addItem(QString::number(size), size);
+  }
+  installed_page_size->setCurrentIndex(
+      installed_page_size->findData(page_state->installed_page_size));
+  installed_pager_layout->addWidget(installed_prev);
+  installed_pager_layout->addWidget(installed_page_label);
+  installed_pager_layout->addWidget(installed_next);
+  installed_pager_layout->addStretch(1);
+  installed_pager_layout->addWidget(Description(installed_pager,
+                                                QStringLiteral("Rows")));
+  installed_pager_layout->addWidget(installed_page_size);
+  layout->addWidget(installed_pager);
+
+  auto add_plugin_row = [=](const QJsonObject& plugin) {
     const QString name = plugin.value(QStringLiteral("name")).toString();
     const QString description =
         plugin.value(QStringLiteral("description")).toString();
@@ -1393,7 +1479,7 @@ QWidget* PluginsPage(const PageContext& context, QWidget* parent) {
     }
     detail.append(status.isEmpty() ? QStringLiteral("unknown") : status);
     Row row = AddRow(
-        page, layout, name,
+        page, installed_list_layout, name,
         description +
             (detail.isEmpty()
                  ? QString()
@@ -1633,7 +1719,85 @@ QWidget* PluginsPage(const PageContext& context, QWidget* parent) {
         dialog->open();
       });
     }
-  }
+  };
+
+  auto render_installed = [=]() {
+    ClearLayout(installed_list_layout);
+    QJsonArray filtered;
+    for (const QJsonValue& value : hub) {
+      const QJsonObject plugin = value.toObject();
+      if (PluginMatchesQuery(plugin, page_state->installed_query)) {
+        filtered.append(plugin);
+      }
+    }
+    const int total = filtered.size();
+    const int page_size = NormalizePluginPageSize(
+        page_state->installed_page_size);
+    page_state->installed_page_size = page_size;
+    const int pages = std::max(1, (total + page_size - 1) / page_size);
+    const int page =
+        std::clamp(page_state->installed_page, 0, pages - 1);
+    page_state->installed_page = page;
+    const int first = total == 0 ? 0 : page * page_size;
+    const int last = std::min(total, first + page_size);
+    for (int i = first; i < last; ++i) {
+      add_plugin_row(filtered.at(i).toObject());
+    }
+    const QString query = page_state->installed_query.trimmed();
+    if (total == 0) {
+      installed_summary->setText(
+          query.isEmpty()
+              ? QStringLiteral(
+                    "No installed plugins reported by this gateway.")
+              : QStringLiteral("No installed plugins match “%1”.")
+                    .arg(query));
+    } else {
+      QString summary =
+          QStringLiteral("Showing %1–%2 of %3 installed %4")
+              .arg(first + 1)
+              .arg(last)
+              .arg(total)
+              .arg(total == 1 ? QStringLiteral("plugin")
+                              : QStringLiteral("plugins"));
+      if (!query.isEmpty()) {
+        summary +=
+            QStringLiteral(" matching “%1”").arg(query);
+      }
+      installed_summary->setText(summary + QStringLiteral("."));
+    }
+    installed_page_label->setText(PluginPageLabel(page, pages));
+    installed_prev->setEnabled(page > 0);
+    installed_next->setEnabled(page + 1 < pages);
+  };
+
+  QObject::connect(installed_search, &QLineEdit::textChanged,
+                   installed_search, [=](const QString& text) {
+                     page_state->installed_query = text;
+                     page_state->installed_page = 0;
+                     render_installed();
+                   });
+  QObject::connect(installed_prev, &QPushButton::clicked, installed_prev,
+                   [=]() {
+                     if (page_state->installed_page > 0) {
+                       --page_state->installed_page;
+                       render_installed();
+                     }
+                   });
+  QObject::connect(installed_next, &QPushButton::clicked, installed_next,
+                   [=]() {
+                     ++page_state->installed_page;
+                     render_installed();
+                   });
+  QObject::connect(
+      installed_page_size,
+      QOverload<int>::of(&QComboBox::currentIndexChanged),
+      installed_page_size, [=](int) {
+        page_state->installed_page_size =
+            installed_page_size->currentData().toInt();
+        page_state->installed_page = 0;
+        render_installed();
+      });
+  render_installed();
 
   const PageState* catalog_state =
       PageStateFor(context, QStringLiteral("plugincatalog"));
@@ -1661,36 +1825,164 @@ QWidget* PluginsPage(const PageContext& context, QWidget* parent) {
           ? QJsonArray()
           : ArrayField(ObjectField(catalog_state->data, "catalog"),
                        {"entries"});
-  if (!catalog_entries.isEmpty()) {
-    layout->addWidget(Label(page, QStringLiteral("Catalog"), "settingTitle"));
-    int shown = 0;
+  layout->addWidget(Label(page, QStringLiteral("Catalog"), "settingTitle"));
+  page_state->catalog_page_size =
+      NormalizePluginPageSize(page_state->catalog_page_size);
+
+  auto* catalog_search = new QLineEdit(page);
+  catalog_search->setObjectName(QStringLiteral("pluginsSearchCatalog"));
+  catalog_search->setPlaceholderText(
+      QStringLiteral("Search catalog plugins by name or description"));
+  catalog_search->setClearButtonEnabled(true);
+  catalog_search->setText(page_state->catalog_query);
+  layout->addWidget(catalog_search);
+
+  auto* catalog_list = new QWidget(page);
+  auto* catalog_list_layout = new QVBoxLayout(catalog_list);
+  catalog_list_layout->setContentsMargins(0, 0, 0, 0);
+  catalog_list_layout->setSpacing(12);
+  layout->addWidget(catalog_list);
+
+  auto* catalog_summary = Description(page, QString());
+  catalog_summary->setObjectName(QStringLiteral("pluginsCatalogSummary"));
+  layout->addWidget(catalog_summary);
+
+  auto* catalog_pager = new QWidget(page);
+  auto* catalog_pager_layout = new QHBoxLayout(catalog_pager);
+  catalog_pager_layout->setContentsMargins(0, 0, 0, 0);
+  catalog_pager_layout->setSpacing(8);
+  auto* catalog_prev = Button(catalog_pager, QStringLiteral("Previous"));
+  catalog_prev->setObjectName(QStringLiteral("pluginsCatalogPrev"));
+  auto* catalog_page_label = Description(catalog_pager, QString());
+  catalog_page_label->setObjectName(QStringLiteral("pluginsCatalogPage"));
+  auto* catalog_next = Button(catalog_pager, QStringLiteral("Next"));
+  catalog_next->setObjectName(QStringLiteral("pluginsCatalogNext"));
+  auto* catalog_page_size = new QComboBox(catalog_pager);
+  catalog_page_size->setObjectName(QStringLiteral("pluginsCatalogPageSize"));
+  for (const int size : kPluginPageSizes) {
+    catalog_page_size->addItem(QString::number(size), size);
+  }
+  catalog_page_size->setCurrentIndex(
+      catalog_page_size->findData(page_state->catalog_page_size));
+  catalog_pager_layout->addWidget(catalog_prev);
+  catalog_pager_layout->addWidget(catalog_page_label);
+  catalog_pager_layout->addWidget(catalog_next);
+  catalog_pager_layout->addStretch(1);
+  catalog_pager_layout->addWidget(
+      Description(catalog_pager, QStringLiteral("Rows")));
+  catalog_pager_layout->addWidget(catalog_page_size);
+  layout->addWidget(catalog_pager);
+
+  auto add_catalog_row = [=](const QJsonObject& entry) {
+    const QString name = entry.value(QStringLiteral("name")).toString();
+    const bool installed = entry.value(QStringLiteral("installed")).toBool();
+    Row row = AddRow(page, catalog_list_layout, name,
+                     entry.value(QStringLiteral("description")).toString());
+    row.widget->setObjectName(QStringLiteral("catalogRow_") + name);
+    if (!installed) {
+      auto* install = Button(row.widget, QStringLiteral("Install"));
+      install->setObjectName(QStringLiteral("catalogInstall_") + name);
+      install->setEnabled(static_cast<bool>(act));
+      QObject::connect(install, &QPushButton::clicked, install, [=]() {
+        act(QStringLiteral("plugins"), QStringLiteral("POST"),
+            QStringLiteral("/api/dashboard/agent-plugins/install"),
+            QJsonObject{{QStringLiteral("catalog_name"), name},
+                        {QStringLiteral("enable"), true}});
+      });
+      row.layout->addWidget(install);
+    } else {
+      row.layout->addWidget(
+          Description(row.widget, QStringLiteral("installed")));
+    }
+  };
+
+  auto render_catalog = [=]() {
+    ClearLayout(catalog_list_layout);
+    QJsonArray filtered;
     for (const QJsonValue& value : catalog_entries) {
-      if (shown++ >= 10) {
-        break;
-      }
       const QJsonObject entry = value.toObject();
-      const QString name = entry.value(QStringLiteral("name")).toString();
-      const bool installed = entry.value(QStringLiteral("installed")).toBool();
-      Row row = AddRow(page, layout, name,
-                       entry.value(QStringLiteral("description")).toString());
-      row.widget->setObjectName(QStringLiteral("catalogRow_") + name);
-      if (!installed) {
-        auto* install = Button(row.widget, QStringLiteral("Install"));
-        install->setObjectName(QStringLiteral("catalogInstall_") + name);
-        install->setEnabled(static_cast<bool>(act));
-        QObject::connect(install, &QPushButton::clicked, install, [=]() {
-          act(QStringLiteral("plugins"), QStringLiteral("POST"),
-              QStringLiteral("/api/dashboard/agent-plugins/install"),
-              QJsonObject{{QStringLiteral("catalog_name"), name},
-                          {QStringLiteral("enable"), true}});
-        });
-        row.layout->addWidget(install);
-      } else {
-        row.layout->addWidget(
-            Description(row.widget, QStringLiteral("installed")));
+      if (PluginMatchesQuery(entry, page_state->catalog_query)) {
+        filtered.append(entry);
       }
     }
-  }
+    const bool loaded = catalog_state != nullptr && catalog_state->loaded;
+    const int total = loaded ? filtered.size() : 0;
+    const int page_size =
+        NormalizePluginPageSize(page_state->catalog_page_size);
+    page_state->catalog_page_size = page_size;
+    const int pages = std::max(1, (total + page_size - 1) / page_size);
+    const int page = std::clamp(page_state->catalog_page, 0, pages - 1);
+    page_state->catalog_page = page;
+    const int first = total == 0 ? 0 : page * page_size;
+    const int last = std::min(total, first + page_size);
+    for (int i = first; i < last; ++i) {
+      add_catalog_row(filtered.at(i).toObject());
+    }
+    const QString query = page_state->catalog_query.trimmed();
+    if (!loaded) {
+      catalog_summary->setText(
+          catalog_state != nullptr && !catalog_state->error.isEmpty()
+              ? catalog_state->error
+              : QStringLiteral("Catalog not loaded. Browse the catalog to "
+                               "search it."));
+    } else if (total == 0) {
+      catalog_summary->setText(
+          query.isEmpty()
+              ? QStringLiteral("The plugin catalog is empty.")
+              : QStringLiteral("No catalog plugins match “%1”.").arg(query));
+    } else {
+      QString summary =
+          QStringLiteral("Showing %1–%2 of %3 catalog %4")
+              .arg(first + 1)
+              .arg(last)
+              .arg(total)
+              .arg(total == 1 ? QStringLiteral("plugin")
+                              : QStringLiteral("plugins"));
+      if (!query.isEmpty()) {
+        summary += QStringLiteral(" matching “%1”").arg(query);
+      }
+      catalog_summary->setText(summary + QStringLiteral("."));
+    }
+    catalog_page_label->setText(PluginPageLabel(page, pages));
+    catalog_prev->setEnabled(page > 0);
+    catalog_next->setEnabled(page + 1 < pages);
+  };
+
+  const bool catalog_loaded =
+      catalog_state != nullptr && catalog_state->loaded;
+  const bool catalog_loading =
+      catalog_state != nullptr && catalog_state->loading;
+  QObject::connect(catalog_search, &QLineEdit::textChanged, catalog_search,
+                   [=](const QString& text) {
+                     page_state->catalog_query = text;
+                     page_state->catalog_page = 0;
+                     render_catalog();
+                   });
+  QObject::connect(catalog_search, &QLineEdit::returnPressed, catalog_search,
+                   [=]() {
+                     if (!catalog_loaded && !catalog_loading && refresh) {
+                       refresh(QStringLiteral("plugincatalog"));
+                     }
+                   });
+  QObject::connect(catalog_prev, &QPushButton::clicked, catalog_prev, [=]() {
+    if (page_state->catalog_page > 0) {
+      --page_state->catalog_page;
+      render_catalog();
+    }
+  });
+  QObject::connect(catalog_next, &QPushButton::clicked, catalog_next, [=]() {
+    ++page_state->catalog_page;
+    render_catalog();
+  });
+  QObject::connect(catalog_page_size,
+                   QOverload<int>::of(&QComboBox::currentIndexChanged),
+                   catalog_page_size, [=](int) {
+                     page_state->catalog_page_size =
+                         catalog_page_size->currentData().toInt();
+                     page_state->catalog_page = 0;
+                     render_catalog();
+                   });
+  render_catalog();
 
   auto* rescan = Button(page, QStringLiteral("Rescan plugins"));
   rescan->setObjectName(QStringLiteral("pluginsRescan"));
