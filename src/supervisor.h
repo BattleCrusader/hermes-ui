@@ -60,6 +60,9 @@ class Supervisor {
                     bool confirm_empty_truncate, bool confirm_deep_truncate);
   void NewSession(int index, const QString& cwd = QString(),
                   const QString& project_id = QString());
+  // Full Desktop `/stop`: interrupt this chat's turn, then kill only the
+  // terminal processes that chat owns. `Interrupt` remains turn-only.
+  void Stop(int index);
   void Interrupt(int index);
   void RespondRequest(int index, const QString& request_id,
                       const QJsonObject& result);

@@ -18,7 +18,7 @@ const std::vector<SlashCommand>& Catalog() {
        false},
       {QStringLiteral("/stop"),
        {},
-       QStringLiteral("Stop the running turn"),
+       QStringLiteral("Stop the running turn and this chat's processes"),
        QString(),
        false},
       {QStringLiteral("/steer"),

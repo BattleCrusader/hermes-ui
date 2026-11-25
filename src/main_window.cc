@@ -278,9 +278,9 @@ MainWindow::MainWindow(ThemeMode mode, bool enable_streaming, QWidget* parent)
                      ShowWorkspacePage(QStringLiteral("kanban"));
                      pages_view_->Kanban()->NewTask();
                    });
-  RegisterShortcut(
-      QStringLiteral("interrupt"), QKeySequence(Qt::CTRL | Qt::Key_Period),
-      [this]() { supervisor_.Interrupt(supervisor_.active_index()); });
+  RegisterShortcut(QStringLiteral("interrupt"),
+                   QKeySequence(Qt::CTRL | Qt::Key_Period),
+                   [this]() { StopActiveSession(); });
   RegisterShortcut(QStringLiteral("find_sessions"),
                    QKeySequence(Qt::CTRL | Qt::Key_F),
                    [this]() { ShowFindBar(); });
@@ -471,10 +471,7 @@ void MainWindow::BuildUi() {
       ParseHiddenModels(NativePref(QStringLiteral("native.model_visibility"))));
   composer_->setMaximumWidth(780);
   composer_->setMinimumWidth(460);
-  composer_->on_stop = [this]() {
-    status_bar_->ShowTransient(QStringLiteral("Stopping…"), 2000);
-    supervisor_.Interrupt(supervisor_.active_index());
-  };
+  composer_->on_stop = [this]() { StopActiveSession(); };
   composer_->on_model_selected = [this](const QString& provider,
                                         const QString& model) {
     supervisor_.SetModel(supervisor_.active_index(), provider, model);
@@ -2146,7 +2143,7 @@ bool MainWindow::RunSlashCommand(const QString& text) {
   if (canonical == QStringLiteral("/new")) {
     NewSession();
   } else if (canonical == QStringLiteral("/stop")) {
-    supervisor_.Interrupt(index);
+    StopActiveSession();
   } else if (canonical == QStringLiteral("/reasoning")) {
     const QStringList levels = {QStringLiteral("none"),     QStringLiteral("minimal"),
                                 QStringLiteral("low"),      QStringLiteral("medium"),
@@ -2452,10 +2449,9 @@ void MainWindow::ShowCommandPalette() {
   const auto snapshot = supervisor_.ActiveSnapshot();
   if (snapshot && snapshot->running) {
     commands.push_back({QStringLiteral("Stop current turn"),
-                        QStringLiteral("Interrupt the running response"),
-                        QStringLiteral("Actions"), [this]() {
-                          supervisor_.Interrupt(supervisor_.active_index());
-                        }});
+                        QStringLiteral("Stop this chat's turn and processes"),
+                        QStringLiteral("Actions"),
+                        [this]() { StopActiveSession(); }});
   }
   commands.push_back({QStringLiteral("New Kanban task"),
                       QStringLiteral("Add a card to the dispatcher queue"),
@@ -2830,10 +2826,7 @@ void MainWindow::ShowDetachedChat() {
           });
   composer->SetHiddenModels(
       ParseHiddenModels(NativePref(QStringLiteral("native.model_visibility"))));
-  composer->on_stop = [this]() {
-    status_bar_->ShowTransient(QStringLiteral("Stopping…"), 2000);
-    supervisor_.Interrupt(supervisor_.active_index());
-  };
+  composer->on_stop = [this]() { StopActiveSession(); };
   composer->on_model_selected = [this](const QString& provider,
                                        const QString& model) {
     supervisor_.SetModel(supervisor_.active_index(), provider, model);
@@ -3997,6 +3990,20 @@ void MainWindow::SyncComposerQueueBadge(int override_count) {
   if (detached_chat_ != nullptr && detached_chat_->composer() != nullptr) {
     detached_chat_->composer()->SetQueuedPrompts(count);
   }
+}
+
+void MainWindow::StopActiveSession() {
+  // Steered prompts are UI history; drop them now so the composer badge and
+  // queue dialog stop advertising work the user just cancelled. The gateway
+  // settles the steering transfers itself and requeues only text that never
+  // reached the running claim.
+  steered_prompts_.clear();
+  SyncComposerQueueBadge();
+  status_bar_->ShowTransient(QStringLiteral("Stopping…"), 2000);
+  // Queued admissions stay gateway-owned: once the interrupt settles, the
+  // session FIFO submits them in order. Detached `/bg` side agents are not
+  // queued admissions, so Stop neither restarts nor duplicates them.
+  supervisor_.Stop(supervisor_.active_index());
 }
 
 void MainWindow::QueuePromptText(const QString& text) {
@@ -5874,8 +5881,7 @@ void MainWindow::ApplyRunIndicators(const ProfileSnapshot& snapshot) {
       command.name = entry.name;
       command.aliases = entry.aliases;
       command.description = entry.description;
-      // A command with a native fast path keeps the native description: the
-      // gateway's /stop kills background processes, ours stops the turn.
+      // A command with a native fast path keeps the native description.
       const SlashCommand* native = FindSlashCommand(entry.name);
       if (native != nullptr && !native->description.isEmpty()) {
         command.description = native->description;

@@ -94,6 +94,8 @@ class ProfileWorker : public QObject {
   void NewSessionInDir(const QString& cwd,
                        const QString& project_id = QString());
   void Interrupt();
+  // Desktop `/stop`: interrupt the turn, then stop this session's processes.
+  void Stop();
   void Refresh();
   void AttachIfForeground();
   void RespondRequest(const QString& request_id, const QJsonObject& result);

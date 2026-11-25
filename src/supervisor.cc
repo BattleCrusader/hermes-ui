@@ -777,6 +777,31 @@ void Supervisor::Interrupt(int index) {
   }
 }
 
+void Supervisor::Stop(int index) {
+  if (index < 0 || index >= profile_count()) {
+    return;
+  }
+  Entry& entry = entries_[static_cast<std::size_t>(index)];
+  const std::shared_ptr<const ProfileSnapshot> snapshot =
+      entry.worker == nullptr ? nullptr : entry.worker->Snapshot();
+  const QString session_id =
+      snapshot == nullptr ? QString() : snapshot->selected_session_id;
+  const int generation =
+      entry.worker == nullptr ? -1 : entry.worker->ExecutionGeneration();
+  if (!session_id.isEmpty() && StartRelay(&entry)) {
+    // Capture both the session and its claim generation before the worker can
+    // move on. The relay sends `session.interrupt` then `process.stop` for this
+    // session only; sibling chats and the gateway registry are never touched.
+    QMetaObject::invokeMethod(entry.relay, "Stop", Qt::QueuedConnection,
+                              Q_ARG(QString, session_id),
+                              Q_ARG(int, generation));
+    return;
+  }
+  if (entry.worker != nullptr) {
+    QMetaObject::invokeMethod(entry.worker, "Stop", Qt::QueuedConnection);
+  }
+}
+
 void Supervisor::UseDefaultModel(int index) {
   if (index < 0 || index >= profile_count()) {
     return;

@@ -3740,6 +3740,9 @@ void PreferencesTest::inputDraftsSurviveRestartAndClearWhenEmptied() {
     window.resize(240, 60);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.raise();
+    window.activateWindow();
+    QTRY_VERIFY(QTest::qWaitForWindowActive(&window));
     line->setFocus();
     QTRY_VERIFY(line->hasFocus());
     QTest::keyClicks(line, QStringLiteral("hello draft"));
@@ -3759,6 +3762,9 @@ void PreferencesTest::inputDraftsSurviveRestartAndClearWhenEmptied() {
     window.resize(240, 60);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.raise();
+    window.activateWindow();
+    QTRY_VERIFY(QTest::qWaitForWindowActive(&window));
     QTRY_COMPARE(line->text(), QStringLiteral("hello draft"));
 
     line->setFocus();
@@ -3816,6 +3822,9 @@ void PreferencesTest::inputDraftsSkipSearchPasswordsAndReadOnlyFields() {
     window.resize(320, 160);
     window.show();
     QVERIFY(QTest::qWaitForWindowExposed(&window));
+    window.raise();
+    window.activateWindow();
+    QTRY_VERIFY(QTest::qWaitForWindowActive(&window));
 
     search->setFocus();
     QTRY_VERIFY(search->hasFocus());
@@ -3870,6 +3879,9 @@ void PreferencesTest::composerDraftSignalOnlyTracksUserEdits() {
   composer.resize(640, 220);
   composer.show();
   QVERIFY(QTest::qWaitForWindowExposed(&composer));
+  composer.raise();
+  composer.activateWindow();
+  QTRY_VERIFY(QTest::qWaitForWindowActive(&composer));
   auto* editor = composer.findChild<QTextEdit*>();
   QVERIFY(editor != nullptr);
   QSignalSpy drafts(&composer, &hermes::ui::Composer::DraftChanged);

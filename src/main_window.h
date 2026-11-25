@@ -142,6 +142,7 @@ class MainWindow : public QWidget {
   // queue items and are hidden, matching the desktop queue panel.
   int PendingQueueCount(const ProfileSnapshot& snapshot) const;
   void SyncComposerQueueBadge(int override_count = -1);
+  void StopActiveSession();
   void QueuePromptText(const QString& text);
   // Start a gateway side agent (`prompt.background` / `prompt.btw`). The ACK
   // carries a task id; the answer arrives later as a completion event.

@@ -94,6 +94,8 @@ class SettingsViewTest : public QObject {
   void artifactsSpotEditorSavesAndShowsImages();
   void artifactsPreviewRendersMarkdownHtmlAndCsv();
   void artifactsScrollSurvivesPageRebuild();
+  void pluginPageSurvivesUnrelatedSnapshotRevisions();
+  void sessionsPageRebuildsWhenSessionListChanges();
   void notificationsPersistKindsAndSendTest();
   void preferencesApplyKeybindsAndFontScale();
   void appearancePagePersistsDisplayPreferences();
@@ -3855,6 +3857,105 @@ void SettingsViewTest::artifactsScrollSurvivesPageRebuild() {
     QCOMPARE(tracked_outer->verticalScrollBar()->value(), kept_outer);
     QCOMPARE(tracked_browser->verticalScrollBar()->value(), kept_browser);
   }
+}
+
+void SettingsViewTest::pluginPageSurvivesUnrelatedSnapshotRevisions() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::SettingsView view(theme);
+  view.resize(1100, 720);
+  view.show();
+
+  auto snapshot = DataSnapshot();
+  view.SetSnapshot(snapshot);
+  view.OpenPage(QStringLiteral("plugins"));
+  // OpenPage rebuilds once on Open and again when it selects the section.
+  // Flush the older generation before tracking the page the reader sees.
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  QCoreApplication::processEvents();
+
+  auto* page = view.findChild<QWidget*>(QStringLiteral("settingsPage:plugins"));
+  auto* toggle = view.findChild<QCheckBox*>(QStringLiteral("pluginToggle_core"));
+  QVERIFY(page != nullptr);
+  QVERIFY(toggle != nullptr);
+  QPointer<QWidget> page_guard(page);
+  QPointer<QCheckBox> toggle_guard(toggle);
+  // The toggle is local interaction state until the backend answers. A
+  // transcript poll or any other unrelated snapshot must not recreate it.
+  toggle->setChecked(false);
+  QVERIFY(!toggle->isChecked());
+
+  hermes::ui::SessionSummary session;
+  session.id = QStringLiteral("unrelated-session");
+  session.title = QStringLiteral("Unrelated chat");
+  snapshot.sessions.push_back(session);
+  for (int i = 0; i < 5; ++i) {
+    snapshot.revision = 100 + i;
+    view.SetSnapshot(snapshot);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCoreApplication::processEvents();
+    QVERIFY(page_guard != nullptr);
+    QVERIFY(toggle_guard != nullptr);
+    QVERIFY(!toggle_guard->isChecked());
+  }
+
+  // A real plugin-page update still rebuilds it, so actions and refreshes are
+  // reflected without waiting for an unrelated revision bump.
+  auto plugins_it = snapshot.pages.find(QStringLiteral("plugins"));
+  QVERIFY(plugins_it != snapshot.pages.end());
+  plugins_it->notice = QStringLiteral("Plugin state refreshed");
+  snapshot.revision = 200;
+  view.SetSnapshot(snapshot);
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  QCoreApplication::processEvents();
+  QVERIFY(page_guard == nullptr);
+  auto* next_page =
+      view.findChild<QWidget*>(QStringLiteral("settingsPage:plugins"));
+  QVERIFY(next_page != nullptr);
+  auto* next_toggle =
+      view.findChild<QCheckBox*>(QStringLiteral("pluginToggle_core"));
+  QVERIFY(next_toggle != nullptr);
+  QVERIFY(next_toggle->isChecked());
+}
+
+void SettingsViewTest::sessionsPageRebuildsWhenSessionListChanges() {
+  hermes::ui::Theme theme = hermes::ui::Theme::Light();
+  hermes::ui::SettingsView view(theme);
+  view.resize(1100, 720);
+  view.show();
+
+  auto snapshot = DataSnapshot();
+  view.SetSnapshot(snapshot);
+  view.OpenPage(QStringLiteral("sessions"));
+  QCoreApplication::processEvents();
+
+  auto* list =
+      view.findChild<QListWidget*>(QStringLiteral("settingsSessions"));
+  QVERIFY(list != nullptr);
+  const int before = list->count();
+  QPointer<QListWidget> list_guard(list);
+
+  hermes::ui::SessionSummary session;
+  session.id = QStringLiteral("new-session");
+  session.title = QStringLiteral("New session");
+  snapshot.sessions.push_back(session);
+  snapshot.revision = 201;
+  view.SetSnapshot(snapshot);
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+  QCoreApplication::processEvents();
+
+  QVERIFY(list_guard == nullptr);
+  auto* next =
+      view.findChild<QListWidget*>(QStringLiteral("settingsSessions"));
+  QVERIFY(next != nullptr);
+  QCOMPARE(next->count(), before + 1);
+  bool found = false;
+  for (int i = 0; i < next->count(); ++i) {
+    if (next->item(i)->text() == QStringLiteral("New session")) {
+      found = true;
+      break;
+    }
+  }
+  QVERIFY(found);
 }
 
 void SettingsViewTest::notificationsPersistKindsAndSendTest() {

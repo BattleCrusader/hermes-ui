@@ -116,6 +116,26 @@ QJsonObject BuildInterruptParams(const QString& session_id,
   return params;
 }
 
+QJsonObject BuildProcessStopParams(const QString& session_id) {
+  QJsonObject params;
+  params.insert(QStringLiteral("session_id"), session_id);
+  return params;
+}
+
+std::vector<GatewayCall> BuildSessionStopCalls(const QString& session_id,
+                                               int execution_generation) {
+  if (session_id.isEmpty()) {
+    return {};
+  }
+  // Mirrors Desktop `use-prompt-actions/slash.ts`: the turn interrupt carries
+  // the claim's generation, and `process.stop` names the resolved session id.
+  return {
+      {QStringLiteral("session.interrupt"),
+       BuildInterruptParams(session_id, execution_generation)},
+      {QStringLiteral("process.stop"), BuildProcessStopParams(session_id)},
+  };
+}
+
 std::vector<PendingAdmission> ParsePendingAdmissions(const QJsonArray& rows) {
   std::vector<PendingAdmission> pending;
   pending.reserve(static_cast<std::size_t>(rows.size()));

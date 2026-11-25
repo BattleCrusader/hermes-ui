@@ -654,13 +654,17 @@ void SettingsView::SetSnapshot(const ProfileSnapshot& snapshot) {
     if (IsOpen()) {
       RebuildForm();
     }
-  } else if (IsOpen() && (special_page || memory_page) && revision_changed &&
-             !artifacts_page_unchanged) {
+  } else if (IsOpen() && (special_page || memory_page) && revision_changed) {
     // Session rows, gateway metadata and memory-provider status change without
-    // a config edit. Artifacts is the exception: its page is large and its
-    // scroll state belongs to the reader, so only rebuild when its page state
-    // (or cwd / selected preview) actually changes.
-    RebuildForm();
+    // a config edit. Data pages rebuild only when the values they actually
+    // render changed; a global revision bump from a transcript poll or an
+    // unrelated page fetch must not wipe a form the reader is using.
+    const bool page_unchanged =
+        IsDataPage(active_id_) &&
+        DataPageSignature(active_id_) == active_page_signature_;
+    if (!artifacts_page_unchanged && !page_unchanged) {
+      RebuildForm();
+    }
   }
   if (snapshot_.config_saving) {
     SetStatus(QStringLiteral("Saving..."));
@@ -931,16 +935,131 @@ void SettingsView::ScheduleFormScrollRestore(
 }
 
 QString SettingsView::DataPageSignature(const QString& id) const {
-  const auto it = snapshot_.pages.constFind(id);
-  QJsonObject state;
-  if (it == snapshot_.pages.constEnd()) {
-    state.insert(QStringLiteral("missing"), true);
-  } else {
-    state.insert(QStringLiteral("loading"), it->loading);
-    state.insert(QStringLiteral("loaded"), it->loaded);
-    state.insert(QStringLiteral("error"), it->error);
-    state.insert(QStringLiteral("notice"), it->notice);
-    state.insert(QStringLiteral("data"), it->data);
+  const auto page_state = [this](const QString& page) {
+    QJsonObject state;
+    const auto it = snapshot_.pages.constFind(page);
+    if (it == snapshot_.pages.constEnd()) {
+      state.insert(QStringLiteral("missing"), true);
+    } else {
+      state.insert(QStringLiteral("loading"), it->loading);
+      state.insert(QStringLiteral("loaded"), it->loaded);
+      state.insert(QStringLiteral("error"), it->error);
+      state.insert(QStringLiteral("notice"), it->notice);
+      state.insert(QStringLiteral("data"), it->data);
+    }
+    return state;
+  };
+
+  QJsonObject state = page_state(id);
+  // Some pages read a second lazy route. Those states belong in the signature
+  // so a fetch result still replaces the page even when the global revision
+  // did not change.
+  if (id == QStringLiteral("plugins")) {
+    state.insert(QStringLiteral("catalog"), page_state(QStringLiteral(
+                                                "plugincatalog")));
+  } else if (id == QStringLiteral("about")) {
+    state.insert(QStringLiteral("update"),
+                 page_state(QStringLiteral("update")));
+  }
+
+  // A profile switch changes the profile query used by every page action.
+  state.insert(QStringLiteral("profile"), snapshot_.name);
+
+  if (id == QStringLiteral("sessions") || id == QStringLiteral("agents")) {
+    QJsonArray sessions;
+    for (const SessionSummary& session : snapshot_.sessions) {
+      sessions.append(QJsonObject{
+          {QStringLiteral("id"), session.id},
+          {QStringLiteral("title"), session.title},
+          {QStringLiteral("archived"), session.archived},
+          {QStringLiteral("model"), session.model},
+          {QStringLiteral("source"), session.source},
+          {QStringLiteral("branched_from"), session.branched_from},
+          {QStringLiteral("reset_from"), session.reset_from},
+          {QStringLiteral("continuation_kind"), session.continuation_kind},
+          {QStringLiteral("parent_session_id"), session.parent_session_id},
+      });
+    }
+    state.insert(QStringLiteral("sessions"), sessions);
+  }
+  if (id == QStringLiteral("agents")) {
+    QJsonArray agents;
+    for (const SubagentProgress& row : snapshot_.subagents) {
+      QJsonArray stream;
+      for (const SubagentStreamEntry& entry : row.stream) {
+        stream.append(QJsonObject{{QStringLiteral("kind"), entry.kind},
+                                  {QStringLiteral("text"), entry.text},
+                                  {QStringLiteral("error"), entry.error}});
+      }
+      agents.append(QJsonObject{
+          {QStringLiteral("id"), row.id},
+          {QStringLiteral("parent_id"), row.parent_id},
+          {QStringLiteral("goal"), row.goal},
+          {QStringLiteral("owner_session_id"), row.owner_session_id},
+          {QStringLiteral("session_id"), row.session_id},
+          {QStringLiteral("delegation_id"), row.delegation_id},
+          {QStringLiteral("model"), row.model},
+          {QStringLiteral("status"), static_cast<int>(row.status)},
+          {QStringLiteral("task_count"), row.task_count},
+          {QStringLiteral("task_index"), row.task_index},
+          {QStringLiteral("started_at_ms"),
+           static_cast<double>(row.started_at_ms)},
+          {QStringLiteral("updated_at_ms"),
+           static_cast<double>(row.updated_at_ms)},
+          {QStringLiteral("duration_seconds"), row.duration_seconds},
+          {QStringLiteral("cost_usd"), row.cost_usd},
+          {QStringLiteral("input_tokens"),
+           static_cast<double>(row.input_tokens)},
+          {QStringLiteral("output_tokens"),
+           static_cast<double>(row.output_tokens)},
+          {QStringLiteral("tool_count"), row.tool_count},
+          {QStringLiteral("files_read"), QJsonArray::fromStringList(
+                                             row.files_read)},
+          {QStringLiteral("files_written"), QJsonArray::fromStringList(
+                                                row.files_written)},
+          {QStringLiteral("stream"), stream},
+          {QStringLiteral("summary"), row.summary},
+          {QStringLiteral("current_tool"), row.current_tool},
+      });
+    }
+    state.insert(QStringLiteral("agents"), agents);
+  }
+  if (id == QStringLiteral("capabilities")) {
+    QJsonArray operations;
+    for (const ConnectionOperation& operation : snapshot_.account_operations) {
+      QJsonArray targets;
+      for (const ConnectionTarget& target : operation.targets) {
+        targets.append(QJsonObject{{QStringLiteral("name"), target.name},
+                                   {QStringLiteral("state"), target.state}});
+      }
+      operations.append(QJsonObject{
+          {QStringLiteral("op_id"), operation.op_id},
+          {QStringLiteral("owner_type"), operation.owner_type},
+          {QStringLiteral("seq"), operation.seq},
+          {QStringLiteral("settled"), operation.settled},
+          {QStringLiteral("settled_by"), operation.settled_by},
+          {QStringLiteral("targets"), targets},
+      });
+    }
+    state.insert(QStringLiteral("account_operations"), operations);
+  }
+  if (id == QStringLiteral("profiles")) {
+    QJsonArray providers;
+    for (const ModelProvider& provider : snapshot_.model_providers) {
+      providers.append(QJsonObject{
+          {QStringLiteral("name"), provider.name},
+          {QStringLiteral("slug"), provider.slug},
+          {QStringLiteral("models"), QJsonArray::fromStringList(
+                                         provider.models)},
+      });
+    }
+    state.insert(QStringLiteral("model_providers"), providers);
+  }
+  if (id == QStringLiteral("about")) {
+    state.insert(QStringLiteral("gateway_version"),
+                 snapshot_.gateway_version);
+    state.insert(QStringLiteral("label"), snapshot_.label);
+    state.insert(QStringLiteral("home"), snapshot_.home);
   }
   if (id == QStringLiteral("artifacts")) {
     state.insert(QStringLiteral("cwd"), snapshot_.artifacts_cwd);

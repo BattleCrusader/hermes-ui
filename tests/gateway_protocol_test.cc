@@ -50,6 +50,7 @@ class GatewayProtocolTest : public QObject {
   void sessionMutateCarriesFencingFields();
   void sidebarPatchMapsOntoClosedOperations();
   void replayAndReceiptParamsCarryWatermarks();
+  void stopCallsAreSessionScopedAndOrdered();
   void pendingAdmissionsParseAndBuildQueueActions();
   void pendingPromptTrackerAnnouncesOnlyProcessedQueueRows();
   void promptOperationsStayFifoAndWaitForAck();
@@ -287,6 +288,28 @@ void GatewayProtocolTest::replayAndReceiptParamsCarryWatermarks() {
   QCOMPARE(interrupt.value(QStringLiteral("execution_generation")).toInt(), 12);
   const QJsonObject unknown = BuildInterruptParams(QStringLiteral("s1"), -1);
   QVERIFY(!unknown.contains(QStringLiteral("execution_generation")));
+}
+
+void GatewayProtocolTest::stopCallsAreSessionScopedAndOrdered() {
+  // Desktop `/stop` first interrupts the active claim, then stops only the
+  // processes this chat owns. Both payloads must name one session; a registry
+  // wide kill would let one window stop another chat's background work.
+  const std::vector<GatewayCall> calls =
+      BuildSessionStopCalls(QStringLiteral("session-7"), 12);
+  QCOMPARE(calls.size(), std::size_t{2});
+  QCOMPARE(calls[0].method, QStringLiteral("session.interrupt"));
+  QCOMPARE(calls[0].params.value(QStringLiteral("session_id")).toString(),
+           QStringLiteral("session-7"));
+  QCOMPARE(
+      calls[0].params.value(QStringLiteral("execution_generation")).toInt(),
+      12);
+  QCOMPARE(calls[1].method, QStringLiteral("process.stop"));
+  QCOMPARE(calls[1].params.value(QStringLiteral("session_id")).toString(),
+           QStringLiteral("session-7"));
+  QVERIFY(!calls[1].params.contains(QStringLiteral("profile")));
+  QVERIFY(!calls[1].params.contains(QStringLiteral("kill_all")));
+  QCOMPARE(calls[1].params.size(), 1);
+  QVERIFY(BuildSessionStopCalls(QString(), 12).empty());
 }
 
 void GatewayProtocolTest::pendingAdmissionsParseAndBuildQueueActions() {

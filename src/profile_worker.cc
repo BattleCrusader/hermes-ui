@@ -1095,6 +1095,29 @@ void ProfileWorker::Interrupt() {
   }
 }
 
+void ProfileWorker::Stop() {
+  QString session_id;
+  int generation = -1;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    session_id = state_.selected_session_id;
+    generation = execution_generation_;
+    state_.status_text = QStringLiteral("stopping");
+    PublishLocked();
+  }
+  if (session_id.isEmpty() || socket_ == nullptr || !socket_->IsConnected()) {
+    return;
+  }
+  for (const GatewayCall& call :
+       BuildSessionStopCalls(session_id, generation)) {
+    const int request_id = socket_->RequestRpc(call.method, call.params);
+    if (call.method == QStringLiteral("session.interrupt") &&
+        request_id >= 0) {
+      pending_interrupts_.insert(request_id);
+    }
+  }
+}
+
 void ProfileWorker::Refresh() {
   if (shutting_down_ || http_ == nullptr) {
     return;

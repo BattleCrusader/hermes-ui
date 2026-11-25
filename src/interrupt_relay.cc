@@ -6,6 +6,7 @@
 #include <QDebug>
 #include <utility>
 
+#include "src/gateway_protocol.h"
 #include "src/gateway_socket.h"
 
 namespace hermes::ui {
@@ -44,11 +45,20 @@ void InterruptRelay::Shutdown() {
 
 void InterruptRelay::Interrupt(const QString& session_id,
                                int execution_generation) {
-  if (session_id.isEmpty()) {
+  Queue(PendingStop{session_id, execution_generation,
+                    QDateTime::currentMSecsSinceEpoch(), false});
+}
+
+void InterruptRelay::Stop(const QString& session_id,
+                          int execution_generation) {
+  Queue(PendingStop{session_id, execution_generation,
+                    QDateTime::currentMSecsSinceEpoch(), true});
+}
+
+void InterruptRelay::Queue(PendingStop request) {
+  if (request.session_id.isEmpty()) {
     return;
   }
-  PendingInterrupt request{session_id, execution_generation,
-                           QDateTime::currentMSecsSinceEpoch()};
   if (socket_ != nullptr && socket_->IsConnected()) {
     Send(request);
     return;
@@ -87,11 +97,19 @@ void InterruptRelay::OnSocketError(const QString& message) {
         qUtf8Printable(message));
 }
 
-void InterruptRelay::Send(const PendingInterrupt& request) {
+void InterruptRelay::Send(const PendingStop& request) {
   if (socket_ == nullptr || !socket_->IsConnected()) {
     return;
   }
-  socket_->InterruptSession(request.session_id, request.execution_generation);
+  if (!request.stop_processes) {
+    socket_->InterruptSession(request.session_id,
+                              request.execution_generation);
+    return;
+  }
+  for (const GatewayCall& call : BuildSessionStopCalls(
+           request.session_id, request.execution_generation)) {
+    socket_->RequestRpc(call.method, call.params);
+  }
 }
 
 }  // namespace hermes::ui

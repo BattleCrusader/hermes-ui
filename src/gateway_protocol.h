@@ -47,6 +47,22 @@ QJsonObject BuildPromptReceiptParams(const QString& session_id,
 QJsonObject BuildInterruptParams(const QString& session_id,
                                  int execution_generation);
 
+// Desktop `/stop` keeps two meanings: end this chat's turn, then kill the
+// terminal processes this chat owns. `process.stop` is session-scoped; the
+// registry-wide `kill_all` is intentionally not part of this sequence.
+QJsonObject BuildProcessStopParams(const QString& session_id);
+
+struct GatewayCall {
+  QString method;
+  QJsonObject params;
+};
+
+// The exact `/stop` RPC order: interrupt the claim first, then stop processes.
+// Both calls carry only the selected session id, so Stop can never kill a
+// sibling chat's work.
+std::vector<GatewayCall> BuildSessionStopCalls(const QString& session_id,
+                                               int execution_generation);
+
 // Gateway-owned queue snapshot. `session.resume` and `session.info` publish
 // the same row shape; parsing it here keeps the worker and the queue dialog on
 // one definition. Rows remain in FIFO order.

@@ -42,6 +42,39 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-24 (Stop matches Desktop and Settings stops rebuilding)
+
+- **Stop now means Desktop `/stop`, not just an interrupt.** The composer stop
+  button, `Ctrl+.`, `/stop` and the command palette all route through
+  `MainWindow::StopActiveSession()`. It clears the selected chat's local steered
+  history, refreshes the queue badge, then sends the same session-scoped pair as
+  Desktop/TUI: `session.interrupt` with the claim generation, followed by
+  `process.stop` with only `{session_id}`. `process.stop` kills processes owned by
+  that chat and interrupts its async delegations; neither call uses registry-wide
+  `kill_all`, so sibling chats are untouched.
+- **Queued work still drains; side agents are not duplicated.** Gateway-owned
+  queued admissions stay in the FIFO and are submitted after the interrupt
+  settles, in order, with `queued=true`. `/bg` and `/btw` are detached side
+  agents, not FIFO admissions, so Stop neither kills nor resubmits them. Steering
+  transfers settle on the gateway; only text that never reached the claim is
+  requeued, and local steered history is cleared immediately.
+- **Relay and worker share one RPC sequence.** `BuildSessionStopCalls()` is the
+  single source for the `session.interrupt` → `process.stop` order. The dedicated
+  `InterruptRelay` sends it even while the profile worker is blocked on REST;
+  `ProfileWorker::Stop()` is the fallback. `Interrupt()` remains turn-only.
+- **Settings data pages only rebuild for their own data.** `SetSnapshot` now
+  compares `DataPageSignature(active_id_)` before rebuilding. Revision bumps from
+  transcript polls, other lazy pages or background fetches no longer recreate
+  Plugins (or any other data page), so toggles, scroll and local interaction state
+  survive. Signatures include each page's lazy routes (Plugins catalog,
+  About/update), the active profile, and the exact snapshot records the page
+  renders. A real change still rebuilds immediately.
+- Tests: `GatewayProtocolTest::stopCallsAreSessionScopedAndOrdered`,
+  `SettingsViewTest::pluginPageSurvivesUnrelatedSnapshotRevisions`, and
+  `sessionsPageRebuildsWhenSessionListChanges`. Input-draft tests now activate
+  their test windows explicitly so macOS focus changes cannot make the suite
+  flaky. Full native suite: **10/10 passed** (25.08 s).
+
 ## Status update — 2026-11-24 (input drafts survive crashes and stay scoped)
 
 - **Every editable input now keeps a crash-safe draft.** A new application-level
