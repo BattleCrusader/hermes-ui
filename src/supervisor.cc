@@ -637,6 +637,14 @@ std::shared_ptr<const ProfileSnapshot> Supervisor::SnapshotAt(int index) const {
   return entry.worker == nullptr ? nullptr : entry.worker->Snapshot();
 }
 
+int Supervisor::ExecutionGeneration(int index) const {
+  if (index < 0 || index >= profile_count()) {
+    return -1;
+  }
+  const Entry& entry = entries_[static_cast<std::size_t>(index)];
+  return entry.worker == nullptr ? -1 : entry.worker->ExecutionGeneration();
+}
+
 void Supervisor::SelectSession(int index, const QString& session_id) {
   if (index < 0 || index >= profile_count()) {
     return;

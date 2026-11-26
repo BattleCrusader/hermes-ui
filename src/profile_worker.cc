@@ -2812,6 +2812,13 @@ void ProfileWorker::SendRpc(quint64 token, const QString& method,
     return;
   }
   const int id = socket_->RequestRpc(method, params);
+  if (id < 0) {
+    qWarning("rpc not sent method=%s: gateway socket is disconnected",
+             qUtf8Printable(method));
+    emit RpcFinished(token, QJsonObject(),
+                     QStringLiteral("Gateway is not connected"));
+    return;
+  }
   pending_rpc_[id] = token;
 }
 

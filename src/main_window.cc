@@ -1764,7 +1764,14 @@ QString MainWindow::ActiveSessionId() const {
 void MainWindow::BranchFromMessage(const ChatMessage& message) {
   const auto snapshot = supervisor_.ActiveSnapshot();
   const QString session_id = ActiveSessionId();
-  if (!snapshot || session_id.isEmpty() || message.row_id <= 0) {
+  if (!snapshot || session_id.isEmpty()) {
+    status_bar_->ShowTransient(
+        QStringLiteral("Branch failed: open a chat first"));
+    return;
+  }
+  if (message.row_id <= 0) {
+    status_bar_->ShowTransient(
+        QStringLiteral("Branch failed: this message has not been saved yet"));
     return;
   }
   if (snapshot->running) {
@@ -1782,28 +1789,128 @@ void MainWindow::BranchFromMessage(const ChatMessage& message) {
     }
   }
   if (index < 0) {
+    status_bar_->ShowTransient(
+        QStringLiteral("Branch failed: this message is no longer in the chat"));
     return;
   }
+  // `session.branch` counts the parent's visible user/assistant rows, while
+  // the native transcript also carries tool/system rows. Keep that count for
+  // the legacy fallback; the canonical branch mutation uses the physical row
+  // id so the child ends exactly at the clicked message.
+  const int count = BranchVisibleCount(snapshot->messages, index);
+  if (count <= 0) {
+    status_bar_->ShowTransient(
+        QStringLiteral("Branch failed: this message has no saved text"));
+    return;
+  }
+  QString cwd;
+  int revision = 0;
+  for (const SessionSummary& session : snapshot->sessions) {
+    if (session.id == session_id) {
+      cwd = session.cwd;
+      revision = session.revision;
+      break;
+    }
+  }
   const int active = supervisor_.active_index();
-  QJsonObject params{{QStringLiteral("session_id"), session_id},
-                     {QStringLiteral("count"), index + 1},
-                     {QStringLiteral("idempotency_key"),
-                      QUuid::createUuid().toString(QUuid::WithoutBraces)}};
+  const int generation = supervisor_.ExecutionGeneration(active);
+  const QString profile = supervisor_.ProfileName(active);
+  const QString key = QUuid::createUuid().toString(QUuid::WithoutBraces);
+  const QJsonArray seed = BuildBranchSeedMessages(snapshot->messages, index);
+
+  auto finish = [this, active](const QJsonObject& result,
+                               const QString& error) {
+    if (!error.isEmpty()) {
+      status_bar_->ShowTransient(
+          QStringLiteral("Branch failed: %1").arg(error), 8000);
+      return;
+    }
+    QString child =
+        result.value(QStringLiteral("branched_session_id")).toString();
+    if (child.isEmpty()) {
+      child = result.value(QStringLiteral("stored_session_id")).toString();
+    }
+    if (child.isEmpty()) {
+      child = result.value(QStringLiteral("session_id")).toString();
+    }
+    if (child.isEmpty()) {
+      status_bar_->ShowTransient(
+          QStringLiteral("Branch failed: the gateway returned no session"));
+      return;
+    }
+    supervisor_.SelectSession(active, child);
+    status_bar_->ShowTransient(QStringLiteral("Branched conversation"));
+  };
+
+  // `session.branch` is only registered by the legacy TUI sidecar; an
+  // authority-backed gateway serves the same operation as the canonical
+  // revision-fenced `session.mutate operation=branch`. `through_message_id`
+  // is the durable physical row the branch copies through.
+  const QJsonObject branch_payload{
+      {QStringLiteral("through_message_id"), message.row_id}};
+  const QJsonObject mutate_params = BuildSessionMutateParams(
+      session_id, key, revision, QStringLiteral("branch"), branch_payload,
+      generation);
   supervisor_.RequestRpc(
-      active, QStringLiteral("session.branch"), params,
-      [this, active, session_id](const QJsonObject& result,
-                                 const QString& error) {
-        if (!error.isEmpty()) {
-          status_bar_->ShowTransient(
-              QStringLiteral("Branch failed: %1").arg(error));
+      active, QStringLiteral("session.mutate"), mutate_params,
+      [this, active, session_id, cwd, profile, key, count, seed, finish](
+          const QJsonObject& result, const QString& error) {
+        if (error.isEmpty()) {
+          finish(result, error);
           return;
         }
-        QString child = result.value(QStringLiteral("session_id")).toString();
-        if (child.isEmpty()) {
-          child = result.value(QStringLiteral("stored_session_id")).toString();
+        if (!IsMissingRpcMethodError(error)) {
+          finish(result, error);
+          return;
         }
-        supervisor_.SelectSession(active, child.isEmpty() ? session_id : child);
-        status_bar_->ShowTransient(QStringLiteral("Branched conversation"));
+        // A gateway without the canonical branch mutation may still expose the
+        // legacy visible-count branch, then the seeded-create fallback below.
+        const QJsonObject legacy{
+            {QStringLiteral("session_id"), session_id},
+            {QStringLiteral("count"), count},
+            {QStringLiteral("idempotency_key"), key}};
+        supervisor_.RequestRpc(
+            active, QStringLiteral("session.branch"), legacy,
+            [this, active, session_id, cwd, profile, key, seed, finish](
+                const QJsonObject& branched, const QString& branch_error) {
+              if (branch_error.isEmpty()) {
+                finish(branched, branch_error);
+                return;
+              }
+              if (!IsMissingRpcMethodError(branch_error) || seed.isEmpty()) {
+                finish(branched, branch_error);
+                return;
+              }
+              // Older gateways predate both branch forms but still accept a
+              // seeded `session.create`. Use the visible prefix so the child
+              // contains the same conversation through the clicked row.
+              QJsonObject create{
+                  {QStringLiteral("parent_session_id"), session_id},
+                  {QStringLiteral("messages"), seed},
+                  {QStringLiteral("request_id"), key}};
+              if (!cwd.isEmpty()) {
+                create.insert(QStringLiteral("cwd"), cwd);
+              }
+              if (!profile.isEmpty()) {
+                create.insert(QStringLiteral("profile"), profile);
+              }
+              supervisor_.RequestRpc(
+                  active, QStringLiteral("session.create"), create,
+                  [finish](const QJsonObject& created,
+                           const QString& create_error) {
+                    if (!create_error.isEmpty()) {
+                      finish(created,
+                             create_error.contains(
+                                 QStringLiteral("invalid_params"))
+                                 ? QStringLiteral("this gateway build does not "
+                                                  "support branches; restart "
+                                                  "Hermes")
+                                 : create_error);
+                      return;
+                    }
+                    finish(created, QString());
+                  });
+            });
       });
 }
 

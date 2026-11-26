@@ -59,6 +59,7 @@ class GatewayProtocolTest : public QObject {
   void backgroundPromptUpsertSurvivesCompletionOrdering();
   void connectionOperationParsesTargetsAndBuildsAnswer();
   void handoffPlatformAndStatusText();
+  void branchHelpersCountVisibleHistory();
   void slashDispatchParsesSharedContract();
 };
 
@@ -875,6 +876,84 @@ void GatewayProtocolTest::slashDispatchParsesSharedContract() {
   QVERIFY(!ShouldFallbackToSlashDispatch(
       QStringLiteral("skill command: use command.dispatch for /fix (timed "
                      "out)")));
+}
+
+
+void GatewayProtocolTest::branchHelpersCountVisibleHistory() {
+  ChatMessage user;
+  user.role = MessageRole::kUser;
+  user.row_id = 11;
+  user.raw_text = QStringLiteral("1. keep the list marker");
+
+  ChatMessage tool_row;
+  tool_row.role = MessageRole::kAssistant;
+  tool_row.row_id = 12;
+  MessageBlock tool_block;
+  tool_block.kind = BlockKind::kTool;
+  tool_block.text = QStringLiteral("tool output");
+  tool_row.blocks.push_back(tool_block);
+
+  ChatMessage answer;
+  answer.role = MessageRole::kAssistant;
+  answer.row_id = 13;
+  answer.raw_text = QStringLiteral("answer through the clicked row");
+
+  ChatMessage notice;
+  notice.role = MessageRole::kSystem;
+  notice.row_id = 14;
+  notice.raw_text = QStringLiteral("local notice");
+
+  ChatMessage empty;
+  empty.role = MessageRole::kAssistant;
+  empty.row_id = 15;
+
+  const std::vector<ChatMessage> messages{user, tool_row, answer, notice, empty};
+  QCOMPARE(BranchVisibleCount(messages, 0), 1);
+  QCOMPARE(BranchVisibleCount(messages, 1), 0);
+  QCOMPARE(BranchVisibleCount(messages, 2), 2);
+  QCOMPARE(BranchVisibleCount(messages, 3), 0);
+  QCOMPARE(BranchVisibleCount(messages, 4), 0);
+
+  const QJsonArray seed = BuildBranchSeedMessages(messages, 2);
+  QCOMPARE(seed.size(), 2);
+  QCOMPARE(seed.at(0).toObject().value(QStringLiteral("role")).toString(),
+           QStringLiteral("user"));
+  QCOMPARE(seed.at(0).toObject().value(QStringLiteral("content")).toString(),
+           QStringLiteral("1. keep the list marker"));
+  QCOMPARE(seed.at(1).toObject().value(QStringLiteral("role")).toString(),
+           QStringLiteral("assistant"));
+  QCOMPARE(seed.at(1).toObject().value(QStringLiteral("content")).toString(),
+           QStringLiteral("answer through the clicked row"));
+  QVERIFY(BuildBranchSeedMessages(messages, 1).isEmpty());
+  QVERIFY(BuildBranchSeedMessages(messages, -1).isEmpty());
+
+  // The canonical branch travels as a revision/generation-fenced mutation and
+  // names the durable row boundary, not a visible-count ordinal.
+  const QJsonObject mutation = BuildSessionMutateParams(
+      QStringLiteral("s1"), QStringLiteral("r1"), 9,
+      QStringLiteral("branch"),
+      QJsonObject{{QStringLiteral("through_message_id"), 13}}, 4);
+  QCOMPARE(mutation.value(QStringLiteral("operation")).toString(),
+           QStringLiteral("branch"));
+  QCOMPARE(mutation.value(QStringLiteral("expected_revision")).toInt(), 9);
+  QCOMPARE(mutation.value(QStringLiteral("expected_generation")).toInt(), 4);
+  QCOMPARE(mutation.value(QStringLiteral("payload"))
+               .toObject()
+               .value(QStringLiteral("through_message_id"))
+               .toInt(),
+           13);
+
+  QVERIFY(IsMissingRpcMethodError(
+      QStringLiteral("unknown method: session.branch — not available on this "
+                     "Hermes backend")));
+  QVERIFY(IsMissingRpcMethodError(
+      QStringLiteral("unknown method: session.mutate — not available on this "
+                     "Hermes backend")));
+  QVERIFY(IsMissingRpcMethodError(QStringLiteral("unknown_method")));
+  QVERIFY(!IsMissingRpcMethodError(
+      QStringLiteral("Gateway is not connected")));
+  QVERIFY(!IsMissingRpcMethodError(
+      QStringLiteral("session.branch failed: invalid_params")));
 }
 
 }  // namespace hermes::ui

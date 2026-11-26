@@ -39,6 +39,19 @@ QJsonObject BuildSessionEventsSinceParams(const QString& session_id,
                                           const QString& profile,
                                           int last_seen);
 
+// Branch helpers. The canonical branch is `session.mutate operation=branch`
+// with the clicked row's durable id as `through_message_id`. The legacy
+// `session.branch` instead counts the parent's visible user/assistant history,
+// not every tool/system row the native transcript folds in. The fallback seed
+// (`session.create` with `messages`) needs the same visible prefix so an older
+// gateway that lacks both branch forms can still fork.
+bool IsBranchableMessage(const ChatMessage& message);
+int BranchVisibleCount(const std::vector<ChatMessage>& messages,
+                       int end_index);
+QJsonArray BuildBranchSeedMessages(const std::vector<ChatMessage>& messages,
+                                   int end_index);
+bool IsMissingRpcMethodError(const QString& error);
+
 QJsonObject BuildPromptReceiptParams(const QString& session_id,
                                      const QString& admission_id);
 

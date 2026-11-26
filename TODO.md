@@ -42,6 +42,33 @@ jumps and generated-artifact versions), and a chat-header session search bar wit
 | 7 | Remaining Settings subpages | Full appearance, 77 sections, special editors, searchable pickers, deep links | **partial** — theme/font scale + display appearance (density, width, timestamps, reasoning, fonts, translucency, animations, code scale); marketplace themes and 68 subpages/pickers missing |
 | 8 | Parity audit | All routes, 307 REST paths, 26 events | **partial** — inventory + REST route audit generated (`parity/rest_routes.py`: 146/307 paths seen, 161 gaps, 3 native-only); event and route rows still enforced by hand |
 
+## Status update — 2026-11-26 (branching is a session mutation)
+
+- **“Branch from here” now calls the method the running gateway actually
+  serves.** The WS `/api/ws` authority dispatcher owns the `session.` namespace
+  and exposes branching only as `session.mutate operation='branch'`; it does not
+  register `session.branch`, and legacy fallback is blocked for `session.*`
+  outside a small allowlist. Native Branch previously sent `session.branch` and
+  silently received `unknown_method`.
+- **The branch boundary is the clicked durable row.** `through_message_id` is
+  the transcript row id, fenced with the selected session's
+  `expected_revision` and live `expected_generation`. The child is selected by
+  `branched_session_id` (the authority's local route), not a legacy
+  `stored_session_id`.
+- **Failures are visible.** Missing chat/session, unsaved messages, a running
+  turn, a row that vanished, a row with no saved text, and gateway errors all
+  surface a transient status instead of doing nothing. Legacy `session.branch`
+  and seeded `session.create` remain only as missing-method fallbacks for older
+  gateways.
+- **Disconnected RPCs no longer disappear.** `ProfileWorker::SendRpc` emits an
+  immediate error when `GatewaySocket::RequestRpc` returns `-1`; previously it
+  stored the callback under a `-1` request id that could never receive a
+  response, which is the other silent no-op path.
+- Added branch helper and mutation-shape coverage. Full native suite: **10/10
+  passed** (31.62 s). A read-only live probe confirmed `session.mutate branch`
+  reaches the authority revision fence (`revision_conflict`) without creating a
+  branch when the revision is wrong.
+
 ## Status update — 2026-11-25 (Stop refreshes the live claim)
 
 - **Stop no longer trusts a cached `execution_generation`.** Native Stop asks

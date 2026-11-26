@@ -43,6 +43,9 @@ class Supervisor {
 
   std::shared_ptr<const ProfileSnapshot> ActiveSnapshot() const;
   std::shared_ptr<const ProfileSnapshot> SnapshotAt(int index) const;
+  // Live claim generation for the worker's selected session. Revision-fenced
+  // mutations (notably `session.mutate operation=branch`) carry this fence.
+  int ExecutionGeneration(int index) const;
 
   void SelectSession(int index, const QString& session_id);
   using SteerCallback = std::function<void(bool ok, const QString& message)>;

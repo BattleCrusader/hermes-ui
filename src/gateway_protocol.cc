@@ -367,4 +367,75 @@ QString HandoffStatusText(const QString& state, const QString& platform,
   return QStringLiteral("No handoff pending");
 }
 
+namespace {
+
+QString BranchMessageText(const ChatMessage& message) {
+  QString text = message.raw_text;
+  if (!text.trimmed().isEmpty()) {
+    return text;
+  }
+  for (const MessageBlock& block : message.blocks) {
+    if (block.kind == BlockKind::kTool) {
+      continue;
+    }
+    if (!text.isEmpty()) {
+      text += QStringLiteral("\n\n");
+    }
+    text += block.text;
+  }
+  return text;
+}
+
+}  // namespace
+
+bool IsBranchableMessage(const ChatMessage& message) {
+  if (message.role != MessageRole::kUser &&
+      message.role != MessageRole::kAssistant) {
+    return false;
+  }
+  return !BranchMessageText(message).trimmed().isEmpty();
+}
+
+int BranchVisibleCount(const std::vector<ChatMessage>& messages,
+                       int end_index) {
+  if (end_index < 0 || end_index >= static_cast<int>(messages.size()) ||
+      !IsBranchableMessage(messages[static_cast<std::size_t>(end_index)])) {
+    return 0;
+  }
+  int count = 0;
+  for (int index = 0; index <= end_index; ++index) {
+    if (IsBranchableMessage(messages[static_cast<std::size_t>(index)])) {
+      ++count;
+    }
+  }
+  return count;
+}
+
+QJsonArray BuildBranchSeedMessages(const std::vector<ChatMessage>& messages,
+                                   int end_index) {
+  QJsonArray seed;
+  if (BranchVisibleCount(messages, end_index) <= 0) {
+    return seed;
+  }
+  for (int index = 0; index <= end_index; ++index) {
+    const ChatMessage& message = messages[static_cast<std::size_t>(index)];
+    if (!IsBranchableMessage(message)) {
+      continue;
+    }
+    seed.append(QJsonObject{
+        {QStringLiteral("role"),
+         message.role == MessageRole::kUser ? QStringLiteral("user")
+                                            : QStringLiteral("assistant")},
+        {QStringLiteral("content"), BranchMessageText(message)}});
+  }
+  return seed;
+}
+
+bool IsMissingRpcMethodError(const QString& error) {
+  const QString lower = error.toLower();
+  return lower.contains(QStringLiteral("unknown_method")) ||
+         lower.contains(QStringLiteral("unknown method")) ||
+         lower.contains(QStringLiteral("not available on this hermes backend"));
+}
+
 }  // namespace hermes::ui
